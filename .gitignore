@@ -1,0 +1,39 @@
+.DS_Store
+
+# Dependencies
+node_modules/
+
+# Frontend build and test output
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+.vite/
+*.tsbuildinfo
+
+# Rust/Tauri build output
+target/
+src-tauri/target/
+src-tauri/gen/
+
+# Local app/runtime state
+*.log
+*.tmp
+tmp/
+.env
+.env.*
+!.env.example
+tsn-agent.db*
+*.sqlite
+*.sqlite3
+
+# Generated project exports
+exports/
+generated-projects/
+
+# Agent/worktree scratch
+.claude/
+
+# Existing nested skill repository. Keep it outside the root app git boundary.
+tsn-topology/
