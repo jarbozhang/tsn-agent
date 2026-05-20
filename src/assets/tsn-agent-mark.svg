@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="TSN Agent">
+  <rect width="1024" height="1024" rx="220" fill="#ffffff"/>
+  <rect x="292" y="286" width="440" height="56" rx="28" fill="#0b2540"/>
+  <rect x="292" y="484" width="440" height="56" rx="28" fill="#0b2540"/>
+  <rect x="292" y="682" width="440" height="56" rx="28" fill="#0b2540"/>
+  <circle cx="292" cy="314" r="82" fill="#0b2540"/>
+  <circle cx="732" cy="314" r="82" fill="#0b2540"/>
+  <circle cx="292" cy="512" r="82" fill="#0ea5b7"/>
+  <circle cx="732" cy="512" r="82" fill="#0b2540"/>
+  <circle cx="292" cy="710" r="82" fill="#0b2540"/>
+  <circle cx="732" cy="710" r="82" fill="#0ea5b7"/>
+  <rect x="424" y="476" width="158" height="72" rx="36" fill="#f97316"/>
+  <polygon points="582,410 714,512 582,614" fill="#f97316"/>
+</svg>

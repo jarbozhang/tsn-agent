@@ -1,12 +1,23 @@
 import type { CanonicalTsnProjectV0 } from "../domain/canonical";
 import { validateCanonicalProject } from "../domain/validation";
+import { exportOmnetppIni } from "./ini-exporter";
+import { NED_CONTRACT } from "./ned-contract";
 import { exportNed } from "./ned-exporter";
 import { exportPlannerInput } from "./planner-exporter";
 import { exportReactFlowTopology } from "./react-flow-exporter";
 
+export type ArtifactPurpose =
+  | "simulation-inet"
+  | "workspace-visualization"
+  | "planner-input"
+  | "planner-output"
+  | "manifest";
+
 export interface ExportedArtifact {
   path: string;
-  purpose: string;
+  purpose: ArtifactPurpose;
+  label: string;
+  observedExternal?: boolean;
   content: string;
 }
 
@@ -16,7 +27,9 @@ export interface ExportManifest {
   generatedAt: string;
   files: Array<{
     path: string;
-    purpose: string;
+    purpose: ArtifactPurpose;
+    label: string;
+    observedExternal?: boolean;
   }>;
 }
 
@@ -34,18 +47,27 @@ export function createArtifactBundle(project: CanonicalTsnProjectV0): ArtifactBu
 
   const artifacts: ExportedArtifact[] = [
     {
-      path: "network.ned",
-      purpose: "INET/OMNeT++ 网络拓扑",
+      path: NED_CONTRACT.relativePath,
+      purpose: "simulation-inet",
+      label: "INET/OMNeT++ 网络拓扑",
       content: exportNed(project),
     },
     {
+      path: "omnetpp.ini",
+      purpose: "simulation-inet",
+      label: "INET/OMNeT++ 最小运行配置",
+      content: exportOmnetppIni(project),
+    },
+    {
       path: "react-flow-topology.json",
-      purpose: "React Flow 拓扑展示数据",
+      purpose: "workspace-visualization",
+      label: "React Flow 拓扑展示数据",
       content: JSON.stringify(exportReactFlowTopology(project), null, 2),
     },
     {
       path: "flow_plan_1.json",
-      purpose: "规划器输入",
+      purpose: "planner-input",
+      label: "规划器输入",
       content: JSON.stringify(exportPlannerInput(project), null, 2),
     },
   ];
@@ -56,6 +78,8 @@ export function createArtifactBundle(project: CanonicalTsnProjectV0): ArtifactBu
     files: artifacts.map((artifact) => ({
       path: artifact.path,
       purpose: artifact.purpose,
+      label: artifact.label,
+      observedExternal: artifact.observedExternal,
     })),
   };
 
@@ -64,7 +88,8 @@ export function createArtifactBundle(project: CanonicalTsnProjectV0): ArtifactBu
       ...artifacts,
       {
         path: "manifest.json",
-        purpose: "导出文件清单",
+        purpose: "manifest",
+        label: "导出文件清单",
         content: JSON.stringify(manifest, null, 2),
       },
     ],

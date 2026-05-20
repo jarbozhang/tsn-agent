@@ -12,7 +12,7 @@ export function exportReactFlowTopology(project: CanonicalTsnProjectV0): ReactFl
     schemaVersion: "tsn-agent.react-flow-topology.v0",
     nodes: project.topology.nodes.map((node) => ({
       id: node.id,
-      type: "default",
+      type: "tsnNode",
       position: node.position,
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
@@ -27,7 +27,6 @@ export function exportReactFlowTopology(project: CanonicalTsnProjectV0): ReactFl
       id: link.id,
       source: link.source.nodeId,
       target: link.target.nodeId,
-      label: `${link.dataRateMbps} Mbps`,
       markerEnd: {
         type: MarkerType.ArrowClosed,
       },

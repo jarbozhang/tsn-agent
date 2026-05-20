@@ -3,5 +3,9 @@
   "identifier": "default",
   "description": "Default permissions for the main TSN Agent window.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:app:default",
+    "dialog:allow-open"
+  ]
 }

@@ -8,7 +8,7 @@
 
 TSN Agent 需要支持多个会话之间的切换、复制、删除和检索。一个会话不仅包含最终导出的文件，还包含对话过程、阶段状态、步骤快照、canonical TSN 模型、导出清单、项目路径和用户备注。如果只依赖项目目录文件，应用需要反复扫描目录并重新推断工作台状态，复制和检索也会变得脆弱。
 
-同时，项目目录中的 `.ned`、React Flow JSON、`flow_plan_1.json` 和 manifest 必须能独立交给规划器、INET/OMNeT++ 或其他工具使用，不能被锁进应用私有数据库。
+同时，项目目录中的 `tsnagent/generated/network.ned`、`omnetpp.ini`、React Flow JSON、`flow_plan_1.json` 和 manifest 必须能独立交给规划器、INET/OMNeT++ 或其他工具使用，不能被锁进应用私有数据库。`flow_plan_result_1.json` 属于外部规划器输出，MVP 只在它存在时把它记录为外部观测文件。
 
 ## 决策
 
@@ -30,12 +30,15 @@ Tauri 应用优先通过 Tauri SQL plugin v2 接入 SQLite，并使用 migration
 
 MVP 首版只需要其中的最小子集：当前会话、最近会话、canonical state、步骤快照、export manifest 和项目路径。其余字段可以预留迁移方向，但不应阻塞第一条新手纵向闭环。
 
+诊断日志也属于工作台数据，但应使用独立表保存，不混入会话 payload。日志只记录按会话归属的脱敏摘要，包括 Claude 交互、会话状态写入和 artifact bundle 刷新；删除会话时同步删除对应日志。
+
 不适合放入 SQLite 作为唯一来源：
 
-- `network.ned`
+- `tsnagent/generated/network.ned`
+- `omnetpp.ini`
 - React Flow 拓扑 JSON
 - `flow_plan_1.json`
-- `flow_plan_result_1.json`
+- 外部生成的 `flow_plan_result_1.json`
 - 项目 manifest
 - INET/OMNeT++ 后续需要直接读取的配置文件
 
@@ -72,4 +75,4 @@ MVP 首版只需要其中的最小子集：当前会话、最近会话、canonic
 - migration 可重复运行。
 - MVP 覆盖当前会话创建、读取、最近会话列表、canonical state、步骤快照和 export manifest 恢复。
 - 完整会话复制、删除和搜索在 hardening 阶段覆盖。
-- 导出的 `.ned`、React Flow JSON 和 `flow_plan_1.json` 不依赖 SQLite 即可被下游工具读取。
+- 导出的 `tsnagent/generated/network.ned`、`omnetpp.ini`、React Flow JSON 和 `flow_plan_1.json` 不依赖 SQLite 即可被下游工具读取。

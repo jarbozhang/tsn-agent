@@ -11,6 +11,13 @@ describe("topology factory", () => {
     });
   });
 
+  it("uses fallback topology values for partial edit requests", () => {
+    expect(parseTopologyIntent("每个交换机改成4个端系统", { switchCount: 3, endSystemsPerSwitch: 3 })).toEqual({
+      switchCount: 3,
+      endSystemsPerSwitch: 4,
+    });
+  });
+
   it("creates a canonical line topology with one control flow", () => {
     const project = createProjectFromIntent("我需要4个交换机，每个交换机连接5个端系统");
 

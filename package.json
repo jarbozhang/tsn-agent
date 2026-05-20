@@ -11,10 +11,13 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "cargo:test": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "tauri": "tauri"
+    "build:worker": "esbuild src-node/claude-agent-worker.mjs --bundle --platform=node --format=esm --outfile=src-node/dist/claude-agent-worker.mjs",
+    "tauri": "npm run build:worker && tauri"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.145",
     "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "@xyflow/react": "^12.8.5",
     "lucide-react": "^0.468.0",
     "react": "^19.2.0",
@@ -22,14 +25,15 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",
+    "@tauri-apps/cli": "^2.9.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
-    "@tauri-apps/cli": "^2.9.2",
     "@types/node": "^24.9.1",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.0",
+    "esbuild": "^0.27.7",
     "jsdom": "^27.0.1",
     "typescript": "^5.9.3",
     "vite": "^7.1.11",

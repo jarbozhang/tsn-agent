@@ -8,20 +8,26 @@ import type {
 } from "./canonical";
 
 const DEFAULT_DATA_RATE_MBPS = 1_000;
+const DEFAULT_SWITCH_COUNT = 4;
+const DEFAULT_END_SYSTEMS_PER_SWITCH = 5;
 
-export function parseTopologyIntent(text: string): TopologyIntent {
+export function parseTopologyIntent(text: string, fallback?: Partial<TopologyIntent>): TopologyIntent {
   const switchMatch = text.match(/(\d+)\s*(?:个|台)?\s*(?:交换机|switch)/i);
   const endSystemMatch = text.match(/(?:每个|each).*?(\d+)\s*(?:个|台)?\s*(?:端系统|终端|端|host|end)/i);
 
   return {
-    switchCount: clampNumber(Number(switchMatch?.[1] ?? 4), 1, 12),
-    endSystemsPerSwitch: clampNumber(Number(endSystemMatch?.[1] ?? 5), 1, 24),
+    switchCount: clampNumber(Number(switchMatch?.[1] ?? fallback?.switchCount ?? DEFAULT_SWITCH_COUNT), 1, 12),
+    endSystemsPerSwitch: clampNumber(
+      Number(endSystemMatch?.[1] ?? fallback?.endSystemsPerSwitch ?? DEFAULT_END_SYSTEMS_PER_SWITCH),
+      1,
+      24,
+    ),
   };
 }
 
-export function createProjectFromIntent(text: string): CanonicalTsnProjectV0 {
-  const intent = parseTopologyIntent(text);
-  return createLineTopologyProject(intent, "TSN 新手规划草案");
+export function createProjectFromIntent(text: string, fallback?: Partial<TopologyIntent>): CanonicalTsnProjectV0 {
+  const intent = parseTopologyIntent(text, fallback);
+  return createLineTopologyProject(intent, "当前规划");
 }
 
 export function createLineTopologyProject(
@@ -37,6 +43,7 @@ export function createLineTopologyProject(
 
   for (let switchIndex = 1; switchIndex <= intent.switchCount; switchIndex += 1) {
     const switchId = `sw${switchIndex}`;
+    const switchX = 80 + 300 * (switchIndex - 1);
     switchIds.push(switchId);
     nodes.push({
       id: switchId,
@@ -44,7 +51,7 @@ export function createLineTopologyProject(
       name: `SW-${switchIndex}`,
       type: "switch",
       ports: createPorts(intent.endSystemsPerSwitch + 2),
-      position: { x: 220 * (switchIndex - 1), y: 180 },
+      position: { x: switchX, y: 220 },
     });
     numericNodeId += 1;
   }
@@ -55,8 +62,9 @@ export function createLineTopologyProject(
     for (let hostIndex = 1; hostIndex <= intent.endSystemsPerSwitch; hostIndex += 1) {
       const hostId = `es${switchIndex}-${hostIndex}`;
       const hostOrdinal = (switchIndex - 1) * intent.endSystemsPerSwitch + hostIndex;
-      const yOffset = hostIndex % 2 === 0 ? 320 : 40;
-      const xJitter = (hostIndex - Math.ceil(intent.endSystemsPerSwitch / 2)) * 28;
+      const switchX = 80 + 300 * (switchIndex - 1);
+      const yOffset = hostIndex % 2 === 0 ? 390 : 70;
+      const xJitter = (hostIndex - Math.ceil(intent.endSystemsPerSwitch / 2)) * 62;
 
       nodes.push({
         id: hostId,
@@ -65,7 +73,7 @@ export function createLineTopologyProject(
         type: "endSystem",
         ports: createPorts(1),
         position: {
-          x: 220 * (switchIndex - 1) + xJitter,
+          x: switchX + xJitter,
           y: yOffset,
         },
         macAddress: createMacAddress(hostOrdinal),

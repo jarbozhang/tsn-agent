@@ -1,8 +1,11 @@
 import type { AgentEvent } from "../agent/fake-agent";
 import type { CanonicalTsnProjectV0 } from "../domain/canonical";
 import type { ArtifactBundle } from "../export/artifact-bundle";
+import { invoke } from "@tauri-apps/api/core";
 
 const STORAGE_KEY = "tsn-agent.sessions.v0";
+const CURRENT_SESSION_KEY = "tsn-agent.current-session.v0";
+const MAX_RECENT_SESSIONS = 12;
 
 export interface ChatMessage {
   id: string;
@@ -17,22 +20,111 @@ export interface TsnSession {
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
+  claudeSessionId?: string;
   agentEvents: AgentEvent[];
   project?: CanonicalTsnProjectV0;
   bundle?: ArtifactBundle;
 }
 
 export interface SessionRepository {
-  list(): TsnSession[];
-  save(session: TsnSession): void;
-  remove(sessionId: string): void;
-  duplicate(sessionId: string): TsnSession | undefined;
+  list(): Promise<TsnSession[]>;
+  getCurrent(): Promise<TsnSession | undefined>;
+  ensureCurrentSession(): Promise<TsnSession>;
+  save(session: TsnSession): Promise<void>;
+  setCurrent(sessionId: string): Promise<void>;
+  remove(sessionId: string): Promise<void>;
+  duplicate(sessionId: string): Promise<TsnSession | undefined>;
 }
 
-export class LocalStorageSessionRepository implements SessionRepository {
+export interface SessionDatabase {
+  list(): Promise<StoredSession[]>;
+  getCurrent(): Promise<StoredSession | undefined>;
+  save(session: StoredSession): Promise<void>;
+  setCurrent(sessionId: string): Promise<void>;
+  remove(sessionId: string): Promise<void>;
+}
+
+interface StoredSession {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  eventCount: number;
+  hasProject: boolean;
+  projectName?: string;
+  bundleFileCount: number;
+  payload: string;
+}
+
+export class BrowserSessionRepository implements SessionRepository {
   constructor(private readonly storage: Storage) {}
 
-  list(): TsnSession[] {
+  async list(): Promise<TsnSession[]> {
+    return this.readSessions();
+  }
+
+  async getCurrent(): Promise<TsnSession | undefined> {
+    const sessions = this.readSessions();
+    const currentId = this.storage.getItem(CURRENT_SESSION_KEY);
+
+    return sessions.find((session) => session.id === currentId) ?? sessions[0];
+  }
+
+  async ensureCurrentSession(): Promise<TsnSession> {
+    const current = await this.getCurrent();
+
+    if (current) {
+      return current;
+    }
+
+    const session = createEmptySession();
+    await this.save(session);
+    return session;
+  }
+
+  async save(session: TsnSession): Promise<void> {
+    const sessions = this.readSessions().filter((candidate) => candidate.id !== session.id);
+    this.writeSessions([redactSessionForStorage(session), ...sessions].slice(0, MAX_RECENT_SESSIONS));
+    this.storage.setItem(CURRENT_SESSION_KEY, session.id);
+  }
+
+  async setCurrent(sessionId: string): Promise<void> {
+    const exists = this.readSessions().some((session) => session.id === sessionId);
+
+    if (exists) {
+      this.storage.setItem(CURRENT_SESSION_KEY, sessionId);
+    }
+  }
+
+  async remove(sessionId: string): Promise<void> {
+    const sessions = this.readSessions().filter((session) => session.id !== sessionId);
+    this.writeSessions(sessions);
+
+    if (this.storage.getItem(CURRENT_SESSION_KEY) === sessionId) {
+      const nextSession = sessions[0];
+
+      if (nextSession) {
+        this.storage.setItem(CURRENT_SESSION_KEY, nextSession.id);
+      } else {
+        this.storage.removeItem(CURRENT_SESSION_KEY);
+      }
+    }
+  }
+
+  async duplicate(sessionId: string): Promise<TsnSession | undefined> {
+    const original = this.readSessions().find((session) => session.id === sessionId);
+
+    if (!original) {
+      return undefined;
+    }
+
+    const copy = copySession(original);
+    await this.save(copy);
+    return copy;
+  }
+
+  private readSessions(): TsnSession[] {
     const raw = this.storage.getItem(STORAGE_KEY);
 
     if (!raw) {
@@ -41,43 +133,91 @@ export class LocalStorageSessionRepository implements SessionRepository {
 
     try {
       const parsed = JSON.parse(raw) as TsnSession[];
-      return parsed.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      return sortSessions(parsed).slice(0, MAX_RECENT_SESSIONS);
     } catch {
       return [];
     }
   }
 
-  save(session: TsnSession): void {
-    const sessions = this.list().filter((candidate) => candidate.id !== session.id);
-    this.write([session, ...sessions].slice(0, 12));
+  private writeSessions(sessions: TsnSession[]): void {
+    this.storage.setItem(STORAGE_KEY, JSON.stringify(sortSessions(sessions).slice(0, MAX_RECENT_SESSIONS)));
+  }
+}
+
+export class SqliteSessionRepository implements SessionRepository {
+  private readonly database: Promise<SessionDatabase>;
+
+  constructor(database: Promise<SessionDatabase>) {
+    this.database = database;
   }
 
-  remove(sessionId: string): void {
-    this.write(this.list().filter((session) => session.id !== sessionId));
+  async list(): Promise<TsnSession[]> {
+    const database = await this.getDatabase();
+    const rows = await database.list();
+    return rows.map(storedSessionToSession).filter(isSession);
   }
 
-  duplicate(sessionId: string): TsnSession | undefined {
-    const original = this.list().find((session) => session.id === sessionId);
+  async getCurrent(): Promise<TsnSession | undefined> {
+    const database = await this.getDatabase();
+    return storedSessionToSession(await database.getCurrent());
+  }
+
+  async ensureCurrentSession(): Promise<TsnSession> {
+    const current = await this.getCurrent();
+
+    if (current) {
+      return current;
+    }
+
+    const session = createEmptySession();
+    await this.save(session);
+    return session;
+  }
+
+  async save(session: TsnSession): Promise<void> {
+    const database = await this.getDatabase();
+    const storedSession = redactSessionForStorage(session);
+
+    await database.save(sessionToStoredSession(storedSession));
+  }
+
+  async setCurrent(sessionId: string): Promise<void> {
+    const database = await this.getDatabase();
+    await database.setCurrent(sessionId);
+  }
+
+  async remove(sessionId: string): Promise<void> {
+    const database = await this.getDatabase();
+    await database.remove(sessionId);
+  }
+
+  async duplicate(sessionId: string): Promise<TsnSession | undefined> {
+    const original = (await this.list()).find((session) => session.id === sessionId);
 
     if (!original) {
       return undefined;
     }
 
-    const now = new Date().toISOString();
-    const copy: TsnSession = {
-      ...original,
-      id: createId("session"),
-      title: `${original.title} 副本`,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.save(copy);
+    const copy = copySession(original);
+    await this.save(copy);
     return copy;
   }
 
-  private write(sessions: TsnSession[]): void {
-    this.storage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+  private getDatabase(): Promise<SessionDatabase> {
+    return this.database;
   }
+}
+
+export function createSessionRepository(): SessionRepository {
+  if (isTauriRuntime()) {
+    return new SqliteSessionRepository(Promise.resolve(new TauriSessionDatabase()));
+  }
+
+  if (typeof window !== "undefined" && window.localStorage) {
+    return new BrowserSessionRepository(window.localStorage);
+  }
+
+  return new BrowserSessionRepository(createMemoryStorage());
 }
 
 export function createEmptySession(): TsnSession {
@@ -105,4 +245,128 @@ export function createId(prefix: string): string {
     : Math.random().toString(36).slice(2);
 
   return `${prefix}-${random}`;
+}
+
+export function redactSessionForStorage(session: TsnSession): TsnSession {
+  return {
+    ...session,
+    title: redactSecrets(session.title),
+    messages: session.messages.map((message) => ({
+      ...message,
+      content: redactSecrets(message.content),
+    })),
+    agentEvents: session.agentEvents.map((event) => ({
+      ...event,
+      content: redactSecrets(event.content),
+    })),
+  };
+}
+
+function copySession(original: TsnSession): TsnSession {
+  const now = new Date().toISOString();
+  return {
+    ...original,
+    id: createId("session"),
+    title: `${original.title} 副本`,
+    createdAt: now,
+    updatedAt: now,
+    claudeSessionId: undefined,
+  };
+}
+
+function storedSessionToSession(session: StoredSession | undefined): TsnSession | undefined {
+  if (!session) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(session.payload) as TsnSession;
+  } catch {
+    return undefined;
+  }
+}
+
+function isSession(session: TsnSession | undefined): session is TsnSession {
+  return Boolean(session);
+}
+
+function sortSessions(sessions: TsnSession[]): TsnSession[] {
+  return [...sessions].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+export function redactSecrets(value: string): string {
+  return value
+    .replace(/(sk-ant-[A-Za-z0-9_-]+)/g, "[redacted]")
+    .replace(/((?:api[_-]?key|token|secret|password|claude_api_key)\s*[:=]\s*)([^\s,;]+)/gi, "$1[redacted]")
+    .replace(/("(?:accessToken|refreshToken|authToken|apiKey|api_key|token|secret|password)"\s*:\s*")([^"]+)(")/gi, "$1[redacted]$3")
+    .replace(/(Authorization\s*:\s*Bearer\s+)([^\s,;]+)/gi, "$1[redacted]");
+}
+
+function sessionToStoredSession(session: TsnSession): StoredSession {
+  return {
+    id: session.id,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    messageCount: session.messages.length,
+    eventCount: session.agentEvents.length,
+    hasProject: Boolean(session.project),
+    projectName: session.project?.name,
+    bundleFileCount: session.bundle?.artifacts.length ?? 0,
+    payload: JSON.stringify(session),
+  };
+}
+
+function isTauriRuntime(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function createMemoryStorage(): Storage {
+  const values = new Map<string, string>();
+
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key: string) => values.get(key) ?? null,
+    key: (index: number) => [...values.keys()][index] ?? null,
+    removeItem: (key: string) => values.delete(key),
+    setItem: (key: string, value: string) => values.set(key, value),
+  };
+}
+
+class TauriSessionDatabase implements SessionDatabase {
+  async list(): Promise<StoredSession[]> {
+    return invoke<StoredSession[]>("list_sessions");
+  }
+
+  async getCurrent(): Promise<StoredSession | undefined> {
+    const session = await invoke<StoredSession | null>("get_current_session");
+    return session ?? undefined;
+  }
+
+  async save(session: StoredSession): Promise<void> {
+    await invoke("save_session", {
+      request: {
+        session,
+      },
+    });
+  }
+
+  async setCurrent(sessionId: string): Promise<void> {
+    await invoke("set_current_session", {
+      request: {
+        sessionId,
+      },
+    });
+  }
+
+  async remove(sessionId: string): Promise<void> {
+    await invoke("remove_session", {
+      request: {
+        sessionId,
+      },
+    });
+  }
 }

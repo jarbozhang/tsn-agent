@@ -17,17 +17,17 @@ export interface FakeAgentResult {
   events: AgentEvent[];
   project: CanonicalTsnProjectV0;
   bundle: ArtifactBundle;
+  assistantText: string;
 }
 
-export function runFakeTsnAgent(userIntent: string): FakeAgentResult {
-  const intent = parseTopologyIntent(userIntent);
-  const project = createProjectFromIntent(userIntent);
+export function runFakeTsnAgent(userIntent: string, previousProject?: CanonicalTsnProjectV0): FakeAgentResult {
+  const shouldReuseProject = previousProject && isContinuationIntent(userIntent) && !hasExplicitTopologyIntent(userIntent);
+  const fallbackIntent = previousProject ? inferIntentFromProject(previousProject) : undefined;
+  const project = shouldReuseProject ? refreshProject(previousProject) : createProjectFromIntent(userIntent, fallbackIntent);
+  const intent = shouldReuseProject ? inferIntentFromProject(project) : parseTopologyIntent(userIntent, fallbackIntent);
   const bundle = createArtifactBundle(project);
 
-  return {
-    project,
-    bundle,
-    events: [
+  const events: AgentEvent[] = [
       {
         id: "event-intent",
         kind: "thought",
@@ -62,6 +62,38 @@ export function runFakeTsnAgent(userIntent: string): FakeAgentResult {
         title: "导出文件",
         content: bundle.artifacts.map((artifact) => artifact.path).join("、"),
       },
-    ],
+  ];
+
+  return {
+    project,
+    bundle,
+    events,
+    assistantText: events.map((event) => event.content).join("\n"),
+  };
+}
+
+export function hasExplicitTopologyIntent(text: string): boolean {
+  return /(\d+)\s*(?:个|台)?\s*(?:交换机|switch)/i.test(text)
+    || /(?:每个|each).*?(\d+)\s*(?:个|台)?\s*(?:端系统|终端|端|host|end)/i.test(text);
+}
+
+function isContinuationIntent(text: string): boolean {
+  return /^(直接生成|生成|确认|可以|好的|开始|继续|按这个|就这样|执行|下一步)\s*[。.!！]?$/i.test(text.trim());
+}
+
+function inferIntentFromProject(project: CanonicalTsnProjectV0) {
+  const switchCount = project.topology.nodes.filter((node) => node.type === "switch").length;
+  const endSystemCount = project.topology.nodes.filter((node) => node.type === "endSystem").length;
+
+  return {
+    switchCount,
+    endSystemsPerSwitch: switchCount > 0 ? Math.round(endSystemCount / switchCount) : 0,
+  };
+}
+
+function refreshProject(project: CanonicalTsnProjectV0): CanonicalTsnProjectV0 {
+  return {
+    ...project,
+    updatedAt: new Date().toISOString(),
   };
 }
