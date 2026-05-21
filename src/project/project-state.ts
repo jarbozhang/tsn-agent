@@ -1,7 +1,42 @@
 import type { CanonicalTsnProjectV0 } from "../domain/canonical";
+import {
+  DEFAULT_SCENARIO_CONFIG_ID,
+  WORKFLOW_STEPS,
+  getScenarioConfig,
+  resolveScenarioConfig,
+  type ScenarioConfig,
+  type WorkflowStep,
+} from "../domain/scenario-config";
 import type { ArtifactBundle } from "../export/artifact-bundle";
 
-export type ProjectStep = "topology" | "flow-template" | "export";
+export type { WorkflowStep };
+
+export type ProjectStep = WorkflowStep;
+
+export type WorkflowStepStatus = "locked" | "current" | "waiting_confirmation" | "confirmed" | "error";
+
+export interface WorkflowStageState {
+  step: WorkflowStep;
+  status: WorkflowStepStatus;
+  summary?: string;
+  confirmedAt?: string;
+  updatedAt?: string;
+  error?: string;
+}
+
+export interface WorkflowState {
+  scenarioConfigId: string;
+  currentStep: WorkflowStep;
+  stages: Record<WorkflowStep, WorkflowStageState>;
+  availableActions: WorkflowAction[];
+}
+
+export type WorkflowAction =
+  | "generate-topology"
+  | "confirm-stage"
+  | "request-changes"
+  | "send-planning"
+  | "quick-generate";
 
 export interface ProjectStepSnapshot {
   id: string;
@@ -10,12 +45,14 @@ export interface ProjectStepSnapshot {
   summary: string;
   project: CanonicalTsnProjectV0;
   bundle?: ArtifactBundle;
+  workflow: WorkflowState;
 }
 
 export interface ProjectState {
   sessionId: string;
   project: CanonicalTsnProjectV0;
   bundle?: ArtifactBundle;
+  workflow: WorkflowState;
   snapshots: ProjectStepSnapshot[];
   activeSnapshotId?: string;
 }
@@ -24,11 +61,14 @@ export function createProjectState(input: {
   sessionId: string;
   project: CanonicalTsnProjectV0;
   bundle?: ArtifactBundle;
+  workflow?: WorkflowState;
+  scenarioConfigId?: string;
 }): ProjectState {
   return {
     sessionId: input.sessionId,
     project: input.project,
     bundle: input.bundle,
+    workflow: normalizeWorkflowState(input.workflow, input.scenarioConfigId),
     snapshots: [],
   };
 }
@@ -38,4 +78,244 @@ export function withProjectBundle(state: ProjectState, bundle: ArtifactBundle): 
     ...state,
     bundle,
   };
+}
+
+export function createInitialWorkflowState(scenarioConfigId: string = DEFAULT_SCENARIO_CONFIG_ID): WorkflowState {
+  const configId = resolveScenarioConfig(scenarioConfigId).config.id;
+  const stages = Object.fromEntries(
+    WORKFLOW_STEPS.map((step, index) => [
+      step,
+      {
+        step,
+        status: index === 0 ? "current" : "locked",
+      } satisfies WorkflowStageState,
+    ]),
+  ) as Record<WorkflowStep, WorkflowStageState>;
+
+  return {
+    scenarioConfigId: configId,
+    currentStep: "topology",
+    stages,
+    availableActions: ["generate-topology", "quick-generate"],
+  };
+}
+
+export function normalizeWorkflowState(
+  state?: WorkflowState,
+  scenarioConfigId: string = DEFAULT_SCENARIO_CONFIG_ID,
+): WorkflowState {
+  const configId = resolveScenarioConfig(state?.scenarioConfigId ?? scenarioConfigId).config.id;
+
+  if (!state) {
+    return createInitialWorkflowState(configId);
+  }
+
+  const currentStep = isWorkflowStep(state.currentStep) ? state.currentStep : "topology";
+  const stages = Object.fromEntries(
+    WORKFLOW_STEPS.map((step) => {
+      const existing = state.stages?.[step];
+
+      return [
+        step,
+        {
+          step,
+          status: existing?.status ?? (step === currentStep ? "current" : "locked"),
+          summary: existing?.summary,
+          confirmedAt: existing?.confirmedAt,
+          updatedAt: existing?.updatedAt,
+          error: existing?.error,
+        } satisfies WorkflowStageState,
+      ];
+    }),
+  ) as Record<WorkflowStep, WorkflowStageState>;
+
+  return {
+    scenarioConfigId: configId,
+    currentStep,
+    stages,
+    availableActions: state.availableActions?.length ? state.availableActions : actionsForStage(stages[currentStep]),
+  };
+}
+
+export function getWorkflowScenarioConfig(workflow: WorkflowState): ScenarioConfig {
+  return getScenarioConfig(workflow.scenarioConfigId);
+}
+
+export function recordStageResult(
+  workflow: WorkflowState,
+  input: {
+    step?: WorkflowStep;
+    summary: string;
+    waitingConfirmation?: boolean;
+    createdAt?: string;
+  },
+): WorkflowState {
+  const step = input.step ?? workflow.currentStep;
+  const createdAt = input.createdAt ?? new Date().toISOString();
+  const status: WorkflowStepStatus = input.waitingConfirmation === false ? "current" : "waiting_confirmation";
+  const stages = updateStagesForCurrentStep(workflow.stages, step);
+
+  return {
+    ...workflow,
+    currentStep: step,
+    stages: {
+      ...stages,
+      [step]: {
+        ...stages[step],
+        step,
+        status,
+        summary: input.summary,
+        updatedAt: createdAt,
+        error: undefined,
+      },
+    },
+    availableActions: actionsForStage({ step, status }),
+  };
+}
+
+export function confirmCurrentStage(workflow: WorkflowState, createdAt = new Date().toISOString()): WorkflowState {
+  const currentStep = workflow.currentStep;
+  const stage = workflow.stages[currentStep];
+
+  if (stage.status !== "waiting_confirmation") {
+    throw new Error(`Workflow step ${currentStep} is not waiting for confirmation.`);
+  }
+
+  const nextStep = getNextWorkflowStep(currentStep);
+  const confirmedStages = {
+    ...workflow.stages,
+    [currentStep]: {
+      ...stage,
+      status: "confirmed" as const,
+      confirmedAt: createdAt,
+      updatedAt: createdAt,
+    },
+  };
+
+  if (!nextStep) {
+    return {
+      ...workflow,
+      stages: confirmedStages,
+      availableActions: [],
+    };
+  }
+
+  return {
+    ...workflow,
+    currentStep: nextStep,
+    stages: {
+      ...confirmedStages,
+      [nextStep]: {
+        ...confirmedStages[nextStep],
+        step: nextStep,
+        status: "current",
+        updatedAt: createdAt,
+        error: undefined,
+      },
+    },
+    availableActions: actionsForStage({ step: nextStep, status: "current" }),
+  };
+}
+
+export function requestStageChanges(
+  workflow: WorkflowState,
+  step: WorkflowStep,
+  createdAt = new Date().toISOString(),
+): WorkflowState {
+  const stepIndex = WORKFLOW_STEPS.indexOf(step);
+  const stages = Object.fromEntries(
+    WORKFLOW_STEPS.map((candidate, index) => {
+      const existing = workflow.stages[candidate];
+
+      if (index < stepIndex) {
+        return [candidate, existing];
+      }
+
+      if (candidate === step) {
+        return [
+          candidate,
+          {
+            ...existing,
+            step: candidate,
+            status: "current",
+            confirmedAt: undefined,
+            updatedAt: createdAt,
+            error: undefined,
+          } satisfies WorkflowStageState,
+        ];
+      }
+
+      return [
+        candidate,
+        {
+          step: candidate,
+          status: "locked",
+        } satisfies WorkflowStageState,
+      ];
+    }),
+  ) as Record<WorkflowStep, WorkflowStageState>;
+
+  return {
+    ...workflow,
+    currentStep: step,
+    stages,
+    availableActions: actionsForStage(stages[step]),
+  };
+}
+
+export function getNextWorkflowStep(step: WorkflowStep): WorkflowStep | undefined {
+  return WORKFLOW_STEPS[WORKFLOW_STEPS.indexOf(step) + 1];
+}
+
+function updateStagesForCurrentStep(
+  stages: Record<WorkflowStep, WorkflowStageState>,
+  step: WorkflowStep,
+): Record<WorkflowStep, WorkflowStageState> {
+  const stepIndex = WORKFLOW_STEPS.indexOf(step);
+
+  return Object.fromEntries(
+    WORKFLOW_STEPS.map((candidate, index) => {
+      const existing = stages[candidate];
+
+      if (index < stepIndex) {
+        return [candidate, existing.status === "locked" ? { ...existing, status: "confirmed" } : existing];
+      }
+
+      if (candidate === step) {
+        return [candidate, existing];
+      }
+
+      return [
+        candidate,
+        {
+          step: candidate,
+          status: "locked",
+        } satisfies WorkflowStageState,
+      ];
+    }),
+  ) as Record<WorkflowStep, WorkflowStageState>;
+}
+
+function actionsForStage(stage: Pick<WorkflowStageState, "step" | "status">): WorkflowAction[] {
+  if (stage.status === "waiting_confirmation") {
+    return stage.step === "planning-export" ? ["confirm-stage", "request-changes"] : ["confirm-stage", "request-changes"];
+  }
+
+  if (stage.status === "current") {
+    if (stage.step === "topology") {
+      return ["generate-topology", "quick-generate"];
+    }
+
+    if (stage.step === "planning-export") {
+      return ["send-planning"];
+    }
+
+    return ["confirm-stage"];
+  }
+
+  return [];
+}
+
+function isWorkflowStep(value: string | undefined): value is WorkflowStep {
+  return Boolean(value && WORKFLOW_STEPS.includes(value as WorkflowStep));
 }

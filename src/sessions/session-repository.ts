@@ -1,6 +1,7 @@
 import type { AgentEvent } from "../agent/fake-agent";
 import type { CanonicalTsnProjectV0 } from "../domain/canonical";
 import type { ArtifactBundle } from "../export/artifact-bundle";
+import { normalizeWorkflowState, type WorkflowState } from "../project/project-state";
 import { invoke } from "@tauri-apps/api/core";
 
 const STORAGE_KEY = "tsn-agent.sessions.v0";
@@ -22,6 +23,7 @@ export interface TsnSession {
   messages: ChatMessage[];
   claudeSessionId?: string;
   agentEvents: AgentEvent[];
+  workflow: WorkflowState;
   project?: CanonicalTsnProjectV0;
   bundle?: ArtifactBundle;
 }
@@ -133,7 +135,7 @@ export class BrowserSessionRepository implements SessionRepository {
 
     try {
       const parsed = JSON.parse(raw) as TsnSession[];
-      return sortSessions(parsed).slice(0, MAX_RECENT_SESSIONS);
+      return sortSessions(parsed.map(normalizeSession)).slice(0, MAX_RECENT_SESSIONS);
     } catch {
       return [];
     }
@@ -236,6 +238,7 @@ export function createEmptySession(): TsnSession {
       },
     ],
     agentEvents: [],
+    workflow: normalizeWorkflowState(),
   };
 }
 
@@ -259,6 +262,7 @@ export function redactSessionForStorage(session: TsnSession): TsnSession {
       ...event,
       content: redactSecrets(event.content),
     })),
+    workflow: normalizeWorkflowState(session.workflow),
   };
 }
 
@@ -280,10 +284,18 @@ function storedSessionToSession(session: StoredSession | undefined): TsnSession 
   }
 
   try {
-    return JSON.parse(session.payload) as TsnSession;
+    return normalizeSession(JSON.parse(session.payload) as TsnSession);
   } catch {
     return undefined;
   }
+}
+
+function normalizeSession(session: TsnSession): TsnSession {
+  return {
+    ...session,
+    agentEvents: session.agentEvents ?? [],
+    workflow: normalizeWorkflowState(session.workflow),
+  };
 }
 
 function isSession(session: TsnSession | undefined): session is TsnSession {

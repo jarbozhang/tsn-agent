@@ -9,6 +9,8 @@ topic: tsn-agent-tauri-ned
 
 构建一个 Tauri 桌面应用，把新手用自然语言描述的 TSN 需求，逐步转换成一个项目目录。MVP 需要直接生成 INET/OMNeT++ 可用的 `.ned` 文件、React Flow 拓扑 JSON，以及规划器输入 `flow_plan_1.json`。应用左侧通过 Claude Agent SDK 驱动对话和阶段引导，右侧以只读方式展示工程状态、默认参数解释、步骤快照和写盘结果。
 
+后续产品需要支持多个 TSN 应用场景，舰载/箭载 TSN 只是其中一个典型场景。场景差异应通过应用场景 Profile 适配阶段文案、默认值、流模板、术语和提示，而不是写死在通用工作流里。
+
 ---
 
 ## 问题背景
@@ -19,6 +21,10 @@ topic: tsn-agent-tauri-ned
 
 现有 `tsn-topology` skill 和 `topology.json` 是有价值的历史基础，但 `topology.json` 主要服务于 Qunee 数据源，不应继续约束新应用的核心模型。新产品应以 canonical TSN 模型为源头，再派生 NED、React Flow 数据和规划器输入。Qunee 风格产物如果仍有消费者，可以作为可选兼容导出。
 
+当前交互还需要避免一次性“流式输出全部结果”的体验。Agent 应按拓扑、时间同步、建立流、发送规划/导出准备等阶段推进，在关键阶段给出摘要并等待用户确认、修改或回退。用户还需要看见 Agent 调用了哪些阶段 skill、工具或 MCP，而不是只能在内部日志中看到粗略的请求结果。
+
+多场景支持也要求核心流程保持场景无关。不同场景可以有不同术语、默认拓扑假设、流模板、同步假设和提示文案，但不应各自复制一套 Agent 流程或 UI。
+
 ---
 
 ## 参与者
@@ -28,6 +34,7 @@ topic: tsn-agent-tauri-ned
 - A3. TSN skills：把阶段意图转换为确定性产物，覆盖拓扑、同步、流配置，以及后续 INET 导出相关能力。
 - A4. 规划器：读取 `flow_plan_1.json`，后续输出 `flow_plan_result_1.json`。
 - A5. INET 仿真流程：读取 `.ned`，后续读取由规划结果和 TSN 元数据派生的 INI/配置。
+- A6. 应用场景 Profile：提供场景特定术语、默认值、流模板和提示，用于适配未来多个 TSN 应用场景。
 
 ---
 
@@ -67,6 +74,20 @@ topic: tsn-agent-tauri-ned
   - **步骤：** 应用写入项目产物，展示生成了哪些文件，并标明哪些用于拓扑展示、规划器输入和未来 INET 仿真。
   - **结果：** 下游工具可以直接读取项目目录，不需要重新解释原始对话。
   - **覆盖：** R8, R9, R10, R11
+
+- F6. 分阶段确认和工具可见
+  - **触发：** Agent 完成拓扑、时间同步、流配置或发送规划等阶段。
+  - **参与者：** A1, A2, A3
+  - **步骤：** Agent 展示阶段摘要、默认值解释、调用过的 skill/tool/MCP 事件和下一步动作；用户确认继续、要求修改或回退。
+  - **结果：** 用户理解当前阶段发生了什么，不需要从一次性输出中猜测生成链路。
+  - **覆盖：** R26, R27, R28, R29
+
+- F7. 场景 Profile 适配
+  - **触发：** 用户选择或项目默认绑定某个 TSN 应用场景。
+  - **参与者：** A1, A2, A6
+  - **步骤：** 应用读取场景 Profile，为阶段导航、默认解释、流模板和提示使用对应场景的术语和默认值。
+  - **结果：** 通用 TSN 工作流可以适配舰载/箭载等未来多个应用场景，而不复制核心流程。
+  - **覆盖：** R30, R31, R32
 
 ---
 
@@ -109,6 +130,17 @@ topic: tsn-agent-tauri-ned
 - R24. SQLite 不应保存 Claude Code 凭证、本机密钥或下游工具的敏感配置。真实 Claude 配置只在 adapter/wrapper 边界读取。
 - R25. 删除会话必须有明确语义：默认删除应用内会话记录和索引；是否同时删除已导出的项目目录必须由用户显式确认。
 
+**分阶段 Agent 交互**
+- R26. Agent 必须按阶段推进 TSN 配置流程，至少包括拓扑、时间同步、建立流、发送规划/导出准备。
+- R27. Agent 在关键阶段完成后必须展示阶段摘要和下一步动作，并等待用户确认继续、要求修改或回退；不应默认一次性完成所有阶段。
+- R28. 左上角步骤导航必须由真实阶段状态驱动，展示当前、已确认、待确认、锁定或错误状态，而不是仅作为静态装饰。
+- R29. 应用必须向用户展示 Agent、阶段 skill、tool/MCP、artifact 和导出动作的可理解事件；诊断日志可以保留更多技术细节，但用户不应只能依赖内部日志理解生成过程。
+
+**应用场景 Profile**
+- R30. 应用必须预留应用场景 Profile 抽象，用于配置场景显示名、阶段文案、默认值解释、流模板、术语映射和提示。
+- R31. 第一版只需要提供通用 TSN Profile 和一个典型场景 Profile 占位，不要求一次性实现全部未来场景。
+- R32. 核心阶段工作流、canonical 模型和导出器不应硬编码舰载/箭载等单一场景规则；场景差异应通过 Profile 注入。
+
 ---
 
 ## 验收示例
@@ -121,6 +153,9 @@ topic: tsn-agent-tauri-ned
 - AE6. **覆盖 R20, R21。** 给定一个已完成拓扑和流模板的会话，当用户复制该会话时，应用应创建新会话 ID，保留原会话引用，并允许在副本中继续调整而不影响原会话。
 - AE7. **覆盖 R22, R23。** 给定存在多个会话，当用户搜索“4 switch control”或筛选最近会话时，应用应从本地 SQLite 索引返回匹配会话，而不需要扫描所有导出目录。
 - AE8. **覆盖 R25。** 给定会话已经导出项目目录，当用户删除会话但未确认删除文件时，应用应移除会话记录和列表索引，但不删除项目目录。
+- AE9. **覆盖 R26, R27, R28。** 给定用户输入拓扑需求，当拓扑阶段生成完成后，应用应停留在拓扑确认状态，展示拓扑摘要和确认/修改动作，而不是直接完成时间同步、流配置和导出。
+- AE10. **覆盖 R29。** 给定 Agent 调用了阶段 skill 或 MCP/tool，当用户查看执行步骤时，应看到脱敏后的工具名称、状态、摘要和所属阶段。
+- AE11. **覆盖 R30, R31, R32。** 给定项目使用不同应用场景 Profile，当进入同一阶段时，阶段 ID 保持稳定，但展示文案、默认说明和流模板来自当前 Profile。
 
 ---
 
@@ -130,6 +165,8 @@ topic: tsn-agent-tauri-ned
 - 生成的项目目录可作为规划器输入，并且保留后续 INET 仿真所需信息，不需要重新解释对话。
 - 后续规划不需要再发明输出、回退、右侧编辑或 Qunee 兼容等产品行为。
 - 未来 `inet-export` 或仿真工作可以基于已保留的 canonical 元数据继续推进，而不是替换拓扑模型。
+- 用户能看懂每个阶段发生了什么、哪些默认值被采用、Agent/skill/tool 做了哪些动作，并能在进入下一阶段前确认或修改。
+- 新增应用场景时可以通过 Profile 扩展术语、默认值和模板，不需要复制核心工作流。
 
 ---
 
@@ -145,6 +182,9 @@ topic: tsn-agent-tauri-ned
 - MVP 不把 SQLite 作为可交付项目产物的唯一来源；项目文件必须可独立被规划器和 INET/OMNeT++ 流程消费。
 - MVP 不做跨设备同步和多人协作，会话数据库只面向本机工作台。
 - Qunee 兼容低于 NED、React Flow 和规划器输入兼容的优先级。
+- MVP 不一次性实现全部未来 8 个应用场景；只建立 Profile 抽象和最小默认/典型 Profile。
+- MVP 不把 Profile 做成复杂插件系统、规则引擎或远程加载机制。
+- MVP 不把规范差距检查作为用户界面功能；规范文档可作为 Profile 和默认值的背景来源。
 
 ---
 
@@ -158,16 +198,21 @@ topic: tsn-agent-tauri-ned
 - 会话是工作台单位：会话用于恢复上下文、管理设计分支和检索历史，项目目录用于交付给规划器和 INET/OMNeT++。
 - SQLite 作为本地索引库：保存会话、消息、步骤快照、canonical state、导出清单和检索索引；不替代 `.ned`、React Flow JSON 和规划器输入等可交付文件。
 - `tsn-topology` 需要演进：现有 skill 应更新或被替代，使拓扑生成面向 NED/React Flow/规划器友好产物，而不是只产出 Qunee 时代文件。
+- 阶段确认优先：Agent 默认按阶段推进，关键阶段完成后等待用户确认；“直接生成完整草案”只能作为显式快速路径。
+- 工具调用可见：阶段 skill、tool/MCP 和 artifact 事件应进入用户可见时间线，同时保持脱敏和摘要化。
+- 场景 Profile 优先于场景硬编码：舰载/箭载等场景差异应通过 Profile 提供，不进入通用流程核心。
 
 ---
 
 ## 依赖与假设
 
 - 应用可以通过 Claude Agent SDK 或 wrapper 进程复用用户本机 Claude Code 配置，整体思路接近 Happy Coder 风格的本地/远程桥接。
+- Claude Agent SDK 消息流可用于捕获 session、streaming chunk、tool/MCP 状态和工具调用摘要，但应用仍需过滤敏感信息并禁止高风险工具默认执行。
 - `tests/fixtures/planner/flow_plan_1.json` 和 `tests/fixtures/planner/flow_plan_result_1.json` 可作为临时规划器输入/输出格式参考。
 - INET/OMNeT++ 兼容需要 canonical 拓扑能保留或派生稳定 module 名称、interface/gate 映射、链路/channel、datarate 和展示坐标。
 - 精确 `.ned` module 选择和 INET package/import 约定可在计划和实现阶段确定。
 - 当前 HTML 原型只是产品方向参考，不是 UI 契约。
+- 未来 8 个应用场景的完整清单和差异规则尚未全部确定；第一版 Profile 契约需要允许后续扩展，而不承诺一次建完全部场景。
 
 ---
 
@@ -176,7 +221,9 @@ topic: tsn-agent-tauri-ned
 ```mermaid
 flowchart LR
     A[自然语言 TSN 意图] --> B[Claude Agent 对话]
-    B --> C[阶段 skills]
+    P[应用场景 Profile] --> B
+    P --> C[阶段 skills]
+    B --> C
     C --> D[Canonical TSN 模型]
     B --> L[SQLite 会话库]
     D --> L
@@ -201,6 +248,8 @@ flowchart LR
 - [影响 R6][技术] 决定是原地更新 `tsn-topology`，还是新增一个拓扑 skill 并提供迁移路径。
 - [影响 R15, R16, R17][需调研] 决定 MVP 中应保留多少 INET INI 元数据，虽然完整 INI 生成延期。
 - [影响 R20-R25][技术] 设计 SQLite schema、迁移策略、全文检索字段，以及会话删除是否提供短期撤销窗口。
+- [影响 R26-R29][技术] 设计阶段状态、确认动作和用户可见事件的数据结构。
+- [影响 R30-R32][产品/技术] 明确第一批内置 Profile 的命名、默认模板和未来 7 个场景的扩展边界。
 
 ---
 
@@ -212,4 +261,6 @@ flowchart LR
 - 规划器输入样例：`tests/fixtures/planner/flow_plan_1.json`
 - 规划器输出样例：`tests/fixtures/planner/flow_plan_result_1.json`
 - 现有 Qunee 时代拓扑样例：`tests/fixtures/legacy-qunee/topology.json`
+- 箭载/舰载 TSN 典型场景背景：`docs/prototypes/箭载TSN技术规范_V1.2_1204-s.docx`
+- 场景差距分析背景：`docs/brainstorms/2026-05-20-tsn-agent-rocket-tsn-spec-gap-analysis.md`
 - 已查阅的 INET 文档方向：NED 有线拓扑、TSN gPTP、Time-Aware Shaping、gate scheduling、stream identification、stream encoding、PCP/VLAN 映射。

@@ -28,4 +28,24 @@ describe("topology factory", () => {
     expect(project.flows[0].routeLinkIds).toEqual(["link-0", "link-20", "link-21", "link-22", "link-15"]);
     expect(validateCanonicalProject(project)).toEqual({ ok: true, errors: [] });
   });
+
+  it("can use scenario config defaults and flow template labels", () => {
+    const project = createProjectFromIntent("请生成一个典型场景拓扑", undefined, {
+      scenarioConfigId: "aerospace-onboard",
+    });
+
+    expect(project.topology.nodes.filter(isSwitch)).toHaveLength(4);
+    expect(project.topology.nodes.filter(isEndSystem)).toHaveLength(20);
+    expect(project.flows[0].name).toBe("飞控控制流-1");
+    expect(project.simulationHints.defaultDataRateMbps).toBe(1_000);
+  });
+
+  it("falls back to generic scenario defaults for unknown config ids", () => {
+    const project = createProjectFromIntent("请生成一个默认拓扑", undefined, {
+      scenarioConfigId: "unknown-config",
+    });
+
+    expect(project.topology.nodes.filter(isSwitch)).toHaveLength(4);
+    expect(project.flows[0].name).toBe("控制流-1");
+  });
 });

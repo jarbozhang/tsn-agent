@@ -34,7 +34,7 @@ interface ClaudeAgentEvent {
 export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Promise<TsnAgentResult> {
   const request = typeof requestOrIntent === "string" ? { userIntent: requestOrIntent } : requestOrIntent;
   const { userIntent } = request;
-  const deterministicResult = runFakeTsnAgent(userIntent, request.session?.project);
+  const deterministicResult = runFakeTsnAgent(userIntent, request.session?.project, request.session?.workflow);
   const runId = request.runId ?? createRunId();
   const sessionId = request.session?.id;
   const startedAt = Date.now();
@@ -64,7 +64,7 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
       message: "Agent 使用 fake 模式完成",
       durationMs: Date.now() - startedAt,
       details: {
-        artifactCount: deterministicResult.bundle.artifacts.length,
+        artifactCount: deterministicResult.bundle?.artifacts.length ?? 0,
         projectName: deterministicResult.project.name,
       },
     });

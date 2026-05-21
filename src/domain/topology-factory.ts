@@ -6,34 +6,47 @@ import type {
   TsnNode,
   TsnPort,
 } from "./canonical";
+import { getScenarioConfig, resolveScenarioConfig, type ScenarioFlowTemplate } from "./scenario-config";
 
-const DEFAULT_DATA_RATE_MBPS = 1_000;
-const DEFAULT_SWITCH_COUNT = 4;
-const DEFAULT_END_SYSTEMS_PER_SWITCH = 5;
+export interface TopologyFactoryOptions {
+  scenarioConfigId?: string;
+}
 
-export function parseTopologyIntent(text: string, fallback?: Partial<TopologyIntent>): TopologyIntent {
+export function parseTopologyIntent(
+  text: string,
+  fallback?: Partial<TopologyIntent>,
+  options: TopologyFactoryOptions = {},
+): TopologyIntent {
   const switchMatch = text.match(/(\d+)\s*(?:个|台)?\s*(?:交换机|switch)/i);
   const endSystemMatch = text.match(/(?:每个|each).*?(\d+)\s*(?:个|台)?\s*(?:端系统|终端|端|host|end)/i);
+  const defaults = getScenarioConfig(options.scenarioConfigId).defaults.topology;
 
   return {
-    switchCount: clampNumber(Number(switchMatch?.[1] ?? fallback?.switchCount ?? DEFAULT_SWITCH_COUNT), 1, 12),
+    switchCount: clampNumber(Number(switchMatch?.[1] ?? fallback?.switchCount ?? defaults.switchCount), 1, 12),
     endSystemsPerSwitch: clampNumber(
-      Number(endSystemMatch?.[1] ?? fallback?.endSystemsPerSwitch ?? DEFAULT_END_SYSTEMS_PER_SWITCH),
+      Number(endSystemMatch?.[1] ?? fallback?.endSystemsPerSwitch ?? defaults.endSystemsPerSwitch),
       1,
       24,
     ),
   };
 }
 
-export function createProjectFromIntent(text: string, fallback?: Partial<TopologyIntent>): CanonicalTsnProjectV0 {
-  const intent = parseTopologyIntent(text, fallback);
-  return createLineTopologyProject(intent, "当前规划");
+export function createProjectFromIntent(
+  text: string,
+  fallback?: Partial<TopologyIntent>,
+  options: TopologyFactoryOptions = {},
+): CanonicalTsnProjectV0 {
+  const intent = parseTopologyIntent(text, fallback, options);
+  return createLineTopologyProject(intent, "当前规划", options);
 }
 
 export function createLineTopologyProject(
   intent: TopologyIntent,
   projectName = "TSN Agent Project",
+  options: TopologyFactoryOptions = {},
 ): CanonicalTsnProjectV0 {
+  const scenarioConfig = resolveScenarioConfig(options.scenarioConfigId).config;
+  const dataRateMbps = scenarioConfig.defaults.topology.dataRateMbps;
   const now = new Date().toISOString();
   const nodes: TsnNode[] = [];
   const links: TsnLink[] = [];
@@ -88,6 +101,7 @@ export function createLineTopologyProject(
           sourcePortId: "p1",
           targetNodeId: switchId,
           targetPortId: `p${hostIndex}`,
+          dataRateMbps,
         }),
       );
       numericLinkId += 1;
@@ -102,12 +116,13 @@ export function createLineTopologyProject(
         sourcePortId: `p${intent.endSystemsPerSwitch + 1}`,
         targetNodeId: switchIds[index + 1],
         targetPortId: `p${intent.endSystemsPerSwitch + 2}`,
+        dataRateMbps,
       }),
     );
     numericLinkId += 1;
   }
 
-  const flows = [createControlFlow(nodes, links, intent)];
+  const flows = [createControlFlow(nodes, links, intent, scenarioConfig.flowTemplates[0])];
 
   return {
     schemaVersion: "tsn-agent.canonical.v0",
@@ -120,7 +135,7 @@ export function createLineTopologyProject(
     simulationHints: {
       inetVersion: "INET 4.x",
       nedPackage: "tsnagent.generated",
-      defaultDataRateMbps: DEFAULT_DATA_RATE_MBPS,
+      defaultDataRateMbps: dataRateMbps,
       timeSynchronization: "assumed-synchronized",
     },
   };
@@ -140,6 +155,7 @@ function createLink(input: {
   sourcePortId: string;
   targetNodeId: string;
   targetPortId: string;
+  dataRateMbps: number;
 }): TsnLink {
   return {
     id: `link-${input.numericId}`,
@@ -153,11 +169,16 @@ function createLink(input: {
       portId: input.targetPortId,
     },
     medium: "ethernet",
-    dataRateMbps: DEFAULT_DATA_RATE_MBPS,
+    dataRateMbps: input.dataRateMbps,
   };
 }
 
-function createControlFlow(nodes: TsnNode[], links: TsnLink[], intent: TopologyIntent): TsnFlow {
+function createControlFlow(
+  nodes: TsnNode[],
+  links: TsnLink[],
+  intent: TopologyIntent,
+  template: ScenarioFlowTemplate,
+): TsnFlow {
   const sourceNode = findNode(nodes, "es1-1");
   const destinationNode = findNode(nodes, `es${intent.switchCount}-1`);
   const routeNodeIds = [
@@ -170,7 +191,7 @@ function createControlFlow(nodes: TsnNode[], links: TsnLink[], intent: TopologyI
   return {
     id: "flow-control-1",
     numericId: 1,
-    name: "控制流-1",
+    name: template.name,
     source: {
       nodeId: sourceNode.id,
       macAddress: sourceNode.macAddress ?? createMacAddress(1),
@@ -183,17 +204,17 @@ function createControlFlow(nodes: TsnNode[], links: TsnLink[], intent: TopologyI
       ipAddress: destinationNode.ipAddress ?? `10.0.${intent.switchCount}.1`,
       udpPort: 26028,
     },
-    periodUs: 250,
-    frameSizeBytes: 512,
-    pcp: 6,
+    periodUs: template.periodUs,
+    frameSizeBytes: template.frameSizeBytes,
+    pcp: template.pcp,
     maxFramesPerInterval: 1,
     earliestTransmitOffsetUs: 0,
     latestTransmitOffsetUs: 50,
-    jitterRequirementUs: 10,
-    latencyRequirementUs: 1_000,
+    jitterRequirementUs: template.jitterRequirementUs,
+    latencyRequirementUs: template.latencyRequirementUs,
     routeLinkIds,
     routeNodeIds,
-    flowType: "ST",
+    flowType: template.flowType,
   };
 }
 

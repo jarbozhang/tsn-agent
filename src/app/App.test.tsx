@@ -56,10 +56,17 @@ describe("App", () => {
     openDialogMock.mockReset();
     Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
     const { runFakeTsnAgent } = await import("../agent/fake-agent");
-    runTsnAgentMock.mockImplementation(async ({ userIntent }: { userIntent: string }) => runFakeTsnAgent(userIntent));
+    runTsnAgentMock.mockImplementation(
+      async ({ userIntent, session }: { userIntent: string; session?: { project?: unknown; workflow?: unknown } }) =>
+        runFakeTsnAgent(
+          userIntent,
+          session?.project as Parameters<typeof runFakeTsnAgent>[1],
+          session?.workflow as Parameters<typeof runFakeTsnAgent>[2],
+        ),
+    );
   });
 
-  it("generates the MVP artifacts from a beginner request", async () => {
+  it("generates a topology stage and waits for confirmation from a beginner request", async () => {
     const user = userEvent.setup();
 
     render(<App />);
@@ -70,12 +77,16 @@ describe("App", () => {
 
     expect(screen.getByText("交换机 4")).toBeInTheDocument();
     expect(screen.getByText("端系统 20")).toBeInTheDocument();
-    expect(screen.getByText("tsnagent/generated/network.ned")).toBeInTheDocument();
-    expect(screen.getAllByText("tsn-topology")).toHaveLength(2);
+    expect(screen.getByText("控制流 0")).toBeInTheDocument();
+    expect(screen.getByText(/拓扑等待确认/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
+    expect(screen.queryByText("控制流-1")).not.toBeInTheDocument();
+    expect(screen.getByText("等待 Agent 生成流模板")).toBeInTheDocument();
+    expect(screen.getByText("完成“发送规划”阶段后显示导出文件")).toBeInTheDocument();
+    expect(screen.getAllByText("tsn-topology")).toHaveLength(1);
 
     await user.click(screen.getByRole("button", { name: "日志" }));
     expect(await screen.findByText("用户提交需求")).toBeInTheDocument();
-    expect(screen.getByText("artifact bundle 已生成")).toBeInTheDocument();
   });
 
   it("exposes a project export action after artifacts are generated", async () => {
@@ -84,14 +95,39 @@ describe("App", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: /生成规划草案/ }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    expect(await screen.findByText("控制流-1")).toBeInTheDocument();
+    expect(screen.getByText("控制流 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
     expect(await screen.findByText("omnetpp.ini")).toBeInTheDocument();
     expect(screen.getByText("INET/OMNeT++ 最小运行配置")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "选择导出目录" }));
     await user.click(await screen.findByRole("button", { name: "保存" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("已导出 5 个文件：browser-preview");
+    expect(await screen.findByText(/已导出 5 个文件：browser-preview/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "日志" }));
     expect(await screen.findByText("项目文件已导出")).toBeInTheDocument();
+  });
+
+  it("marks the final planning stage confirmed instead of rerunning it", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /生成规划草案/ }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    expect(await screen.findByText(/发送规划等待确认/)).toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+
+    expect(screen.queryByText(/发送规划等待确认/)).not.toBeInTheDocument();
+    expect(screen.getByText("omnetpp.ini")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新" })).toBeEnabled();
   });
 
   it("re-enables submit if pending session persistence fails", async () => {
@@ -145,6 +181,6 @@ describe("App", () => {
 
     deferred.resolve(runFakeTsnAgent("我需要4个交换机，每个交换机连接5个端系统"));
 
-    expect(await screen.findByText("没有导出文件")).toBeInTheDocument();
+    expect(await screen.findByText("完成“发送规划”阶段后显示导出文件")).toBeInTheDocument();
   });
 });

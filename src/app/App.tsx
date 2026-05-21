@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Background, Controls, Handle, Position, ReactFlow, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -29,6 +29,7 @@ import { DiagnosticsLogView } from "../ui/diagnostics/DiagnosticsDrawer";
 import { isEndSystem, isSwitch } from "../domain/canonical";
 import { createArtifactBundle } from "../export/artifact-bundle";
 import { exportReactFlowTopology } from "../export/react-flow-exporter";
+import { getScenarioConfig } from "../domain/scenario-config";
 import {
   exportProjectBundle,
   openProjectExportDirectory,
@@ -120,11 +121,23 @@ export function App() {
 
   const project = currentSession.project;
   const bundle = currentSession.bundle;
+  const workflow = currentSession.workflow;
+  const scenarioConfig = getScenarioConfig(workflow.scenarioConfigId);
+  const currentStage = workflow.stages[workflow.currentStep];
+  const canExport = Boolean(bundle && workflow.currentStep === "planning-export");
+  const canRefreshBundle = Boolean(
+    project
+      && workflow.currentStep === "planning-export"
+      && ["waiting_confirmation", "confirmed"].includes(workflow.stages["planning-export"].status),
+  );
+  const isFlowStageVisible = workflow.stages["flow-template"].status === "waiting_confirmation"
+    || workflow.stages["flow-template"].status === "confirmed";
+  const visibleFlows = isFlowStageVisible ? project?.flows ?? [] : [];
   const flowTopology = useMemo(() => (project ? exportReactFlowTopology(project) : undefined), [project]);
   const switchCount = project?.topology.nodes.filter(isSwitch).length ?? 0;
   const endSystemCount = project?.topology.nodes.filter(isEndSystem).length ?? 0;
   const linkCount = project?.topology.links.length ?? 0;
-  const flowCount = project?.flows.length ?? 0;
+  const flowCount = visibleFlows.length;
 
   async function persistSession(nextSession: TsnSession) {
     await repository.save(nextSession);
@@ -139,7 +152,11 @@ export function App() {
   }
 
   async function handleSubmit() {
-    const trimmedInput = input.trim();
+    await submitIntent(input);
+  }
+
+  async function submitIntent(rawInput: string) {
+    const trimmedInput = rawInput.trim();
 
     if (!trimmedInput || isAgentRunning) {
       return;
@@ -166,7 +183,7 @@ export function App() {
     };
     let streamedText = "";
 
-    setInput("");
+    setInput((value) => (value.trim() === trimmedInput ? "" : value));
     setIsAgentRunning(true);
     setExportResult(undefined);
     setExportError(undefined);
@@ -206,7 +223,8 @@ export function App() {
           message.id === assistantMessage.id ? { ...message, content: result.assistantText } : message,
         ),
         claudeSessionId: result.claudeSessionId ?? pendingSession.claudeSessionId,
-        agentEvents: result.events,
+        agentEvents: [...pendingSession.agentEvents, ...stampAgentEvents(result.events, completedAt)],
+        workflow: result.workflow,
         project: result.project,
         bundle: result.bundle,
       };
@@ -225,12 +243,14 @@ export function App() {
           agentMode: result.mode,
         },
       });
-      logDiagnostic(diagnosticsRepository, {
-        sessionId: nextSession.id,
-        category: "artifact",
-        message: "artifact bundle 已生成",
-        details: artifactBundleSummary(result.bundle),
-      });
+      if (result.bundle) {
+        logDiagnostic(diagnosticsRepository, {
+          sessionId: nextSession.id,
+          category: "artifact",
+          message: "artifact bundle 已生成",
+          details: artifactBundleSummary(result.bundle),
+        });
+      }
       setCurrentSession((session) => (session.id === nextSession.id ? nextSession : session));
       setSessions(await repository.list());
     } catch (error) {
@@ -351,7 +371,7 @@ export function App() {
   }
 
   async function refreshBundle() {
-    if (!project) {
+    if (!project || !canRefreshBundle) {
       return;
     }
 
@@ -368,11 +388,12 @@ export function App() {
       ...currentSession,
       updatedAt: new Date().toISOString(),
       bundle: nextBundle,
+      workflow,
     });
   }
 
   async function handleExportProject() {
-    if (!bundle) {
+    if (!bundle || !canExport) {
       return;
     }
 
@@ -539,16 +560,19 @@ export function App() {
           <div className="project-strip">
             <span className="project-name">当前规划</span>
             <span className="env-badge mono">
-              {project ? "canonical=v0" : "waiting"}
+              {project ? `canonical=v0 · ${scenarioConfig.displayName}` : scenarioConfig.displayName}
             </span>
           </div>
 
           <div className="chat-stepper" aria-label="配置步骤">
-            <Step index="1" label="拓扑" status={project ? "passed" : "current"} />
-            <span className={project ? "stepper-conn active" : "stepper-conn"} />
-            <Step index="2" label="时钟同步" status="locked" />
-            <span className="stepper-conn" />
-            <Step index="3" label="流量" status={project ? "current" : "locked"} />
+            {(["topology", "time-sync", "flow-template", "planning-export"] as const).map((step, index, steps) => (
+              <Fragment key={step}>
+                <Step index={`${index + 1}`} label={scenarioConfig.stageLabels[step]} status={workflow.stages[step].status} />
+                {index < steps.length - 1 && (
+                  <span className={workflow.stages[step].status === "confirmed" ? "stepper-conn active" : "stepper-conn"} />
+                )}
+              </Fragment>
+            ))}
           </div>
 
           <div className="messages" aria-live="polite">
@@ -562,6 +586,17 @@ export function App() {
 
           <div className="composer">
             <label htmlFor="intent">描述你的 TSN 需求</label>
+            {currentStage.status === "waiting_confirmation" && (
+              <div className="stage-confirmation" role="status">
+                <div>
+                  <strong>{scenarioConfig.stageLabels[workflow.currentStep]}等待确认</strong>
+                  <p>{currentStage.summary}</p>
+                </div>
+                <button className="btn-primary" type="button" onClick={() => submitIntent("继续")} disabled={isAgentRunning}>
+                  确认并继续
+                </button>
+              </div>
+            )}
             <div className="composer-box">
               <textarea
                 id="intent"
@@ -634,15 +669,17 @@ export function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {project?.flows.map((flow) => (
-                      <tr key={flow.id}>
-                        <td>{flow.name}</td>
-                        <td>{flow.routeNodeIds.join(" -> ")}</td>
-                        <td>{flow.periodUs} us</td>
-                        <td>{flow.pcp}</td>
-                        <td>{flow.latencyRequirementUs} us</td>
-                      </tr>
-                    )) ?? (
+                    {visibleFlows.length > 0 ? (
+                      visibleFlows.map((flow) => (
+                        <tr key={flow.id}>
+                          <td>{flow.name}</td>
+                          <td>{flow.routeNodeIds.join(" -> ")}</td>
+                          <td>{flow.periodUs} us</td>
+                          <td>{flow.pcp}</td>
+                          <td>{flow.latencyRequirementUs} us</td>
+                        </tr>
+                      ))
+                    ) : (
                       <tr>
                         <td colSpan={5}>等待 Agent 生成流模板</td>
                       </tr>
@@ -657,11 +694,11 @@ export function App() {
                     <h2>导出文件</h2>
                     <p>NED、最小 INET ini、React Flow JSON、规划器输入和 manifest。</p>
                   </div>
-                  <button className="btn" type="button" onClick={refreshBundle} disabled={!project}>
+                  <button className="btn" type="button" onClick={refreshBundle} disabled={!canRefreshBundle}>
                     <RefreshCw size={14} aria-hidden="true" />
                     刷新
                   </button>
-                  <button className="btn" type="button" onClick={handleExportProject} disabled={!bundle}>
+                  <button className="btn" type="button" onClick={handleExportProject} disabled={!canExport}>
                     <Download size={14} aria-hidden="true" />
                     保存
                   </button>
@@ -693,7 +730,7 @@ export function App() {
                       </div>
                     </article>
                   ))}
-                  {!bundle && <div className="empty-panel mono">没有导出文件</div>}
+                  {!bundle && <div className="empty-panel mono">完成“发送规划”阶段后显示导出文件</div>}
                 </div>
                 {exportResult && (
                   <p className="export-status mono" role="status">
@@ -718,8 +755,8 @@ export function App() {
                   <h2>执行步骤</h2>
                 </div>
                 <ol className="event-list">
-                  {currentSession.agentEvents.map((event) => (
-                    <li key={event.id}>
+                  {currentSession.agentEvents.map((event, index) => (
+                    <li className={event.kind} key={`${event.id}-${index}`}>
                       <span>{event.skillName ?? event.title}</span>
                       <p>{event.content}</p>
                     </li>
@@ -735,9 +772,19 @@ export function App() {
   );
 }
 
-function Step({ index, label, status }: { index: string; label: string; status: "current" | "passed" | "locked" }) {
+function Step({
+  index,
+  label,
+  status,
+}: {
+  index: string;
+  label: string;
+  status: "locked" | "current" | "waiting_confirmation" | "confirmed" | "error";
+}) {
+  const className = status === "confirmed" ? "passed" : status;
+
   return (
-    <div className={`stepper-item ${status}`}>
+    <div className={`stepper-item ${className}`}>
       <span className="si-num">{index}</span>
       <span className="si-label">{label}</span>
     </div>
@@ -796,4 +843,12 @@ function normalizeError(error: unknown): string {
   }
 
   return "未知错误";
+}
+
+function stampAgentEvents<T extends { id: string; createdAt?: string }>(events: T[], createdAt: string): T[] {
+  return events.map((event, index) => ({
+    ...event,
+    id: `${event.id}-${createdAt.replace(/[^0-9A-Za-z]/g, "")}-${index}`,
+    createdAt,
+  }));
 }

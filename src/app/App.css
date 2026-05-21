@@ -355,10 +355,21 @@ textarea:focus-visible {
   background: var(--accent-dim);
 }
 
-.stepper-item.current .si-num {
+.stepper-item.current .si-num,
+.stepper-item.waiting_confirmation .si-num {
   border-color: var(--accent);
   color: #ffffff;
   background: var(--accent);
+}
+
+.stepper-item.waiting_confirmation {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.stepper-item.error {
+  color: var(--error);
+  background: var(--error-dim);
 }
 
 .stepper-item.passed {
@@ -454,6 +465,36 @@ textarea:focus-visible {
 .composer label {
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.stage-confirmation {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(250, 84, 28, 0.2);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.stage-confirmation div {
+  min-width: 0;
+}
+
+.stage-confirmation strong {
+  display: block;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.stage-confirmation p {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.stage-confirmation .btn-primary {
+  flex: 0 0 auto;
 }
 
 .composer-box {

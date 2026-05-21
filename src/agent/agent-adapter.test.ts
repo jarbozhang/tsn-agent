@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createProjectFromIntent } from "../domain/topology-factory";
 import type { DiagnosticLogRepository } from "../diagnostics/diagnostic-log-repository";
+import { createInitialWorkflowState } from "../project/project-state";
 
 const invokeMock = vi.hoisted(() => vi.fn());
 const listenMock = vi.hoisted(() => vi.fn());
@@ -42,8 +43,9 @@ describe("runTsnAgent", () => {
 
     expect(result.mode).toBe("fake");
     expect(invokeMock).not.toHaveBeenCalled();
-    expect(result.bundle.artifacts.some((artifact) => artifact.path === "tsnagent/generated/network.ned")).toBe(true);
-    expect(result.bundle.artifacts.some((artifact) => artifact.path === "omnetpp.ini")).toBe(true);
+    expect(result.workflow.currentStep).toBe("topology");
+    expect(result.workflow.stages.topology.status).toBe("waiting_confirmation");
+    expect(result.bundle).toBeUndefined();
   });
 
   it("uses Claude output in Tauri while keeping deterministic artifacts", async () => {
@@ -120,6 +122,7 @@ describe("runTsnAgent", () => {
           },
         ],
         agentEvents: [],
+        workflow: createInitialWorkflowState(),
       },
     });
 
@@ -158,6 +161,7 @@ describe("runTsnAgent", () => {
         updatedAt: "2026-05-20T00:00:00.000Z",
         messages: [],
         agentEvents: [],
+        workflow: createInitialWorkflowState(),
       },
     });
 
@@ -208,6 +212,7 @@ describe("runTsnAgent", () => {
           },
         ],
         agentEvents: [],
+        workflow: createInitialWorkflowState(),
         project: createProjectFromIntent("我需要3个交换机，每个交换机连接3个端系统"),
       },
     });

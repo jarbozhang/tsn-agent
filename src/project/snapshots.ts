@@ -18,6 +18,7 @@ export function createStepSnapshot(
     summary: input.summary,
     project: structuredClone(state.project),
     bundle: state.bundle ? structuredClone(state.bundle) : undefined,
+    workflow: structuredClone(state.workflow),
   };
 }
 
@@ -49,6 +50,7 @@ export function restoreSnapshot(state: ProjectState, snapshotId: string): Projec
     ...state,
     project: structuredClone(snapshot.project),
     bundle: snapshot.bundle ? structuredClone(snapshot.bundle) as ArtifactBundle : undefined,
+    workflow: structuredClone(snapshot.workflow),
     activeSnapshotId: snapshot.id,
   };
 }
