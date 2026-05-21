@@ -62,6 +62,20 @@ describe("topology factory", () => {
     });
   });
 
+  it("parses total endpoints distributed across switches as per-switch hosts", () => {
+    expect(parseTopologyIntent("改为 20 个端系统，分配到 4 台交换机", {
+      switchCount: 4,
+      endSystemsPerSwitch: 0,
+      switchInterconnect: "line",
+      topologyTemplate: "aerospace-redundant",
+      endSystemCount: 7,
+    })).toEqual({
+      switchCount: 4,
+      endSystemsPerSwitch: 5,
+      switchInterconnect: "line",
+    });
+  });
+
   it("prefers the target host value in per-switch change requests", () => {
     expect(parseTopologyIntent("每个交换机从3个端系统改成4个端系统", {
       switchCount: 3,

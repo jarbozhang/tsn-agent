@@ -37,8 +37,9 @@ export function parseTopologyIntent(
   const switchInterconnect = matchSwitchInterconnect(text) ?? fallback?.switchInterconnect ?? "line";
   const defaults = getScenarioConfig(options.scenarioConfigId).defaults.topology;
   const switchCount = clampNumber(Number(switchMatch ?? fallback?.switchCount ?? defaults.switchCount), 1, 12);
+  const distributedEndSystemMatch = matchDistributedEndSystemCount(text, switchCount);
   const endSystemsPerSwitch = clampNumber(
-    Number(endSystemMatch ?? fallback?.endSystemsPerSwitch ?? defaults.endSystemsPerSwitch),
+    Number(distributedEndSystemMatch ?? endSystemMatch ?? fallback?.endSystemsPerSwitch ?? defaults.endSystemsPerSwitch),
     1,
     24,
   );
@@ -49,11 +50,11 @@ export function parseTopologyIntent(
     switchInterconnect,
   };
 
-  if (fallback?.topologyTemplate) {
+  if (fallback?.topologyTemplate && !distributedEndSystemMatch && !endSystemMatch) {
     intent.topologyTemplate = fallback.topologyTemplate;
   }
 
-  if (fallback?.endSystemCount !== undefined) {
+  if (fallback?.endSystemCount !== undefined && intent.topologyTemplate) {
     intent.endSystemCount = fallback.endSystemCount;
   }
 
@@ -487,6 +488,18 @@ function matchTargetCount(text: string, nounPattern: string, prefix = ""): strin
 
   const directPattern = new RegExp(`${prefix}(\\d+)\\s*(?:个|台)?\\s*${nounPattern}`, "i");
   return text.match(directPattern)?.[1];
+}
+
+function matchDistributedEndSystemCount(text: string, switchCount: number): string | undefined {
+  const totalMatch = text.match(/(\d+)\s*(?:个|台)?\s*(?:网卡|端系统|终端|端(?!口)|host|end)s?\s*(?:，|,|\s)*(?:平均)?(?:分配|分到|分布|接入|连接)\s*(?:到|至)?\s*(\d+)?\s*(?:个|台)?\s*(?:系统\s*)?(?:交换机|switch)/i);
+  const total = Number(totalMatch?.[1]);
+  const switches = Number(totalMatch?.[2] ?? switchCount);
+
+  if (!Number.isFinite(total) || !Number.isFinite(switches) || total <= 0 || switches <= 0) {
+    return undefined;
+  }
+
+  return String(Math.max(1, Math.round(total / switches)));
 }
 
 function matchSwitchInterconnect(text: string): TopologyIntent["switchInterconnect"] | undefined {

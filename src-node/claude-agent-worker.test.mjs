@@ -408,4 +408,22 @@ describe("claude-agent-worker", () => {
       "[文件] 修改 src/agent/fake-agent.ts",
     ]);
   });
+
+  it("does not expose empty tool input objects in operation traces", () => {
+    const traces = extractOperationTraceEvents({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "tool_use", id: "skill-1", name: "Skill", input: {} },
+          { type: "tool_use", id: "bash-1", name: "Bash", input: {} },
+        ],
+      },
+    });
+
+    expect(traces.map((trace) => trace.text)).toEqual([
+      "[Skill] 调用",
+      "[工具] Bash",
+    ]);
+    expect(traces.map((trace) => trace.text).join("\n")).not.toContain("{}");
+  });
 });

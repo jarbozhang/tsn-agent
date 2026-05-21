@@ -467,9 +467,8 @@ function formatToolUseTrace(name, input) {
   if (normalizedName === "skill") {
     const skillName = stringValue(inputRecord.skill)
       ?? stringValue(inputRecord.skillName)
-      ?? stringValue(inputRecord.name)
-      ?? summarizeInput(input);
-    return `[Skill] ${skillName || "调用"}`;
+      ?? stringValue(inputRecord.name);
+    return skillName ? `[Skill] 调用 ${skillName}` : "[Skill] 调用";
   }
 
   if (normalizedName === "read") {
@@ -485,7 +484,8 @@ function formatToolUseTrace(name, input) {
   }
 
   if (normalizedName === "bash") {
-    return `[工具] Bash: ${summarizeCommand(stringValue(inputRecord.command) ?? stringValue(inputRecord.cmd) ?? summarizeInput(input))}`;
+    const command = summarizeCommand(stringValue(inputRecord.command) ?? stringValue(inputRecord.cmd));
+    return command ? `[工具] Bash: ${command}` : "[工具] Bash";
   }
 
   const summary = summarizeInput(input);
@@ -500,7 +500,7 @@ function summarizeCommand(command) {
   const redacted = redactSecrets(String(command ?? "").trim());
 
   if (!redacted) {
-    return "执行命令";
+    return "";
   }
 
   const stage = redacted.match(/--stage\s+([^\s]+)/)?.[1];

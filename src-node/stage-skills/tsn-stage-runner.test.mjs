@@ -48,6 +48,24 @@ describe("tsn-stage-runner", () => {
     expect(result.payload.project.topology.nodes).toHaveLength(16);
   });
 
+  it("switches from the aerospace fallback to a generic distributed endpoint topology", () => {
+    const result = runTopologyStage({
+      userIntent: "改为 20 个端系统，分配到 4 台交换机",
+      fallbackIntent: {
+        switchCount: 4,
+        endSystemsPerSwitch: 0,
+        switchInterconnect: "line",
+        topologyTemplate: "aerospace-redundant",
+        endSystemCount: 7,
+      },
+    });
+
+    expect(result.summary).toContain("4 个交换机");
+    expect(result.summary).toContain("5 个端系统");
+    expect(result.payload.project.id).toBe("project-default");
+    expect(result.payload.project.topology.nodes).toHaveLength(24);
+  });
+
   it("generates the aerospace redundant topology stage result from the spec prompt", () => {
     const result = runTopologyStage({
       userIntent: AEROSPACE_TOPOLOGY_PROMPT,
