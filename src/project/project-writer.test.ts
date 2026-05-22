@@ -19,7 +19,7 @@ describe("export manifest", () => {
     const manifest = withObservedPlannerResult(bundle.manifest);
 
     expect(manifest.files).toContainEqual({
-      path: "flow_plan_result_1.json",
+      path: "planner/flow_plan_result_1.json",
       purpose: "planner-output",
       label: "规划器输出",
       observedExternal: true,
@@ -47,6 +47,28 @@ describe("export manifest", () => {
 
     expect(validation).toMatchObject({ ok: false });
   });
+
+  it("rejects planner output at unexpected paths", () => {
+    const bundle = createArtifactBundle(createProjectFromIntent("我需要4个交换机，每个交换机连接5个端系统"));
+
+    const validation = validateExportManifest({
+      ...bundle,
+      manifest: {
+        ...bundle.manifest,
+        files: [
+          ...bundle.manifest.files,
+          {
+            path: "simulation/inet/flow_plan_result_1.json",
+            purpose: "planner-output",
+            label: "规划器输出",
+            observedExternal: true,
+          },
+        ],
+      },
+    });
+
+    expect(validation).toMatchObject({ ok: false });
+  });
 });
 
 describe("project writer", () => {
@@ -63,18 +85,103 @@ describe("project writer", () => {
     });
 
     expect(result.writtenFiles).toEqual([
-      "tsnagent/generated/network.ned",
-      "omnetpp.ini",
-      "react-flow-topology.json",
-      "flow_plan_1.json",
+      "simulation/inet/tsnagent/generated/network.ned",
+      "simulation/inet/omnetpp.ini",
+      "simulation/inet/traffic.ini",
+      "workspace/react-flow-topology.json",
+      "planner/flow_plan_1.json",
       "manifest.json",
     ]);
     expect(await readFile(path.join(outputDir, "notes.txt"), "utf8")).toBe("keep");
-    expect(await readFile(path.join(outputDir, "tsnagent/generated/network.ned"), "utf8")).toContain("TsnSwitch");
-    expect(await readFile(path.join(outputDir, "omnetpp.ini"), "utf8")).toContain(
+    expect(await readFile(path.join(outputDir, "simulation/inet/tsnagent/generated/network.ned"), "utf8")).toContain("TsnSwitch");
+    expect(await readFile(path.join(outputDir, "simulation/inet/omnetpp.ini"), "utf8")).toContain(
       "network = tsnagent.generated.TsnAgentNetwork",
     );
+    expect(await readFile(path.join(outputDir, "simulation/inet/traffic.ini"), "utf8")).toContain("UdpSourceApp");
     expect(await readFile(path.join(outputDir, "manifest.json"), "utf8")).toContain("simulation-inet");
+  });
+
+  it("rejects duplicate, missing, and escaping artifact paths", async () => {
+    const parentDir = await mkdtemp(path.join(tmpdir(), "tsn-agent-project-test-"));
+    const outputDir = path.join(parentDir, "generated-project");
+    const bundle = createArtifactBundle(createProjectFromIntent("我需要4个交换机，每个交换机连接5个端系统"));
+
+    await expect(
+      writeProjectArtifacts(
+        outputDir,
+        {
+          ...bundle,
+          artifacts: [
+            ...bundle.artifacts,
+            {
+              ...bundle.artifacts[0],
+              content: "duplicate",
+            },
+          ],
+        },
+        {
+          repoRoot: process.cwd(),
+          homeDir: path.join(parentDir, "home"),
+        },
+      ),
+    ).rejects.toThrow("duplicated");
+
+    await expect(
+      writeProjectArtifacts(
+        outputDir,
+        {
+          ...bundle,
+          manifest: {
+            ...bundle.manifest,
+            files: [
+              ...bundle.manifest.files,
+              {
+                path: "simulation/inet/missing.ini",
+                purpose: "simulation-inet",
+                label: "missing",
+              },
+            ],
+          },
+        },
+        {
+          repoRoot: process.cwd(),
+          homeDir: path.join(parentDir, "home"),
+        },
+      ),
+    ).rejects.toThrow("no artifact content");
+
+    await expect(
+      writeProjectArtifacts(
+        outputDir,
+        {
+          ...bundle,
+          artifacts: [
+            ...bundle.artifacts,
+            {
+              path: "../omnetpp.ini",
+              purpose: "simulation-inet",
+              label: "escaping",
+              content: "[General]",
+            },
+          ],
+          manifest: {
+            ...bundle.manifest,
+            files: [
+              ...bundle.manifest.files,
+              {
+                path: "../omnetpp.ini",
+                purpose: "simulation-inet",
+                label: "escaping",
+              },
+            ],
+          },
+        },
+        {
+          repoRoot: process.cwd(),
+          homeDir: path.join(parentDir, "home"),
+        },
+      ),
+    ).rejects.toThrow("escapes project directory");
   });
 
   it("rejects protected and unsafe output paths", async () => {
@@ -96,5 +203,22 @@ describe("project writer", () => {
     await symlink(targetDir, linkDir);
 
     await expect(assertSafeProjectPath(linkDir)).rejects.toThrow("symlink");
+  });
+
+  it("rejects symlink artifact parent directories", async () => {
+    const parentDir = await mkdtemp(path.join(tmpdir(), "tsn-agent-project-test-"));
+    const outputDir = path.join(parentDir, "generated-project");
+    const externalDir = path.join(parentDir, "external");
+    const bundle = createArtifactBundle(createProjectFromIntent("我需要4个交换机，每个交换机连接5个端系统"));
+    await mkdir(outputDir, { recursive: true });
+    await mkdir(externalDir, { recursive: true });
+    await symlink(externalDir, path.join(outputDir, "simulation"));
+
+    await expect(
+      writeProjectArtifacts(outputDir, bundle, {
+        repoRoot: process.cwd(),
+        homeDir: path.join(parentDir, "home"),
+      }),
+    ).rejects.toThrow("symlink");
   });
 });

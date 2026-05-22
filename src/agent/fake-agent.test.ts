@@ -62,6 +62,22 @@ describe("fake tsn agent", () => {
     expect(result.assistantText).toContain("7 个网卡");
   });
 
+  it("updates an aerospace redundant topology when the user adds networkcards 8 and 9", () => {
+    const previous = runFakeTsnAgent(
+      AEROSPACE_TOPOLOGY_PROMPT,
+      undefined,
+      createInitialWorkflowState("aerospace-onboard"),
+    );
+
+    const result = runFakeTsnAgent("交换机3和4那里，我希望再添加网卡8和9", previous.project, previous.workflow);
+
+    expect(result.workflow.currentStep).toBe("topology");
+    expect(result.project.topology.nodes.filter(isSwitch)).toHaveLength(4);
+    expect(result.project.topology.nodes.filter(isEndSystem)).toHaveLength(9);
+    expect(result.project.topology.links).toHaveLength(20);
+    expect(result.assistantText).toContain("9 个网卡");
+  });
+
   it("confirms the final planning stage without rerunning it", () => {
     const topology = runFakeTsnAgent("我需要4个交换机，每个交换机连接5个端系统");
     const timeSync = runFakeTsnAgent("继续", topology.project, topology.workflow);
@@ -77,7 +93,7 @@ describe("fake tsn agent", () => {
     expect(confirmed.workflow.currentStep).toBe("planning-export");
     expect(confirmed.workflow.stages["planning-export"].status).toBe("confirmed");
     expect(confirmed.events.map((event) => event.kind)).not.toContain("confirmation-required");
-    expect(confirmed.bundle?.artifacts.some((artifact) => artifact.path === "omnetpp.ini")).toBe(true);
+    expect(confirmed.bundle?.artifacts.some((artifact) => artifact.path === "simulation/inet/omnetpp.ini")).toBe(true);
     expect(confirmed.assistantText).toContain("已生成规划器输入和导出清单");
   });
 
@@ -89,8 +105,8 @@ describe("fake tsn agent", () => {
     expect(result.project.topology.nodes.filter(isSwitch)).toHaveLength(3);
     expect(result.project.topology.nodes.filter(isEndSystem)).toHaveLength(9);
     expect(result.workflow.currentStep).toBe("planning-export");
-    expect(result.bundle?.artifacts.some((artifact) => artifact.path === "tsnagent/generated/network.ned")).toBe(true);
-    expect(result.bundle?.artifacts.some((artifact) => artifact.path === "omnetpp.ini")).toBe(true);
+    expect(result.bundle?.artifacts.some((artifact) => artifact.path === "simulation/inet/tsnagent/generated/network.ned")).toBe(true);
+    expect(result.bundle?.artifacts.some((artifact) => artifact.path === "simulation/inet/omnetpp.ini")).toBe(true);
     expect(result.assistantText).toContain("3 个交换机");
     expect(result.assistantText).toContain("3 个端系统");
   });
@@ -194,7 +210,7 @@ describe("fake tsn agent", () => {
     const captured = runFakeTsnAgent("两条流，一条视频流，一条控制流", timeSync.project, timeSync.workflow);
     const flow = runFakeTsnAgent("继续", captured.project, captured.workflow);
     const planning = runFakeTsnAgent("继续", flow.project, flow.workflow);
-    const flowPlan = planning.bundle?.artifacts.find((artifact) => artifact.path === "flow_plan_1.json");
+    const flowPlan = planning.bundle?.artifacts.find((artifact) => artifact.path === "planner/flow_plan_1.json");
 
     expect(captured.workflow.currentStep).toBe("time-sync");
     expect(captured.project.flows.map((candidate) => candidate.name)).toEqual(["控制流-1", "视频流-1"]);

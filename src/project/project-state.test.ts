@@ -36,8 +36,8 @@ describe("project state snapshots", () => {
     const restored = restoreSnapshot(changed, snapshotted.snapshots[0].id);
 
     expect(restored.project.topology.nodes).toHaveLength(24);
-    expect(restored.bundle?.artifacts.map((artifact) => artifact.path)).toContain("tsnagent/generated/network.ned");
-    expect(restored.bundle?.artifacts.map((artifact) => artifact.path)).toContain("omnetpp.ini");
+    expect(restored.bundle?.artifacts.map((artifact) => artifact.path)).toContain("simulation/inet/tsnagent/generated/network.ned");
+    expect(restored.bundle?.artifacts.map((artifact) => artifact.path)).toContain("simulation/inet/omnetpp.ini");
     expect(restored.workflow.currentStep).toBe("topology");
     expect(restored.activeSnapshotId).toBe(snapshotted.snapshots[0].id);
   });

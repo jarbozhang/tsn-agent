@@ -38,6 +38,11 @@ generated-projects/
 !.claude/skills/
 !.claude/skills/tsn-topology/
 !.claude/skills/tsn-topology/SKILL.md
+!.claude/skills/tsn-topology/package.json
+!.claude/skills/tsn-topology/docs/
+!.claude/skills/tsn-topology/docs/rules.md
+!.claude/skills/tsn-topology/tools/
+!.claude/skills/tsn-topology/tools/*.js
 !.claude/skills/tsn-flow-planning/
 !.claude/skills/tsn-flow-planning/SKILL.md
 

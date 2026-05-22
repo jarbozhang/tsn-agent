@@ -1,6 +1,7 @@
 import type { CanonicalTsnProjectV0 } from "../domain/canonical";
 import { validateCanonicalProject } from "../domain/validation";
 import { exportOmnetppIni } from "./ini-exporter";
+import { exportInetTrafficIni } from "./inet-traffic-exporter";
 import { NED_CONTRACT } from "./ned-contract";
 import { exportNed } from "./ned-exporter";
 import { exportPlannerInput } from "./planner-exporter";
@@ -47,25 +48,31 @@ export function createArtifactBundle(project: CanonicalTsnProjectV0): ArtifactBu
 
   const artifacts: ExportedArtifact[] = [
     {
-      path: NED_CONTRACT.relativePath,
+      path: NED_CONTRACT.artifactPath,
       purpose: "simulation-inet",
       label: "INET/OMNeT++ 网络拓扑",
       content: exportNed(project),
     },
     {
-      path: "omnetpp.ini",
+      path: "simulation/inet/omnetpp.ini",
       purpose: "simulation-inet",
-      label: "INET/OMNeT++ 最小运行配置",
+      label: "INET/OMNeT++ 入口配置",
       content: exportOmnetppIni(project),
     },
     {
-      path: "react-flow-topology.json",
+      path: "simulation/inet/traffic.ini",
+      purpose: "simulation-inet",
+      label: "INET/OMNeT++ UDP 业务流配置",
+      content: exportInetTrafficIni(project),
+    },
+    {
+      path: "workspace/react-flow-topology.json",
       purpose: "workspace-visualization",
       label: "React Flow 拓扑展示数据",
       content: JSON.stringify(exportReactFlowTopology(project), null, 2),
     },
     {
-      path: "flow_plan_1.json",
+      path: "planner/flow_plan_1.json",
       purpose: "planner-input",
       label: "规划器输入",
       content: JSON.stringify(exportPlannerInput(project), null, 2),

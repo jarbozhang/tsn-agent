@@ -11,6 +11,7 @@ import { getScenarioConfig, resolveScenarioConfig, type ScenarioFlowTemplate } f
 export interface TopologyFactoryOptions {
   scenarioConfigId?: string;
   includeControlFlow?: boolean;
+  aerospaceEndSystemCount?: number;
 }
 
 export function parseTopologyIntent(
@@ -18,13 +19,18 @@ export function parseTopologyIntent(
   fallback?: Partial<TopologyIntent>,
   options: TopologyFactoryOptions = {},
 ): TopologyIntent {
-  if (isAerospaceRedundantTopologyRequest(text, options.scenarioConfigId)) {
+  const aerospaceNetworkcardCount = matchAerospaceNetworkcardCount(text, fallback?.endSystemCount);
+  const shouldUseAerospaceTemplate = !hasDistributedEndSystemTopologyRequest(text)
+    && (isAerospaceRedundantTopologyRequest(text, options.scenarioConfigId)
+      || fallback?.topologyTemplate === "aerospace-redundant" && hasAerospaceTemplateEditRequest(text));
+
+  if (shouldUseAerospaceTemplate) {
     return {
       switchCount: 4,
       endSystemsPerSwitch: 0,
       switchInterconnect: "line",
       topologyTemplate: "aerospace-redundant",
-      endSystemCount: 7,
+      endSystemCount: clampNumber(Number(aerospaceNetworkcardCount ?? fallback?.endSystemCount ?? 7), 1, 24),
     };
   }
 
@@ -69,7 +75,11 @@ export function createProjectFromIntent(
   const intent = parseTopologyIntent(text, fallback, options);
 
   if (intent.topologyTemplate === "aerospace-redundant") {
-    return createAerospaceRedundantTopologyProject("箭载双冗余拓扑", options);
+    const aerospaceOptions = intent.endSystemCount === undefined
+      ? options
+      : { ...options, aerospaceEndSystemCount: intent.endSystemCount };
+
+    return createAerospaceRedundantTopologyProject("箭载双冗余拓扑", aerospaceOptions);
   }
 
   return createLineTopologyProject(intent, "当前规划", options);
@@ -81,6 +91,11 @@ export function createAerospaceRedundantTopologyProject(
 ): CanonicalTsnProjectV0 {
   const scenarioConfig = resolveScenarioConfig(options.scenarioConfigId ?? "aerospace-onboard").config;
   const dataRateMbps = scenarioConfig.defaults.topology.dataRateMbps;
+  const endSystemCount = clampNumber(Number(options.aerospaceEndSystemCount ?? 7), 1, 24);
+  const leftEndSystemCount = Math.min(3, endSystemCount);
+  const middleEndSystemCount = Math.max(0, Math.min(2, endSystemCount - leftEndSystemCount));
+  const rightEndSystemCount = Math.max(0, endSystemCount - leftEndSystemCount - middleEndSystemCount);
+  const sw3PortCount = Math.max(6, rightEndSystemCount + 2);
   const now = new Date().toISOString();
   const nodes: TsnNode[] = [];
   const links: TsnLink[] = [];
@@ -122,34 +137,67 @@ export function createAerospaceRedundantTopologyProject(
     numericLinkId += 1;
   };
 
-  addNode({ id: "nic1", name: "网卡1", type: "endSystem", portCount: 2, position: { x: 30, y: 40 }, hostOrdinal: 1 });
-  addNode({ id: "nic2", name: "网卡2", type: "endSystem", portCount: 2, position: { x: 30, y: 160 }, hostOrdinal: 2 });
-  addNode({ id: "nic3", name: "网卡3", type: "endSystem", portCount: 2, position: { x: 30, y: 300 }, hostOrdinal: 3 });
+  for (let index = 1; index <= leftEndSystemCount; index += 1) {
+    addNode({
+      id: `nic${index}`,
+      name: `网卡${index}`,
+      type: "endSystem",
+      portCount: 2,
+      position: { x: 30, y: leftAerospaceY(index) },
+      hostOrdinal: index,
+    });
+  }
+
   addNode({ id: "sw1", name: "交换机1", type: "switch", portCount: 8, position: { x: 210, y: 55 } });
   addNode({ id: "sw2", name: "交换机2", type: "switch", portCount: 8, position: { x: 210, y: 195 } });
-  addNode({ id: "nic4", name: "网卡4", type: "endSystem", portCount: 2, position: { x: 380, y: 80 }, hostOrdinal: 4 });
-  addNode({ id: "nic5", name: "网卡5", type: "endSystem", portCount: 2, position: { x: 380, y: 210 }, hostOrdinal: 5 });
-  addNode({ id: "sw3", name: "交换机3", type: "switch", portCount: 6, position: { x: 590, y: 55 } });
-  addNode({ id: "sw4", name: "交换机4", type: "switch", portCount: 6, position: { x: 590, y: 195 } });
-  addNode({ id: "nic6", name: "网卡6", type: "endSystem", portCount: 2, position: { x: 760, y: 40 }, hostOrdinal: 6 });
-  addNode({ id: "nic7", name: "网卡7", type: "endSystem", portCount: 2, position: { x: 760, y: 195 }, hostOrdinal: 7 });
 
-  addLink("nic1", "p1", "sw1", "p1");
-  addLink("nic1", "p2", "sw2", "p1");
-  addLink("nic2", "p1", "sw1", "p2");
-  addLink("nic2", "p2", "sw2", "p2");
-  addLink("nic3", "p1", "sw1", "p3");
-  addLink("nic3", "p2", "sw2", "p3");
-  addLink("sw1", "p4", "nic4", "p1");
-  addLink("sw2", "p4", "nic4", "p2");
-  addLink("sw1", "p5", "nic5", "p1");
-  addLink("sw2", "p5", "nic5", "p2");
+  for (let offset = 0; offset < middleEndSystemCount; offset += 1) {
+    const ordinal = leftEndSystemCount + offset + 1;
+    addNode({
+      id: `nic${ordinal}`,
+      name: `网卡${ordinal}`,
+      type: "endSystem",
+      portCount: 2,
+      position: { x: 380, y: middleAerospaceY(offset) },
+      hostOrdinal: ordinal,
+    });
+  }
+
+  addNode({ id: "sw3", name: "交换机3", type: "switch", portCount: sw3PortCount, position: { x: 590, y: 55 } });
+  addNode({ id: "sw4", name: "交换机4", type: "switch", portCount: sw3PortCount, position: { x: 590, y: 195 } });
+
+  for (let offset = 0; offset < rightEndSystemCount; offset += 1) {
+    const ordinal = leftEndSystemCount + middleEndSystemCount + offset + 1;
+    addNode({
+      id: `nic${ordinal}`,
+      name: `网卡${ordinal}`,
+      type: "endSystem",
+      portCount: 2,
+      position: { x: 760, y: rightAerospaceY(offset) },
+      hostOrdinal: ordinal,
+    });
+  }
+
+  for (let ordinal = 1; ordinal <= leftEndSystemCount; ordinal += 1) {
+    addLink(`nic${ordinal}`, "p1", "sw1", `p${ordinal}`);
+    addLink(`nic${ordinal}`, "p2", "sw2", `p${ordinal}`);
+  }
+
+  for (let offset = 0; offset < middleEndSystemCount; offset += 1) {
+    const ordinal = leftEndSystemCount + offset + 1;
+    addLink("sw1", `p${ordinal}`, `nic${ordinal}`, "p1");
+    addLink("sw2", `p${ordinal}`, `nic${ordinal}`, "p2");
+  }
+
   addLink("sw1", "p6", "sw3", "p1");
   addLink("sw2", "p6", "sw4", "p1");
-  addLink("sw3", "p3", "nic6", "p1");
-  addLink("sw4", "p3", "nic6", "p2");
-  addLink("sw3", "p4", "nic7", "p1");
-  addLink("sw4", "p4", "nic7", "p2");
+
+  for (let offset = 0; offset < rightEndSystemCount; offset += 1) {
+    const ordinal = leftEndSystemCount + middleEndSystemCount + offset + 1;
+    const switchPort = offset + 3;
+    addLink("sw3", `p${switchPort}`, `nic${ordinal}`, "p1");
+    addLink("sw4", `p${switchPort}`, `nic${ordinal}`, "p2");
+  }
 
   const project: CanonicalTsnProjectV0 = {
     schemaVersion: "tsn-agent.canonical.v0",
@@ -502,6 +550,51 @@ function matchDistributedEndSystemCount(text: string, switchCount: number): stri
   return String(Math.max(1, Math.round(total / switches)));
 }
 
+function hasDistributedEndSystemTopologyRequest(text: string): boolean {
+  return /(\d+)\s*(?:个|台)?\s*(?:网卡|端系统|终端|端(?!口)|host|end)s?\s*(?:，|,|\s)*(?:平均)?(?:分配|分到|分布|接入|连接)\s*(?:到|至)?\s*(\d+)?\s*(?:个|台)?\s*(?:系统\s*)?(?:交换机|switch)/i.test(text);
+}
+
+function matchAerospaceNetworkcardCount(text: string, fallbackCount?: number): number | undefined {
+  const values: number[] = [];
+  const endpointPattern = "(?:网卡|端系统|终端|端(?!口))";
+  const totalPatterns = [
+    new RegExp(`(?:从|由)?\\s*[一二两三四五六七八九十\\d]+\\s*(?:个|块|张|台)?\\s*${endpointPattern}\\s*(?:改成|改为|变为|调整为|设为|改至|到)\\s*([一二两三四五六七八九十\\d]+)\\s*(?:个|块|张|台)?\\s*${endpointPattern}?`, "gi"),
+    new RegExp(`([一二两三四五六七八九十\\d]+)\\s*(?:个|块|张|台)?\\s*${endpointPattern}`, "gi"),
+  ];
+
+  for (const pattern of totalPatterns) {
+    for (const match of text.matchAll(pattern)) {
+      values.push(parseChineseNumber(match[1]));
+    }
+  }
+
+  for (const match of text.matchAll(/(?:网卡|端系统|终端|端(?!口))\s*([一二两三四五六七八九十\d]+)/gi)) {
+    values.push(parseChineseNumber(match[1]));
+  }
+
+  for (const match of text.matchAll(/(?:网卡|端系统|终端|端(?!口))\s*((?:[一二两三四五六七八九十\d]+\s*(?:、|,|，|和|及|与)?\s*)+)/gi)) {
+    for (const value of match[1].matchAll(/[一二两三四五六七八九十\d]+/g)) {
+      values.push(parseChineseNumber(value[0]));
+    }
+  }
+
+  const addMatch = text.match(/(?:再加|再添加|新增|添加|加|增加)\s*([一二两三四五六七八九十\d]+)\s*(?:个|块|张|台)?\s*(?:网卡|端系统|终端|端(?!口))/i);
+  const addedCount = parseChineseNumber(addMatch?.[1]);
+  if (addMatch && fallbackCount !== undefined && Number.isFinite(fallbackCount)) {
+    values.push(fallbackCount + addedCount);
+  }
+
+  const validValues = values.filter((value) => Number.isFinite(value) && value > 0);
+  return validValues.length > 0 ? Math.max(...validValues) : undefined;
+}
+
+function hasAerospaceTemplateEditRequest(text: string): boolean {
+  return /(?:网卡|端系统|终端|端(?!口))\s*[一二两三四五六七八九十\d]+/i.test(text)
+    || /(?:再加|再添加|新增|添加|加|增加|删除|移除|减少|改成|改为|调整|变为).*?(?:网卡|端系统|终端|端(?!口))/i.test(text)
+    || /(?:网卡|端系统|终端|端(?!口)).*?(?:再加|再添加|新增|添加|加|增加|删除|移除|减少|改成|改为|调整|变为)/i.test(text)
+    || /双冗余|双平面|系统交换机|双归属|双以太网/i.test(text);
+}
+
 function matchSwitchInterconnect(text: string): TopologyIntent["switchInterconnect"] | undefined {
   if (/环形|环网|ring/i.test(text) || /闭环/.test(text) && !/闭环\s*(?:控制)?流/.test(text)) {
     return "ring";
@@ -521,7 +614,7 @@ function inferIntentFromProject(project: CanonicalTsnProjectV0): TopologyIntent 
       endSystemsPerSwitch: 0,
       switchInterconnect: "line",
       topologyTemplate: "aerospace-redundant",
-      endSystemCount: 7,
+      endSystemCount: project.topology.nodes.filter((node) => node.type === "endSystem").length,
     };
   }
 
@@ -540,10 +633,13 @@ function inferIntentFromProject(project: CanonicalTsnProjectV0): TopologyIntent 
 
 function isAerospaceRedundantTopologyRequest(text: string, scenarioConfigId?: string): boolean {
   const hasAerospaceSignal = /箭载|航天|火箭|飞控|箭机|级间/i.test(text) || scenarioConfigId === "aerospace-onboard";
-  const hasRedundantSignal = /双冗余|双平面|系统交换机|双归属|双以太网|网卡[1-7]/i.test(text);
+  const hasRedundantSignal = /双冗余|双平面|系统交换机|双归属|双以太网|(?:网卡|端系统|终端|端(?!口))\s*[一二两三四五六七八九十\d]+/i.test(text);
   const hasDiagramScale = /4\s*(?:个|台)?\s*(?:系统\s*)?交换机/i.test(text)
-    && /7\s*(?:个|块|张|台)?\s*网卡/i.test(text);
-  const hasNamedDiagramNodes = /网卡1/.test(text) && /网卡7/.test(text) && /交换机1/.test(text) && /交换机4/.test(text);
+    && /7\s*(?:个|块|张|台)?\s*(?:网卡|端系统|终端|端(?!口))/i.test(text);
+  const hasNamedDiagramNodes = /(?:网卡|端系统|终端|端(?!口))\s*1/.test(text)
+    && /(?:网卡|端系统|终端|端(?!口))\s*7/.test(text)
+    && /交换机1/.test(text)
+    && /交换机4/.test(text);
 
   return hasNamedDiagramNodes || hasDiagramScale && hasRedundantSignal || hasAerospaceSignal && hasRedundantSignal;
 }
@@ -562,6 +658,18 @@ function createPorts(count: number): TsnPort[] {
     name: `eth${index}`,
     index,
   }));
+}
+
+function leftAerospaceY(ordinal: number): number {
+  return [40, 160, 300][ordinal - 1] ?? 40 + (ordinal - 1) * 120;
+}
+
+function middleAerospaceY(offset: number): number {
+  return [80, 210][offset] ?? 80 + offset * 130;
+}
+
+function rightAerospaceY(offset: number): number {
+  return [40, 195][offset] ?? 40 + offset * 95;
 }
 
 function createLink(input: {

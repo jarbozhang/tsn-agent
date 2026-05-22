@@ -10,9 +10,10 @@ export function exportOmnetppIni(project: CanonicalTsnProjectV0): string {
     `sim-time-limit = ${suggestSimulationLimit(project)}`,
     "cmdenv-interactive = false",
     "cmdenv-express-mode = true",
+    "include traffic.ini",
     "",
-    "# TSN Agent 仅生成最小可加载 INET 配置。",
-    "# gPTP、TAS/GCL、CBS、ATS、FRER 和真实流应用配置由后续 inet-export skill 扩展。",
+    "# TSN Agent 仅生成可加载拓扑和第一版 UDP 业务流配置。",
+    "# gPTP、TAS/GCL、CBS、ATS、FRER 和规划结果回写由后续 inet-export skill 扩展。",
     "",
   ].join("\n");
 }

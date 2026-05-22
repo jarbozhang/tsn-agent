@@ -16,6 +16,13 @@ const AEROSPACE_TOPOLOGY_PROMPT = [
   "主干链路为交换机1连接交换机3、交换机2连接交换机4，2台系统交换机为独立单机，不相互级联，链路速率不小于1000Mbps。",
 ].join("");
 
+const AEROSPACE_ENDPOINT_TOPOLOGY_PROMPT = [
+  "采用双冗余链路和两组系统交换机。",
+  "创建4台交换机和7个端系统，交换机1、交换机2为左侧系统交换机，交换机3、交换机4为右侧系统交换机。",
+  "端1、端2、端3、端4、端5分别双归属连接交换机1和交换机2；端6、端7分别双归属连接交换机3和交换机4。",
+  "主干链路为交换机1连接交换机3、交换机2连接交换机4，2台系统交换机为独立单机，不相互级联，链路速率不小于1000Mbps。",
+].join("");
+
 const AEROSPACE_FLOW_PROMPT = [
   "基于箭载TSN流量特征做流量规划：",
   "生成时序控制消息，周期1ms，需要同步，延迟约束，不允许丢包，8-10字节，高关键性；",
@@ -132,6 +139,18 @@ describe("topology factory", () => {
     });
   });
 
+  it("treats endpoint wording as networkcards in aerospace redundant topology prompts", () => {
+    expect(parseTopologyIntent(AEROSPACE_ENDPOINT_TOPOLOGY_PROMPT, undefined, {
+      scenarioConfigId: "generic-tsn",
+    })).toEqual({
+      switchCount: 4,
+      endSystemsPerSwitch: 0,
+      switchInterconnect: "line",
+      topologyTemplate: "aerospace-redundant",
+      endSystemCount: 7,
+    });
+  });
+
   it("creates the pictured aerospace redundant topology before the flow stage", () => {
     const project = createProjectFromIntent(AEROSPACE_TOPOLOGY_PROMPT, undefined, {
       scenarioConfigId: "aerospace-onboard",
@@ -173,6 +192,61 @@ describe("topology factory", () => {
       ["sw3", "nic7"],
       ["sw4", "nic7"],
     ]);
+    expect(validateCanonicalProject(project)).toEqual({ ok: true, errors: [] });
+  });
+
+  it("does not let the '2 system switches are standalone' sentence overwrite the 4-switch aerospace scale", () => {
+    const project = createProjectFromIntent(AEROSPACE_ENDPOINT_TOPOLOGY_PROMPT, undefined, {
+      scenarioConfigId: "generic-tsn",
+      includeControlFlow: false,
+    });
+
+    expect(project.topology.nodes.filter(isSwitch)).toHaveLength(4);
+    expect(project.topology.nodes.filter(isEndSystem)).toHaveLength(7);
+    expect(project.topology.links).toHaveLength(16);
+    expect(project.id).toBe("project-aerospace-redundant");
+  });
+
+  it("updates the aerospace redundant topology when adding networkcards 8 and 9", () => {
+    const fallback = parseTopologyIntent(AEROSPACE_TOPOLOGY_PROMPT, undefined, {
+      scenarioConfigId: "aerospace-onboard",
+    });
+    const intent = parseTopologyIntent("交换机3和4那里，我希望再添加网卡8和9", fallback, {
+      scenarioConfigId: "aerospace-onboard",
+    });
+    const project = createProjectFromIntent("交换机3和4那里，我希望再添加网卡8和9", fallback, {
+      scenarioConfigId: "aerospace-onboard",
+      includeControlFlow: false,
+    });
+
+    expect(intent).toEqual({
+      switchCount: 4,
+      endSystemsPerSwitch: 0,
+      switchInterconnect: "line",
+      topologyTemplate: "aerospace-redundant",
+      endSystemCount: 9,
+    });
+    expect(project.topology.nodes.filter(isSwitch)).toHaveLength(4);
+    expect(project.topology.nodes.filter(isEndSystem).map((node) => node.name)).toEqual([
+      "网卡1",
+      "网卡2",
+      "网卡3",
+      "网卡4",
+      "网卡5",
+      "网卡6",
+      "网卡7",
+      "网卡8",
+      "网卡9",
+    ]);
+    expect(project.topology.links).toHaveLength(20);
+    expect(project.topology.links.map((link) => [link.source.nodeId, link.source.portId, link.target.nodeId, link.target.portId])).toEqual(
+      expect.arrayContaining([
+        ["sw3", "p5", "nic8", "p1"],
+        ["sw4", "p5", "nic8", "p2"],
+        ["sw3", "p6", "nic9", "p1"],
+        ["sw4", "p6", "nic9", "p2"],
+      ]),
+    );
     expect(validateCanonicalProject(project)).toEqual({ ok: true, errors: [] });
   });
 

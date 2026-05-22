@@ -29,6 +29,7 @@ pub struct ClaudeAgentResponse {
     assistant_text: String,
     session_id: Option<String>,
     stage_results: Vec<serde_json::Value>,
+    audit_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,6 +39,7 @@ struct ClaudeWorkerResponse {
     session_id: Option<String>,
     #[serde(default)]
     stage_results: Vec<serde_json::Value>,
+    audit_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -50,6 +52,7 @@ struct ClaudeWorkerEvent {
     assistant_text: Option<String>,
     #[serde(default)]
     stage_results: Vec<serde_json::Value>,
+    audit_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -83,6 +86,7 @@ fn run_claude_agent_blocking(
     let cwd = repo_root_from_worker(&worker_path);
     let run_id = request.run_id.clone().unwrap_or_else(create_run_id);
     let app_session_id = request.app_session_id.clone();
+    let audit_dir = agent_audit_dir(&app);
     let prompt_chars = request.prompt.chars().count();
     let context_chars = request
         .conversation_context
@@ -101,12 +105,15 @@ fn run_claude_agent_blocking(
             "hasResumeSession": request.resume_session_id.is_some(),
             "promptChars": prompt_chars,
             "contextChars": context_chars,
+            "auditDir": audit_dir.as_ref().map(|path| path.display().to_string()),
         }),
     );
     let payload = serde_json::json!({
         "prompt": request.prompt,
         "cwd": cwd,
         "runId": run_id,
+        "appSessionId": request.app_session_id,
+        "auditDir": audit_dir,
         "resumeSessionId": request.resume_session_id,
         "conversationContext": request.conversation_context,
         "stageRunnerInput": request.stage_runner_input,
@@ -260,6 +267,7 @@ fn run_claude_agent_blocking(
             "assistantChars": final_response.assistant_text.chars().count(),
             "stdoutLines": stdout_lines.len(),
             "stderrLines": stderr_lines.len(),
+            "auditPath": final_response.audit_path,
         }),
     );
 
@@ -288,6 +296,7 @@ fn parse_worker_output(stdout: &str) -> Result<ClaudeAgentResponse, String> {
         assistant_text,
         session_id: parsed.session_id,
         stage_results: parsed.stage_results,
+        audit_path: parsed.audit_path,
     })
 }
 
@@ -419,12 +428,20 @@ fn handle_worker_line(
                 assistant_text,
                 session_id: parsed.session_id,
                 stage_results: parsed.stage_results,
+                audit_path: parsed.audit_path,
             });
         }
         _ => {}
     }
 
     Ok(())
+}
+
+fn agent_audit_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|path| path.join("agent-runs"))
 }
 
 fn log_worker_event(
@@ -501,6 +518,16 @@ fn emit_claude_event(
 }
 
 fn find_worker_path(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir
+        .parent()
+        .ok_or_else(|| "无法定位项目根目录。".to_string())?;
+    let development_worker_path = repo_root.join("src-node/dist/claude-agent-worker.mjs");
+
+    if cfg!(debug_assertions) && development_worker_path.exists() {
+        return Ok(development_worker_path);
+    }
+
     if let Some(app) = app {
         if let Ok(resource_path) = app
             .path()
@@ -512,19 +539,13 @@ fn find_worker_path(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
         }
     }
 
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest_dir
-        .parent()
-        .ok_or_else(|| "无法定位项目根目录。".to_string())?;
-    let worker_path = repo_root.join("src-node/dist/claude-agent-worker.mjs");
-
-    if worker_path.exists() {
-        return Ok(worker_path);
+    if development_worker_path.exists() {
+        return Ok(development_worker_path);
     }
 
     Err(format!(
         "未找到智能助手运行时 worker：{}。请先运行 npm run build:worker。",
-        worker_path.display()
+        development_worker_path.display()
     ))
 }
 
@@ -699,6 +720,19 @@ mod tests {
         let tauri_config = std::fs::read_to_string(tauri_config_path).expect("tauri config");
 
         assert!(tauri_config.contains("../.claude/skills/tsn-topology/SKILL.md"));
+        assert!(tauri_config.contains("../.claude/skills/tsn-topology/package.json"));
+        assert!(tauri_config.contains("../.claude/skills/tsn-topology/docs/rules.md"));
+        assert!(tauri_config.contains("../.claude/skills/tsn-topology/tools/topology-builder.js"));
+        assert!(tauri_config
+            .contains("../.claude/skills/tsn-topology/tools/validate-topology.js"));
+        assert!(tauri_config.contains(
+            "../.claude/skills/tsn-topology/tools/validate-mac-forwarding-table.js"
+        ));
+        assert!(tauri_config
+            .contains("../.claude/skills/tsn-topology/tools/render-mac-forwarding-html.js"));
+        assert!(
+            tauri_config.contains("../.claude/skills/tsn-topology/tools/run-topology-skill.js")
+        );
         assert!(tauri_config.contains("../.claude/skills/tsn-flow-planning/SKILL.md"));
     }
 

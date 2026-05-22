@@ -51,7 +51,7 @@ describe("runTsnAgent", () => {
     expect(result.project.flows).toHaveLength(0);
   });
 
-  it("uses Claude output in Tauri while keeping deterministic artifacts", async () => {
+  it("does not apply a local topology candidate when a first topology run returns text without a structured stage result", async () => {
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
       value: {},
@@ -70,7 +70,7 @@ describe("runTsnAgent", () => {
         prompt: "我需要4个交换机，每个交换机连接5个端系统",
         runId: expect.stringMatching(/^agent-run-/),
         appSessionId: undefined,
-        conversationContext: expect.stringContaining("交换机：4"),
+        conversationContext: expect.not.stringContaining("本地预解析候选"),
         resumeSessionId: undefined,
         stageRunnerInput: expect.objectContaining({
           userIntent: "我需要4个交换机，每个交换机连接5个端系统",
@@ -86,18 +86,58 @@ describe("runTsnAgent", () => {
     });
     expect(invokeMock).toHaveBeenCalledWith("run_claude_agent", {
       request: expect.objectContaining({
-        conversationContext: expect.stringContaining("交换机互联：线型互联"),
+        conversationContext: expect.stringContaining("当前还没有生成 canonical TSN project"),
       }),
     });
+    expect(result.project.topology.nodes).toHaveLength(24);
+    expect(result.project.topology.links).toHaveLength(23);
+    expect(result.workflow.stages.topology.status).toBe("waiting_confirmation");
+    expect(result.assistantText).toContain("没有拿到可应用的结构化结果");
+    expect(result.assistantText).toContain("不会自动 fallback 到默认拓扑");
+    expect(result.claudeSessionId).toBe("claude-session-1");
+    expect(result.shouldApplyProject).toBe(false);
+    expect(result.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "error",
+          content: expect.stringContaining("右侧工程暂不落图"),
+        }),
+      ]),
+    );
+  });
+
+  it("does not apply the corrected local aerospace topology candidate when Claude skips the topology runner", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    invokeMock.mockResolvedValue({
+      assistantText: "已识别 4 台交换机和 7 个端系统。",
+      sessionId: "claude-session-no-stage",
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent([
+      "采用双冗余链路和两组系统交换机。",
+      "创建4台交换机和7个端系统，交换机1、交换机2为左侧系统交换机，交换机3、交换机4为右侧系统交换机。",
+      "端1、端2、端3、端4、端5分别双归属连接交换机1和交换机2；端6、端7分别双归属连接交换机3和交换机4。",
+      "主干链路为交换机1连接交换机3、交换机2连接交换机4，2台系统交换机为独立单机，不相互级联，链路速率不小于1000Mbps。",
+    ].join(""));
+
+    expect(result.mode).toBe("claude");
     expect(invokeMock).toHaveBeenCalledWith("run_claude_agent", {
       request: expect.objectContaining({
-        conversationContext: expect.stringContaining("流：尚未生成"),
+        prompt: expect.stringContaining("创建4台交换机和7个端系统"),
+        conversationContext: expect.not.stringContaining("端系统：7"),
       }),
     });
-    expect(result.assistantText).toBe("智能助手已识别拓扑需求。");
-    expect(result.claudeSessionId).toBe("claude-session-1");
-    expect(result.project.topology.nodes).toHaveLength(24);
-    expect(result.project.flows).toHaveLength(0);
+    expect(result.project.id).toBe("project-aerospace-redundant");
+    expect(result.project.topology.nodes.filter((node) => node.type === "switch")).toHaveLength(4);
+    expect(result.project.topology.nodes.filter((node) => node.type === "endSystem")).toHaveLength(7);
+    expect(result.project.topology.links).toHaveLength(16);
+    expect(result.workflow.stages.topology.status).toBe("waiting_confirmation");
+    expect(result.shouldApplyProject).toBe(false);
+    expect(result.assistantText).toContain("没有拿到可应用的结构化结果");
   });
 
   it("applies a validated topology stage result from the worker", async () => {
@@ -127,7 +167,7 @@ describe("runTsnAgent", () => {
       expect.arrayContaining([
         expect.objectContaining({
           kind: "tool-availability",
-          content: expect.stringContaining("Bash、Edit、Write"),
+          content: expect.stringContaining("Read、Bash、Edit、Write"),
         }),
         expect.objectContaining({
           kind: "skill-result",
@@ -210,7 +250,7 @@ describe("runTsnAgent", () => {
     );
   });
 
-  it("uses the current deterministic fallback when a worker stage result fails validation", async () => {
+  it("keeps the previous project when a worker stage result fails validation", async () => {
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
       value: {},
@@ -254,12 +294,62 @@ describe("runTsnAgent", () => {
       },
     });
 
-    expect(result.project.topology.nodes).toHaveLength(24);
+    expect(result.project.topology.nodes).toHaveLength(12);
+    expect(result.shouldApplyProject).toBe(false);
+    expect(result.assistantText).toContain("不会自动 fallback 到默认拓扑");
     expect(result.events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "error",
-          content: expect.stringContaining("已使用本地 fallback"),
+          content: expect.stringContaining("已保留当前工程状态"),
+        }),
+      ]),
+    );
+  });
+
+  it("rejects a stale topology skill result when the user adds networkcards 8 and 9", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    const previousProject = createProjectFromIntent("我需要4台交换机和7个网卡，采用双冗余系统交换机拓扑", undefined, {
+      scenarioConfigId: "aerospace-onboard",
+      includeControlFlow: false,
+    });
+    const staleStageResult = runTopologyStage({
+      userIntent: "我需要4台交换机和7个网卡，采用双冗余系统交换机拓扑",
+      scenarioConfigId: "aerospace-onboard",
+    });
+    invokeMock.mockResolvedValue({
+      assistantText: "已添加网卡8和9。",
+      sessionId: "claude-session-stale-aerospace",
+      stageResults: [staleStageResult],
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "交换机3和4那里，我希望再添加网卡8和9",
+      session: {
+        id: "session-stale-aerospace",
+        title: "箭载双冗余拓扑",
+        createdAt: "2026-05-20T00:00:00.000Z",
+        updatedAt: "2026-05-20T00:00:00.000Z",
+        messages: [],
+        agentEvents: [],
+        workflow: createInitialWorkflowState("aerospace-onboard"),
+        project: previousProject,
+      },
+    });
+
+    expect(result.project.topology.nodes.filter((node) => node.type === "endSystem")).toHaveLength(7);
+    expect(result.project.topology.links).toHaveLength(16);
+    expect(result.shouldApplyProject).toBe(false);
+    expect(result.assistantText).toContain("不会自动 fallback 到默认拓扑");
+    expect(result.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "error",
+          content: expect.stringContaining("用户请求 9 个网卡/端系统"),
         }),
       ]),
     );
@@ -522,21 +612,22 @@ describe("runTsnAgent", () => {
       },
     });
 
-    expect(ring.project.topology.nodes).toHaveLength(16);
-    expect(ring.project.topology.links).toHaveLength(16);
+    expect(ring.project.topology.nodes).toHaveLength(18);
+    expect(ring.project.topology.links).toHaveLength(17);
     expect(invokeMock).toHaveBeenLastCalledWith("run_claude_agent", {
       request: expect.objectContaining({
-        conversationContext: expect.stringContaining("交换机：4"),
+        conversationContext: expect.stringContaining("交换机：3"),
       }),
     });
     expect(invokeMock).toHaveBeenLastCalledWith("run_claude_agent", {
       request: expect.objectContaining({
-        conversationContext: expect.stringContaining("端系统：12"),
+        conversationContext: expect.stringContaining("端系统：15"),
       }),
     });
     expect(invokeMock).toHaveBeenLastCalledWith("run_claude_agent", {
       request: expect.objectContaining({
-        conversationContext: expect.stringContaining("交换机互联：环形互联"),
+        conversationContext: expect.stringContaining("交换机互联：线型互联"),
+        prompt: "可以使用环形互联",
       }),
     });
   });
@@ -637,6 +728,50 @@ describe("runTsnAgent", () => {
     expect(result.assistantText).not.toContain("配置控制流");
   });
 
+  it("treats confirming the prior topology understanding as a boundary confirmation", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    invokeMock.mockResolvedValue({
+      assistantText: "不应该调用远程 agent",
+      sessionId: "claude-session-unexpected",
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+    const topologyProject = createProjectFromIntent(
+      "采用双冗余链路和两组系统交换机。创建4台交换机和7个端系统，端1、端2、端3、端4、端5分别双归属连接交换机1和交换机2；端6、端7分别双归属连接交换机3和交换机4。",
+      undefined,
+      { includeControlFlow: false },
+    );
+    const workflow = createInitialWorkflowState();
+    workflow.currentStep = "topology";
+    workflow.stages.topology = {
+      ...workflow.stages.topology,
+      status: "waiting_confirmation",
+      summary: "识别到箭载双冗余拓扑：4 个交换机，7 个网卡。",
+    };
+
+    const result = await runTsnAgent({
+      userIntent: "理解的对，按照上面的理解更新拓扑",
+      session: {
+        id: "session-confirm-understanding",
+        title: "阶段会话",
+        createdAt: "2026-05-20T00:00:00.000Z",
+        updatedAt: "2026-05-20T00:00:00.000Z",
+        messages: [],
+        agentEvents: [],
+        workflow,
+        project: topologyProject,
+      },
+    });
+
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(result.mode).toBe("fake");
+    expect(result.workflow.currentStep).toBe("time-sync");
+    expect(result.project.topology.nodes.filter((node) => node.type === "switch")).toHaveLength(4);
+    expect(result.project.topology.nodes.filter((node) => node.type === "endSystem")).toHaveLength(7);
+  });
+
   it("does not send simulation requests to Claude because no runner is implemented", async () => {
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
@@ -667,7 +802,7 @@ describe("runTsnAgent", () => {
     expect(result.assistantText).toContain("不会在后台启动仿真");
   });
 
-  it("falls back to fake output when Claude command fails", async () => {
+  it("reports an error without applying a default topology when Claude command fails", async () => {
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
       value: {},
@@ -677,12 +812,14 @@ describe("runTsnAgent", () => {
 
     const result = await runTsnAgent("我需要4个交换机，每个交换机连接5个端系统");
 
-    expect(result.mode).toBe("fake");
-    expect(result.assistantText).toContain("本机智能助手暂时不可用");
-    expect(result.assistantText).not.toContain("failed");
+    expect(result.mode).toBe("claude");
+    expect(result.shouldApplyProject).toBe(false);
+    expect(result.assistantText).toContain("没有拿到可应用的结构化结果");
+    expect(result.assistantText).toContain("不会自动 fallback 到默认拓扑");
+    expect(result.assistantText).toContain("智能助手执行失败");
   });
 
-  it("normalizes Error objects when Claude command fails", async () => {
+  it("keeps the previous project when Claude command fails during a topology edit", async () => {
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
       value: {},
@@ -690,10 +827,28 @@ describe("runTsnAgent", () => {
     invokeMock.mockRejectedValue(new Error("sdk failed"));
     const { runTsnAgent } = await import("./agent-adapter");
 
-    const result = await runTsnAgent("我需要4个交换机，每个交换机连接5个端系统");
+    const previousProject = createProjectFromIntent("我需要3个交换机，每个交换机连接3个端系统", undefined, {
+      includeControlFlow: false,
+    });
+    const result = await runTsnAgent({
+      userIntent: "改成4个交换机，每个交换机连接5个端系统",
+      session: {
+        id: "session-claude-fail",
+        title: "已有拓扑",
+        createdAt: "2026-05-20T00:00:00.000Z",
+        updatedAt: "2026-05-20T00:00:00.000Z",
+        messages: [],
+        agentEvents: [],
+        workflow: createInitialWorkflowState(),
+        project: previousProject,
+      },
+    });
 
-    expect(result.mode).toBe("fake");
-    expect(result.assistantText).toContain("本机智能助手暂时不可用");
-    expect(result.assistantText).not.toContain("sdk failed");
+    expect(result.mode).toBe("claude");
+    expect(result.project).toBe(previousProject);
+    expect(result.project.topology.nodes).toHaveLength(12);
+    expect(result.shouldApplyProject).toBe(false);
+    expect(result.assistantText).toContain("不会自动 fallback 到默认拓扑");
+    expect(result.assistantText).toContain("sdk failed");
   });
 });

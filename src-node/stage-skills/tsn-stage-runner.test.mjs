@@ -1,15 +1,26 @@
-import { mkdtemp, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { STAGE_SKILL_SCHEMA_VERSION } from "../../src/agent/stage-skill-contract";
 import { createProjectFromIntent } from "../../src/domain/topology-factory";
 import { runCli, runFlowPlanningStage, runTopologyStage } from "./tsn-stage-runner";
 
+const execFileAsync = promisify(execFile);
+
 const AEROSPACE_TOPOLOGY_PROMPT = [
   "基于箭载TSN技术规范创建图示拓扑：采用双冗余链路和两组系统交换机。",
   "创建4台交换机和7个网卡，交换机1、交换机2为左侧系统交换机，交换机3、交换机4为右侧系统交换机。",
   "网卡1、网卡2、网卡3、网卡4、网卡5分别双归属连接交换机1和交换机2；网卡6、网卡7分别双归属连接交换机3和交换机4。",
+  "主干链路为交换机1连接交换机3、交换机2连接交换机4，2台系统交换机为独立单机，不相互级联，链路速率不小于1000Mbps。",
+].join("");
+
+const AEROSPACE_ENDPOINT_TOPOLOGY_PROMPT = [
+  "采用双冗余链路和两组系统交换机。",
+  "创建4台交换机和7个端系统，交换机1、交换机2为左侧系统交换机，交换机3、交换机4为右侧系统交换机。",
+  "端1、端2、端3、端4、端5分别双归属连接交换机1和交换机2；端6、端7分别双归属连接交换机3和交换机4。",
   "主干链路为交换机1连接交换机3、交换机2连接交换机4，2台系统交换机为独立单机，不相互级联，链路速率不小于1000Mbps。",
 ].join("");
 
@@ -92,6 +103,19 @@ describe("tsn-stage-runner", () => {
     ]);
   });
 
+  it("keeps endpoint wording on the aerospace redundant topology path", () => {
+    const result = runTopologyStage({
+      userIntent: AEROSPACE_ENDPOINT_TOPOLOGY_PROMPT,
+      scenarioConfigId: "generic-tsn",
+    });
+
+    expect(result.summary).toContain("箭载双冗余拓扑");
+    expect(result.summary).toContain("7 个网卡");
+    expect(result.payload.project.id).toBe("project-aerospace-redundant");
+    expect(result.payload.project.topology.nodes).toHaveLength(11);
+    expect(result.payload.project.topology.links).toHaveLength(16);
+  });
+
   it("writes the result to the requested result path without stdout coupling", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tsn-stage-runner-"));
     const resultPath = join(dir, "result.json");
@@ -108,6 +132,337 @@ describe("tsn-stage-runner", () => {
     const result = JSON.parse(await readFile(resultPath, "utf8"));
     expect(result.stage).toBe("topology");
     expect(result.payload.project.topology.nodes).toHaveLength(6);
+  });
+
+  it("imports complete tsn-topology skill artifacts into the canonical project", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tsn-stage-runner-skill-"));
+    const resultPath = join(dir, "result.json");
+    const skillOutputDir = join(dir, "skill-output");
+
+    await mkdir(skillOutputDir, { recursive: true });
+    await writeFile(
+      join(skillOutputDir, "topology.json"),
+      JSON.stringify({
+        node: {
+          nodes: [
+            { imac: 100, sync_name: "0", x: 0, y: 0, node_type: "networkcard" },
+            { imac: 101, sync_name: "1", x: 100, y: 0, node_type: "switch" },
+            { imac: 102, sync_name: "2", x: 200, y: 0, node_type: "networkcard" },
+          ],
+          links: [
+            { name: "0:0-1:0", styles: { leftLabel: "0", rightLabel: "0", speed: 1000 }, imac: 100, addr: 101 },
+            { name: "2:0-1:1", styles: { leftLabel: "0", rightLabel: "1", speed: 1000 }, imac: 102, addr: 101 },
+          ],
+        },
+        refs: {},
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(skillOutputDir, "data-server.json"),
+      JSON.stringify({
+        version: "2.0",
+        refs: {},
+        datas: [
+          { _className: "Q.Node", id: 100, src_imac: 100, display_name: "ES0", node_type: "networkcard", mac_address: "00:00:23:00:00:00", ip: "192.168.0.0", port_count: 1 },
+          { _className: "Q.Node", id: 101, src_imac: 101, display_name: "SW0", node_type: "switch", port_count: 4 },
+          { _className: "Q.Node", id: 102, src_imac: 102, display_name: "ES1", node_type: "networkcard", mac_address: "00:00:23:00:00:02", ip: "192.168.0.2", port_count: 1 },
+        ],
+        scale: 1,
+      }),
+      "utf8",
+    );
+
+    await runCli([
+      "--stage",
+      "topology",
+      "--input",
+      JSON.stringify({ userIntent: "生成一个星型拓扑" }),
+      "--skill-output-dir",
+      skillOutputDir,
+      "--result-path",
+      resultPath,
+    ]);
+
+    const result = JSON.parse(await readFile(resultPath, "utf8"));
+    expect(result.summary).toContain("tsn-topology skill 已生成");
+    expect(result.payload.project.id).toBe("project-tsn-topology-skill");
+    expect(result.payload.project.topology.nodes.map((node) => node.id)).toEqual(["es1-1", "sw1", "es1-2"]);
+    expect(result.payload.project.topology.nodes.map((node) => node.name)).toEqual(["ES0", "SW0", "ES1"]);
+    expect(result.payload.project.topology.links).toEqual([
+      expect.objectContaining({
+        source: { nodeId: "es1-1", portId: "p1" },
+        target: { nodeId: "sw1", portId: "p1" },
+        dataRateMbps: 1000,
+      }),
+      expect.objectContaining({
+        source: { nodeId: "es1-2", portId: "p1" },
+        target: { nodeId: "sw1", portId: "p2" },
+        dataRateMbps: 1000,
+      }),
+    ]);
+  });
+
+  it("runs the complete tsn-topology skill tool for a 9-networkcard dual-homed topology", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tsn-topology-skill-runner-"));
+    const intermediatePath = join(dir, "intermediate.json");
+    const skillOutputDir = join(dir, "skill-output");
+    const resultPath = join(dir, "result.json");
+    const switches = [
+      { node_id: 3, node_type: "switch", display_name: "交换机1" },
+      { node_id: 4, node_type: "switch", display_name: "交换机2" },
+      { node_id: 5, node_type: "switch", display_name: "交换机3" },
+      { node_id: 6, node_type: "switch", display_name: "交换机4" },
+    ];
+    const networkcards = Array.from({ length: 9 }, (_, index) => ({
+      node_id: index + 10,
+      node_type: "networkcard",
+      display_name: `网卡${index + 1}`,
+    }));
+    const links = [
+      ...[10, 11, 12, 13, 14].flatMap((nodeId, index) => [
+        { src: nodeId, src_port: 0, dst: 3, dst_port: index, speed: 1000 },
+        { src: nodeId, src_port: 1, dst: 4, dst_port: index, speed: 1000 },
+      ]),
+      { src: 3, src_port: 5, dst: 5, dst_port: 0, speed: 1000 },
+      { src: 4, src_port: 5, dst: 6, dst_port: 0, speed: 1000 },
+      ...[15, 16, 17, 18].flatMap((nodeId, index) => [
+        { src: nodeId, src_port: 0, dst: 5, dst_port: index + 2, speed: 1000 },
+        { src: nodeId, src_port: 1, dst: 6, dst_port: index + 2, speed: 1000 },
+      ]),
+    ];
+
+    await writeFile(
+      intermediatePath,
+      JSON.stringify({
+        nodes: [...switches, ...networkcards],
+        links,
+      }, null, 2),
+      "utf8",
+    );
+
+    await execFileAsync(process.execPath, [
+      resolve(".claude/skills/tsn-topology/tools/run-topology-skill.js"),
+      intermediatePath,
+    ], {
+      env: {
+        ...process.env,
+        TSN_AGENT_SKILL_OUTPUT_DIR: skillOutputDir,
+      },
+      maxBuffer: 1024 * 1024,
+    });
+
+    await runCli([
+      "--stage",
+      "topology",
+      "--input",
+      JSON.stringify({ userIntent: "交换机3和4那里，我希望再添加网卡8和9" }),
+      "--skill-output-dir",
+      skillOutputDir,
+      "--result-path",
+      resultPath,
+    ]);
+
+    const result = JSON.parse(await readFile(resultPath, "utf8"));
+    expect(result.summary).toContain("9 个端系统");
+    expect(result.payload.project.topology.nodes).toHaveLength(13);
+    expect(result.payload.project.topology.nodes.filter((node) => node.type === "endSystem")).toHaveLength(9);
+    expect(result.payload.project.topology.links).toHaveLength(20);
+    expect(result.payload.project.topology.nodes.map((node) => node.name)).toEqual([
+      "交换机1",
+      "交换机2",
+      "交换机3",
+      "交换机4",
+      "网卡1",
+      "网卡2",
+      "网卡3",
+      "网卡4",
+      "网卡5",
+      "网卡6",
+      "网卡7",
+      "网卡8",
+      "网卡9",
+    ]);
+  });
+
+  it("uses the generic topology layout when the skill output omits coordinates", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tsn-topology-default-layout-"));
+    const intermediatePath = join(dir, "intermediate.json");
+    const skillOutputDir = join(dir, "skill-output");
+
+    await writeFile(
+      intermediatePath,
+      JSON.stringify({
+        nodes: [
+          { node_id: 1, node_type: "switch", display_name: "交换机1" },
+          { node_id: 2, node_type: "switch", display_name: "交换机2" },
+          { node_id: 10, node_type: "networkcard", display_name: "端系统1" },
+          { node_id: 11, node_type: "networkcard", display_name: "端系统2" },
+          { node_id: 12, node_type: "networkcard", display_name: "端系统3" },
+          { node_id: 13, node_type: "networkcard", display_name: "端系统4" },
+        ],
+        links: [
+          { src: 10, src_port: 0, dst: 1, dst_port: 0, speed: 1000 },
+          { src: 11, src_port: 0, dst: 1, dst_port: 1, speed: 1000 },
+          { src: 12, src_port: 0, dst: 2, dst_port: 0, speed: 1000 },
+          { src: 13, src_port: 0, dst: 2, dst_port: 1, speed: 1000 },
+          { src: 1, src_port: 2, dst: 2, dst_port: 2, speed: 1000 },
+        ],
+      }, null, 2),
+      "utf8",
+    );
+
+    await execFileAsync(process.execPath, [
+      resolve(".claude/skills/tsn-topology/tools/run-topology-skill.js"),
+      intermediatePath,
+    ], {
+      env: {
+        ...process.env,
+        TSN_AGENT_SKILL_OUTPUT_DIR: skillOutputDir,
+      },
+      maxBuffer: 1024 * 1024,
+    });
+
+    const topology = JSON.parse(await readFile(join(skillOutputDir, "topology.json"), "utf8"));
+    const positionsBySyncName = new Map(
+      topology.node.nodes.map((node) => [node.sync_name, { x: node.x, y: node.y }]),
+    );
+
+    expect(positionsBySyncName.get("1")).toEqual({ x: 80, y: 220 });
+    expect(positionsBySyncName.get("2")).toEqual({ x: 380, y: 220 });
+    expect(positionsBySyncName.get("10")).toEqual({ x: 80, y: 70 });
+    expect(positionsBySyncName.get("11")).toEqual({ x: 142, y: 390 });
+    expect(positionsBySyncName.get("12")).toEqual({ x: 380, y: 70 });
+    expect(positionsBySyncName.get("13")).toEqual({ x: 442, y: 390 });
+  });
+
+  it("rejects distributed skill topology output when switch interconnect links are missing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tsn-topology-missing-switch-links-"));
+    const intermediatePath = join(dir, "intermediate.json");
+    const skillOutputDir = join(dir, "skill-output");
+    const resultPath = join(dir, "result.json");
+    const nodes = [
+      ...Array.from({ length: 4 }, (_, index) => ({
+        node_id: index,
+        node_type: "switch",
+        display_name: `SW${index}`,
+      })),
+      ...Array.from({ length: 20 }, (_, index) => ({
+        node_id: index + 4,
+        node_type: "networkcard",
+        display_name: `ES${index}`,
+      })),
+    ];
+    const links = Array.from({ length: 20 }, (_, index) => {
+      const switchIndex = Math.floor(index / 5);
+      return {
+        src: index + 4,
+        src_port: 0,
+        dst: switchIndex,
+        dst_port: index % 5,
+        speed: 1000,
+      };
+    });
+
+    await writeFile(
+      intermediatePath,
+      JSON.stringify({ nodes, links }, null, 2),
+      "utf8",
+    );
+
+    await execFileAsync(process.execPath, [
+      resolve(".claude/skills/tsn-topology/tools/run-topology-skill.js"),
+      intermediatePath,
+    ], {
+      env: {
+        ...process.env,
+        TSN_AGENT_SKILL_OUTPUT_DIR: skillOutputDir,
+      },
+      maxBuffer: 1024 * 1024,
+    });
+
+    await runCli([
+      "--stage",
+      "topology",
+      "--input",
+      JSON.stringify({ userIntent: "我需要4个交换机，每个交换机连接5个端系统" }),
+      "--skill-output-dir",
+      skillOutputDir,
+      "--result-path",
+      resultPath,
+    ]);
+
+    const result = JSON.parse(await readFile(resultPath, "utf8"));
+    expect(result.status).toBe("failed");
+    expect(result.validation.ok).toBe(false);
+    expect(result.validation.errors.join("；")).toContain("缺少交换机互联链路");
+  });
+
+  it("accepts distributed skill topology output with default line switch interconnect links", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tsn-topology-with-switch-links-"));
+    const intermediatePath = join(dir, "intermediate.json");
+    const skillOutputDir = join(dir, "skill-output");
+    const resultPath = join(dir, "result.json");
+    const nodes = [
+      ...Array.from({ length: 4 }, (_, index) => ({
+        node_id: index,
+        node_type: "switch",
+        display_name: `SW${index}`,
+      })),
+      ...Array.from({ length: 20 }, (_, index) => ({
+        node_id: index + 4,
+        node_type: "networkcard",
+        display_name: `ES${index}`,
+      })),
+    ];
+    const links = [
+      ...Array.from({ length: 20 }, (_, index) => {
+        const switchIndex = Math.floor(index / 5);
+        return {
+          src: index + 4,
+          src_port: 0,
+          dst: switchIndex,
+          dst_port: index % 5,
+          speed: 1000,
+        };
+      }),
+      { src: 0, src_port: 5, dst: 1, dst_port: 5, speed: 1000 },
+      { src: 1, src_port: 6, dst: 2, dst_port: 5, speed: 1000 },
+      { src: 2, src_port: 6, dst: 3, dst_port: 5, speed: 1000 },
+    ];
+
+    await writeFile(
+      intermediatePath,
+      JSON.stringify({ nodes, links }, null, 2),
+      "utf8",
+    );
+
+    await execFileAsync(process.execPath, [
+      resolve(".claude/skills/tsn-topology/tools/run-topology-skill.js"),
+      intermediatePath,
+    ], {
+      env: {
+        ...process.env,
+        TSN_AGENT_SKILL_OUTPUT_DIR: skillOutputDir,
+      },
+      maxBuffer: 1024 * 1024,
+    });
+
+    await runCli([
+      "--stage",
+      "topology",
+      "--input",
+      JSON.stringify({ userIntent: "我需要4个交换机，每个交换机连接5个端系统" }),
+      "--skill-output-dir",
+      skillOutputDir,
+      "--result-path",
+      resultPath,
+    ]);
+
+    const result = JSON.parse(await readFile(resultPath, "utf8"));
+    expect(result.status).toBe("success");
+    expect(result.validation.ok).toBe(true);
+    expect(result.payload.project.topology.links).toHaveLength(23);
   });
 
   it("generates flow planning stage results with additional video and BE flows", () => {

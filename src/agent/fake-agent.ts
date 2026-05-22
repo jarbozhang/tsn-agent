@@ -45,6 +45,7 @@ export interface FakeAgentResult {
   bundle?: ArtifactBundle;
   workflow: WorkflowState;
   assistantText: string;
+  shouldApplyProject?: boolean;
 }
 
 export function runFakeTsnAgent(
@@ -101,7 +102,7 @@ export function runFakeTsnAgent(
 export function hasExplicitTopologyIntent(text: string): boolean {
   return /(\d+)\s*(?:个|台)?\s*(?:交换机|switch)/i.test(text)
     || /(?:每个|每台|each).*?(\d+)\s*(?:个|台)?\s*(?:网卡|端系统|终端|端(?!口)|host|end)/i.test(text)
-    || /双冗余|双平面|系统交换机|网卡[1-7]/i.test(text)
+    || /双冗余|双平面|系统交换机|网卡\s*[一二两三四五六七八九十\d]+/i.test(text)
     || /箭载.*拓扑|拓扑.*箭载/i.test(text)
     || hasSwitchInterconnectIntent(text);
 }
@@ -428,7 +429,7 @@ function isContinuationIntent(text: string): boolean {
 }
 
 function isStageConfirmationIntent(text: string): boolean {
-  return /^(确认|可以|好的|没问题|按这个|就这样|同意|通过|使用|采用|先给默认|默认|用默认|采用默认|使用默认)/i.test(text.trim());
+  return /^(确认|可以|好的|没问题|理解的对|对|正确|按这个|就这样|同意|通过|使用|采用|先给默认|默认|用默认|采用默认|使用默认)/i.test(text.trim());
 }
 
 function isQuickGenerateIntent(text: string): boolean {
@@ -478,7 +479,7 @@ function inferIntentFromProject(project: CanonicalTsnProjectV0): TopologyIntent 
       endSystemsPerSwitch: 0,
       switchInterconnect: "line",
       topologyTemplate: "aerospace-redundant",
-      endSystemCount: 7,
+      endSystemCount: project.topology.nodes.filter((node) => node.type === "endSystem").length,
     };
   }
 

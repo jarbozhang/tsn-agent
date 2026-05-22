@@ -119,6 +119,7 @@ fn write_artifacts_to_dir(output_dir: &Path, artifacts: &[ProjectArtifact]) -> R
         }
 
         if let Some(parent) = destination.parent() {
+            assert_artifact_parents_are_not_symlinks(output_dir, parent)?;
             std::fs::create_dir_all(parent)
                 .map_err(|error| format!("无法创建导出目录：{error}"))?;
         }
@@ -180,8 +181,8 @@ fn validate_artifacts(artifacts: &[ProjectArtifact]) -> Result<(), String> {
             .unwrap_or(false);
 
         if purpose == "planner-output" {
-            if path != "flow_plan_result_1.json" || !observed_external {
-                return Err("规划器输出必须是外部观测到的 flow_plan_result_1.json。".to_string());
+            if !is_allowed_planner_output_path(path) || !observed_external {
+                return Err("规划器输出必须是外部观测到的 planner/flow_plan_result_1.json。".to_string());
             }
             continue;
         }
@@ -192,6 +193,10 @@ fn validate_artifacts(artifacts: &[ProjectArtifact]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn is_allowed_planner_output_path(path: &str) -> bool {
+    path == "planner/flow_plan_result_1.json" || path == "flow_plan_result_1.json"
 }
 
 fn assert_safe_project_path(app: &tauri::AppHandle, output_dir: &str) -> Result<PathBuf, String> {
@@ -266,6 +271,13 @@ fn resolve_artifact_path(base_dir: &Path, artifact_path: &str) -> Result<PathBuf
         return Err(format!("导出文件路径必须是相对路径：{artifact_path}"));
     }
 
+    if relative
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(format!("导出文件路径逃逸项目目录：{artifact_path}"));
+    }
+
     let resolved = base_dir.join(relative);
 
     if !is_parent_or_same(base_dir, &resolved) {
@@ -273,6 +285,25 @@ fn resolve_artifact_path(base_dir: &Path, artifact_path: &str) -> Result<PathBuf
     }
 
     Ok(resolved)
+}
+
+fn assert_artifact_parents_are_not_symlinks(base_dir: &Path, parent_dir: &Path) -> Result<(), String> {
+    let relative = parent_dir
+        .strip_prefix(base_dir)
+        .map_err(|_| format!("导出文件路径逃逸项目目录：{}", parent_dir.display()))?;
+    let mut current = base_dir.to_path_buf();
+
+    for component in relative.components() {
+        current.push(component);
+
+        if let Ok(metadata) = std::fs::symlink_metadata(&current) {
+            if metadata.file_type().is_symlink() {
+                return Err(format!("拒绝通过 symlink 导出项目文件：{}", current.display()));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn normalize_path(path: &Path) -> Result<PathBuf, String> {
@@ -335,14 +366,14 @@ mod tests {
     fn validates_manifest_files() {
         let artifacts = vec![
             ProjectArtifact {
-                path: "tsnagent/generated/network.ned".to_string(),
+                path: "simulation/inet/tsnagent/generated/network.ned".to_string(),
                 purpose: "simulation-inet".to_string(),
                 label: "INET".to_string(),
                 observed_external: None,
                 content: "network".to_string(),
             },
             ProjectArtifact {
-                path: "omnetpp.ini".to_string(),
+                path: "simulation/inet/omnetpp.ini".to_string(),
                 purpose: "simulation-inet".to_string(),
                 label: "INET ini".to_string(),
                 observed_external: None,
@@ -353,7 +384,7 @@ mod tests {
                 purpose: "manifest".to_string(),
                 label: "manifest".to_string(),
                 observed_external: None,
-                content: r#"{"files":[{"path":"tsnagent/generated/network.ned","purpose":"simulation-inet"},{"path":"omnetpp.ini","purpose":"simulation-inet"}]}"#.to_string(),
+                content: r#"{"files":[{"path":"simulation/inet/tsnagent/generated/network.ned","purpose":"simulation-inet"},{"path":"simulation/inet/omnetpp.ini","purpose":"simulation-inet"}]}"#.to_string(),
             },
         ];
 
@@ -383,10 +414,58 @@ mod tests {
             purpose: "manifest".to_string(),
             label: "manifest".to_string(),
             observed_external: None,
-            content: r#"{"files":[{"path":"flow_plan_result_1.json","purpose":"planner-output","observedExternal":true}]}"#.to_string(),
+            content: r#"{"files":[{"path":"planner/flow_plan_result_1.json","purpose":"planner-output","observedExternal":true}]}"#.to_string(),
         }];
 
         assert!(validate_artifacts(&artifacts).is_ok());
+    }
+
+    #[test]
+    fn rejects_escaping_artifact_paths() {
+        let output_dir =
+            std::env::temp_dir().join(format!("tsn-agent-export-test-{}", timestamp_nanos()));
+        let error = resolve_artifact_path(&output_dir, "../omnetpp.ini")
+            .expect_err("escaping path should fail");
+
+        assert!(error.contains("逃逸"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_artifact_parent_directories() {
+        let output_dir =
+            std::env::temp_dir().join(format!("tsn-agent-export-test-{}", timestamp_nanos()));
+        let external_dir =
+            std::env::temp_dir().join(format!("tsn-agent-external-test-{}", timestamp_nanos()));
+        std::fs::create_dir_all(&output_dir).expect("create export dir");
+        std::fs::create_dir_all(&external_dir).expect("create external dir");
+        std::os::unix::fs::symlink(&external_dir, output_dir.join("simulation"))
+            .expect("create symlink");
+
+        let artifacts = vec![
+            ProjectArtifact {
+                path: "simulation/inet/omnetpp.ini".to_string(),
+                purpose: "simulation-inet".to_string(),
+                label: "INET ini".to_string(),
+                observed_external: None,
+                content: "[General]".to_string(),
+            },
+            ProjectArtifact {
+                path: "manifest.json".to_string(),
+                purpose: "manifest".to_string(),
+                label: "manifest".to_string(),
+                observed_external: None,
+                content: r#"{"files":[{"path":"simulation/inet/omnetpp.ini","purpose":"simulation-inet"}]}"#.to_string(),
+            },
+        ];
+
+        let error = write_artifacts_to_dir(&output_dir, &artifacts)
+            .expect_err("symlink parent should fail");
+
+        assert!(error.contains("symlink"));
+
+        std::fs::remove_dir_all(output_dir).expect("cleanup export dir");
+        std::fs::remove_dir_all(external_dir).expect("cleanup external dir");
     }
 
     #[test]
@@ -433,14 +512,14 @@ mod tests {
 
         let artifacts = vec![
             ProjectArtifact {
-                path: "tsnagent/generated/network.ned".to_string(),
+                path: "simulation/inet/tsnagent/generated/network.ned".to_string(),
                 purpose: "simulation-inet".to_string(),
                 label: "INET".to_string(),
                 observed_external: None,
                 content: "network".to_string(),
             },
             ProjectArtifact {
-                path: "omnetpp.ini".to_string(),
+                path: "simulation/inet/omnetpp.ini".to_string(),
                 purpose: "simulation-inet".to_string(),
                 label: "INET ini".to_string(),
                 observed_external: None,
@@ -451,7 +530,7 @@ mod tests {
                 purpose: "manifest".to_string(),
                 label: "manifest".to_string(),
                 observed_external: None,
-                content: r#"{"files":[{"path":"tsnagent/generated/network.ned","purpose":"simulation-inet"},{"path":"omnetpp.ini","purpose":"simulation-inet"}]}"#.to_string(),
+                content: r#"{"files":[{"path":"simulation/inet/tsnagent/generated/network.ned","purpose":"simulation-inet"},{"path":"simulation/inet/omnetpp.ini","purpose":"simulation-inet"}]}"#.to_string(),
             },
         ];
 
@@ -462,12 +541,12 @@ mod tests {
             "keep",
         );
         assert_eq!(
-            std::fs::read_to_string(output_dir.join("tsnagent/generated/network.ned"))
+            std::fs::read_to_string(output_dir.join("simulation/inet/tsnagent/generated/network.ned"))
                 .expect("read artifact"),
             "network",
         );
         assert_eq!(
-            std::fs::read_to_string(output_dir.join("omnetpp.ini")).expect("read ini artifact"),
+            std::fs::read_to_string(output_dir.join("simulation/inet/omnetpp.ini")).expect("read ini artifact"),
             "[General]",
         );
 

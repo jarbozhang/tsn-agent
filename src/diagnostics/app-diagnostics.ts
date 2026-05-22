@@ -1,4 +1,5 @@
 import type { ArtifactBundle } from "../export/artifact-bundle";
+import { classifyArtifact } from "../export/artifact-classification";
 import type { TsnSession } from "../sessions/session-repository";
 import type { DiagnosticLogRepository } from "./diagnostic-log-repository";
 import { summarizeText, type DiagnosticLogInput } from "./diagnostic-log";
@@ -25,12 +26,20 @@ export function sessionSummary(session: TsnSession) {
 export function artifactBundleSummary(bundle: ArtifactBundle) {
   return {
     artifactCount: bundle.artifacts.length,
-    files: bundle.artifacts.map((artifact) => ({
-      path: artifact.path,
-      purpose: artifact.purpose,
-      label: artifact.label ?? artifact.purpose,
-      contentLength: artifact.content.length,
-    })),
+    files: bundle.artifacts.map((artifact) => {
+      const classification = classifyArtifact(artifact);
+
+      return {
+        path: artifact.path,
+        purpose: artifact.purpose,
+        group: classification.group,
+        isEntrypoint: classification.isEntrypoint,
+        observedExternal: artifact.observedExternal === true,
+        label: artifact.label ?? artifact.purpose,
+        roleLabel: classification.roleLabel,
+        contentLength: artifact.content.length,
+      };
+    }),
     projectId: bundle.manifest.projectId,
     generatedAt: bundle.manifest.generatedAt,
   };

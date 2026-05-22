@@ -29,10 +29,11 @@ describe("exportProjectBundle", () => {
       mode: "browser-preview",
       outputDir: "browser-preview",
       writtenFiles: [
-        "tsnagent/generated/network.ned",
-        "omnetpp.ini",
-        "react-flow-topology.json",
-        "flow_plan_1.json",
+        "simulation/inet/tsnagent/generated/network.ned",
+        "simulation/inet/omnetpp.ini",
+        "simulation/inet/traffic.ini",
+        "workspace/react-flow-topology.json",
+        "planner/flow_plan_1.json",
         "manifest.json",
       ],
     });
@@ -46,7 +47,7 @@ describe("exportProjectBundle", () => {
     });
     invokeMock.mockResolvedValue({
       outputDir: "/tmp/tsn-project",
-      writtenFiles: ["tsnagent/generated/network.ned", "omnetpp.ini", "manifest.json"],
+      writtenFiles: ["simulation/inet/tsnagent/generated/network.ned", "simulation/inet/omnetpp.ini", "manifest.json"],
     });
     const { exportProjectBundle } = await import("./project-exporter");
     const bundle = createArtifactBundle(createProjectFromIntent("我需要4个交换机，每个交换机连接5个端系统"));
@@ -59,14 +60,14 @@ describe("exportProjectBundle", () => {
         outputDir: "/tmp/tsn-project",
         artifacts: expect.arrayContaining([
           expect.objectContaining({
-            path: "tsnagent/generated/network.ned",
+            path: "simulation/inet/tsnagent/generated/network.ned",
             purpose: "simulation-inet",
             label: "INET/OMNeT++ 网络拓扑",
           }),
           expect.objectContaining({
-            path: "omnetpp.ini",
+            path: "simulation/inet/omnetpp.ini",
             purpose: "simulation-inet",
-            label: "INET/OMNeT++ 最小运行配置",
+            label: "INET/OMNeT++ 入口配置",
           }),
         ]),
       },

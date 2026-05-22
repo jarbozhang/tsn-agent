@@ -1,5 +1,7 @@
-import { writeFile } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildPrompt,
   extractOperationTraceEvents,
@@ -10,6 +12,23 @@ import {
   runClaude,
 } from "./claude-agent-worker.mjs";
 import { runTopologyStage, writeStageResult } from "./stage-skills/tsn-stage-runner";
+
+function failedTopologyStageResult(error) {
+  const result = runTopologyStage({ userIntent: "我需要4个交换机，每个交换机连接5个端系统" });
+  return {
+    ...result,
+    status: "failed",
+    validation: {
+      ok: false,
+      errors: [error],
+    },
+    safeEventSummary: {
+      title: "拓扑结果",
+      content: `拓扑校验失败：${error}`,
+      status: "error",
+    },
+  };
+}
 
 async function* messages(items) {
   for (const item of items) {
@@ -23,15 +42,16 @@ describe("claude-agent-worker", () => {
       expect(input.options.settingSources).toEqual(["user", "project"]);
       expect(input.options.skills).toEqual(["tsn-topology", "tsn-flow-planning"]);
       expect(input.options.tools).toEqual({ type: "preset", preset: "claude_code" });
-      expect(input.options.allowedTools).toEqual(expect.arrayContaining(["Bash", "Edit", "Write"]));
+      expect(input.options.allowedTools).toEqual(expect.arrayContaining(["Skill", "Read", "Bash", "Edit", "Write"]));
       expect(input.options.disallowedTools).toEqual([]);
       expect(input.options.includePartialMessages).toBe(true);
       expect(input.options.systemPrompt).toContain("工程状态只接受结构化校验结果");
       expect(input.options.systemPrompt).toContain("拓扑、时间同步、流量规划、模拟仿真");
       expect(input.options.systemPrompt).toContain("不能声称已启动仿真");
       expect(input.prompt).toContain("TSN_AGENT_STAGE_RESULT_PATH");
-      expect(input.prompt).toContain("建议传给 stage runner 的结构化输入");
-      expect(input.prompt).toContain('"scenarioConfigId": "generic-tsn"');
+      expect(input.prompt).toContain("TSN_AGENT_SKILL_OUTPUT_DIR");
+      expect(input.prompt).toContain("--skill-output-dir");
+      expect(input.options.env.TSN_AGENT_SKILL_OUTPUT_DIR).toContain("skill-output");
       yield* messages([
         { type: "system", session_id: "session-1" },
         { type: "result", structured_output: { assistantText: " 已生成拓扑说明 " } },
@@ -42,30 +62,17 @@ describe("claude-agent-worker", () => {
       "我需要4个交换机",
       {
         cwd: "/tmp/project",
-        stageRunnerInput: {
-          userIntent: "我需要4个交换机",
-          stage: "topology",
-          scenarioConfigId: "generic-tsn",
-        },
-        stageRunner: async ({ input, resultPath }) => {
-          await writeStageResult(runTopologyStage(input), resultPath);
-        },
       },
       query,
     );
 
     expect(result.sessionId).toBe("session-1");
-    expect(result.assistantText).toContain("[Skill] 调用 tsn-topology");
-    expect(result.assistantText).toContain("[工具] Bash: node tsn-stage-runner --stage topology --result-path stage-result.json");
-    expect(result.assistantText).toContain("[文件] 写入阶段结果 stage-result.json");
-    expect(result.assistantText).toContain("[文件] 读取阶段结果 stage-result.json");
-    expect(result.assistantText).toContain("[Skill] tsn-topology 结果已返回");
     expect(result.assistantText).toContain("已生成拓扑说明");
-    expect(result.stageResults).toHaveLength(1);
-    expect(result.stageResults[0].payload.project.topology.nodes).toHaveLength(24);
+    expect(result.stageResults).toEqual([]);
   });
 
   it("reads and validates a topology stage result written to the run-scoped path", async () => {
+    const events = [];
     const query = async function* (input) {
       const resultPath = input.options.env.TSN_AGENT_STAGE_RESULT_PATH;
       expect(resultPath).toContain("tsn-agent-stage-");
@@ -77,7 +84,7 @@ describe("claude-agent-worker", () => {
       yield { type: "result", session_id: "session-stage", result: "拓扑已生成" };
     };
 
-    const result = await runClaude("我需要4个交换机，每个交换机连接5个端系统", undefined, query);
+    const result = await runClaude("我需要4个交换机，每个交换机连接5个端系统", { onEvent: (event) => events.push(event) }, query);
 
     expect(result.stageResults).toHaveLength(1);
     expect(result.stageResults[0]).toMatchObject({
@@ -86,44 +93,140 @@ describe("claude-agent-worker", () => {
       validation: { ok: true, errors: [] },
     });
     expect(result.stageResults[0].payload.project.topology.nodes).toHaveLength(24);
+    expect(events.map((event) => event.text ?? "").join("")).toContain(
+      "[Skill] tsn-topology 结果已返回：4 个交换机，20 个端系统，23 条链路",
+    );
   });
 
-  it("runs the topology stage locally when the model does not write a structured result", async () => {
+  it("runs a repair turn when the model does not write a structured topology result", async () => {
     const events = [];
+    const auditDir = await mkdtemp(join(tmpdir(), "tsn-agent-repair-audit-test-"));
+    let callCount = 0;
     const query = async function* (input) {
-      expect(input.prompt).toContain('"stage": "topology"');
-      yield { type: "result", session_id: "session-local-runner", result: "拓扑已生成" };
+      callCount += 1;
+      expect(input.prompt).toContain("stage-runner-input.json");
+      expect(input.options.env.TSN_AGENT_STAGE_RUNNER_INPUT_PATH).toContain("stage-runner-input.json");
+      if (callCount === 1) {
+        yield { type: "system", session_id: "session-repair-runner" };
+        yield { type: "result", session_id: "session-repair-runner", result: "拓扑已生成" };
+        return;
+      }
+
+      expect(input.options.resume).toBe("session-repair-runner");
+      expect(input.prompt).toContain("上一轮只返回了文字说明");
+      await writeFile(
+        input.options.env.TSN_AGENT_STAGE_RESULT_PATH,
+        JSON.stringify(runTopologyStage({ userIntent: "我需要4个交换机，每个交换机连接5个端系统" })),
+        "utf8",
+      );
+      yield {
+        type: "assistant",
+        session_id: "session-repair-runner",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu-repair",
+              name: "Bash",
+              input: {
+                command:
+                  'node "$TSN_AGENT_STAGE_RUNNER_PATH" --stage topology --input \'{"userIntent":"我需要4个交换机，每个交换机连接5个端系统"}\' --result-path "$TSN_AGENT_STAGE_RESULT_PATH"',
+              },
+            },
+          ],
+        },
+      };
+      yield { type: "result", session_id: "session-repair-runner", result: "拓扑结构化结果已生成" };
     };
 
     const result = await runClaude(
-      "拓扑采用双冗余系统交换结构，交换机数量：2 台系统交换机，每台连接 24 个端系统接口节点。",
+      "我需要4个交换机，每个交换机连接5个端系统",
       {
         stageRunnerInput: {
-          userIntent: "拓扑采用双冗余系统交换结构，交换机数量：2 台系统交换机，每台连接 24 个端系统接口节点。",
+          userIntent: "我需要4个交换机，每个交换机连接5个端系统",
           stage: "topology",
           scenarioConfigId: "generic-tsn",
         },
-        stageRunner: async ({ input, resultPath }) => {
-          await writeStageResult(runTopologyStage(input), resultPath);
-        },
+        auditDir,
+        appSessionId: "session-repair",
+        runId: "agent-run-repair",
         onEvent: (event) => events.push(event),
       },
       query,
     );
 
     const streamed = events.map((event) => event.text ?? "").join("");
-    expect(streamed).toContain("[Skill] 调用 tsn-topology");
+    const audit = JSON.parse(await readFile(result.auditPath, "utf8"));
+    expect(callCount).toBe(2);
     expect(streamed).toContain("[工具] Bash: node tsn-stage-runner --stage topology");
-    expect(streamed).toContain("[文件] 写入阶段结果 stage-result.json");
-    expect(result.assistantText).toContain("[Skill] 调用 tsn-topology");
-    expect(result.assistantText).toContain("[文件] 读取阶段结果 stage-result.json");
+    expect(result.assistantText).toContain("[工具] Bash: node tsn-stage-runner --stage topology");
+    expect(result.assistantText).toContain("拓扑结构化结果已生成");
     expect(result.stageResults).toHaveLength(1);
     expect(result.stageResults[0]).toMatchObject({
       stage: "topology",
       skillName: "tsn-topology",
-      status: "success",
+      validation: { ok: true, errors: [] },
     });
-    expect(result.stageResults[0].payload.project.topology.nodes).toHaveLength(50);
+    expect(audit.stageRunnerInputPath).toContain("stage-runner-input.json");
+    expect(audit.promptRuns).toEqual([
+      expect.objectContaining({
+        id: "initial",
+        kind: "initial",
+        resultText: "拓扑已生成",
+      }),
+      expect.objectContaining({
+        id: "2-missing_stage_result_retry",
+        kind: "missing_stage_result_retry",
+        prompt: expect.stringContaining("上一轮只返回了文字说明"),
+        resultText: "拓扑结构化结果已生成",
+      }),
+    ]);
+  });
+
+  it("runs a repair turn when the structured topology result fails validation", async () => {
+    let callCount = 0;
+    const validationError = "通用分布式拓扑缺少交换机互联链路";
+    const query = async function* (input) {
+      callCount += 1;
+
+      if (callCount === 1) {
+        await writeFile(
+          input.options.env.TSN_AGENT_STAGE_RESULT_PATH,
+          JSON.stringify(failedTopologyStageResult(validationError)),
+          "utf8",
+        );
+        yield { type: "system", session_id: "session-invalid-runner" };
+        yield { type: "result", session_id: "session-invalid-runner", result: "拓扑已生成" };
+        return;
+      }
+
+      expect(input.options.resume).toBe("session-invalid-runner");
+      expect(input.prompt).toContain("上一轮已经写入 stage result，但校验未通过");
+      expect(input.prompt).toContain(validationError);
+      await writeFile(
+        input.options.env.TSN_AGENT_STAGE_RESULT_PATH,
+        JSON.stringify(runTopologyStage({ userIntent: "我需要4个交换机，每个交换机连接5个端系统" })),
+        "utf8",
+      );
+      yield { type: "result", session_id: "session-invalid-runner", result: "已补齐交换机互联链路" };
+    };
+
+    const result = await runClaude(
+      "我需要4个交换机，每个交换机连接5个端系统",
+      {
+        stageRunnerInput: {
+          userIntent: "我需要4个交换机，每个交换机连接5个端系统",
+          stage: "topology",
+          scenarioConfigId: "generic-tsn",
+        },
+      },
+      query,
+    );
+
+    expect(callCount).toBe(2);
+    expect(result.assistantText).toContain("已补齐交换机互联链路");
+    expect(result.stageResults).toHaveLength(1);
+    expect(result.stageResults[0].status).toBe("success");
   });
 
   it("surfaces SDK tool use and tool result events in the final assistant text", async () => {
@@ -173,43 +276,134 @@ describe("claude-agent-worker", () => {
     expect(result.assistantText).toContain("已更新流量规划");
   });
 
-  it("recovers a topology stage result when the SDK stops at the turn limit", async () => {
+  it("writes a per-session audit log with prompt, result, and tool traces", async () => {
+    const auditDir = await mkdtemp(join(tmpdir(), "tsn-agent-audit-test-"));
+    const query = async function* (input) {
+      await writeFile(
+        input.options.env.TSN_AGENT_STAGE_RESULT_PATH,
+        JSON.stringify(runTopologyStage({ userIntent: "我需要4个交换机" })),
+        "utf8",
+      );
+      yield { type: "system", session_id: "sdk-session-audit" };
+      yield {
+        type: "assistant",
+        session_id: "sdk-session-audit",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu-audit",
+              name: "Bash",
+              input: {
+                command:
+                  'node "$TSN_AGENT_STAGE_RUNNER_PATH" --stage topology --input \'{"userIntent":"我需要4个交换机"}\' --result-path "$TSN_AGENT_STAGE_RESULT_PATH"',
+              },
+            },
+          ],
+        },
+      };
+      yield {
+        type: "user",
+        session_id: "sdk-session-audit",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu-audit",
+              content: "stage result written",
+            },
+          ],
+        },
+      };
+      yield { type: "result", session_id: "sdk-session-audit", result: "拓扑已生成" };
+    };
+
+    const result = await runClaude(
+      "我需要4个交换机",
+      {
+        auditDir,
+        appSessionId: "session/audit:1",
+        runId: "agent-run-audit",
+        stageRunnerInput: {
+          userIntent: "我需要4个交换机",
+          stage: "topology",
+          scenarioConfigId: "generic-tsn",
+        },
+      },
+      query,
+    );
+    const auditRaw = await readFile(result.auditPath, "utf8");
+    const audit = JSON.parse(auditRaw);
+    const latestRaw = await readFile(join(auditDir, "session_audit_1", "latest.json"), "utf8");
+
+    expect(result.auditPath).toContain("session_audit_1");
+    expect(audit.schemaVersion).toBe("tsn-agent.agent-run-audit.v1");
+    expect(audit.appSessionId).toBe("session/audit:1");
+    expect(audit.runId).toBe("agent-run-audit");
+    expect(audit.summary).toMatchObject({
+      status: "success",
+      stage: "topology",
+      userPromptPreview: "我需要4个交换机",
+      stageRunnerInputPath: expect.stringContaining("stage-runner-input.json"),
+      promptRunCount: 1,
+      recovered: false,
+    });
+    expect(audit.summary.prompt).toMatchObject({
+      usesStageRunnerInputPath: true,
+      hasInlineStageRunnerInputJson: false,
+    });
+    expect(audit.summary.context.includesLocalCandidate).toBe(false);
+    expect(audit.prompt).toContain("用户原始需求：");
+    expect(audit.prompt).toContain("我需要4个交换机");
+    expect(audit.promptRuns).toEqual([
+      expect.objectContaining({
+        id: "initial",
+        kind: "initial",
+        promptSummary: expect.objectContaining({
+          usesStageRunnerInputPath: true,
+          hasInlineStageRunnerInputJson: false,
+        }),
+        prompt: expect.stringContaining("我需要4个交换机"),
+        resultText: expect.stringContaining("拓扑已生成"),
+      }),
+    ]);
+    expect(audit.sdkOptions.allowedTools).toEqual(["Skill", "Read", "Bash", "Edit", "Write"]);
+    expect(audit.sdkOptions.skills).toEqual(["tsn-topology", "tsn-flow-planning"]);
+    expect(audit.toolCalls.map((call) => call.text).join("\n")).toContain("[工具] Bash: node tsn-stage-runner --stage topology");
+    expect(audit.toolCalls.map((call) => call.text).join("\n")).toContain("[工具结果] Bash 已返回");
+    expect(audit.result.assistantText).toContain("拓扑已生成");
+    expect(audit.sdkSessionId).toBe("sdk-session-audit");
+    expect(JSON.parse(latestRaw).runId).toBe("agent-run-audit");
+    expect(JSON.parse(latestRaw).summary.stageRunnerInputPath).toContain("stage-runner-input.json");
+  });
+
+  it("does not synthesize a topology stage result when the SDK stops at the turn limit", async () => {
     const query = async function* (input) {
       expect(input.options.maxTurns).toBe(3);
       yield { type: "system", session_id: "session-turn-limit" };
       throw new Error("Bash returned an error result: Reached maximum number of turns (3)");
     };
+    const stageRunner = vi.fn(async ({ input, resultPath }) => {
+      await writeStageResult(runTopologyStage(input), resultPath);
+    });
 
-    const result = await runClaude(
+    await expect(runClaude(
       "我需要4个交换机，每个交换机连接5个端系统",
       {
+        maxTurns: 3,
         stageRunnerInput: {
           userIntent: "我需要4个交换机，每个交换机连接5个端系统",
           stage: "topology",
           scenarioConfigId: "generic-tsn",
         },
-        stageRunner: async ({ input, resultPath }) => {
-          await writeStageResult(runTopologyStage(input), resultPath);
-        },
+        stageRunner,
       },
       query,
-    );
-
-    expect(result).toMatchObject({
-      assistantText: expect.stringContaining("已根据本轮需求生成拓扑草案"),
-      sessionId: "session-turn-limit",
-    });
-    expect(result.assistantText).not.toContain("Bash returned an error");
-    expect(result.stageResults).toHaveLength(1);
-    expect(result.stageResults[0]).toMatchObject({
-      stage: "topology",
-      skillName: "tsn-topology",
-      status: "success",
-    });
-    expect(result.stageResults[0].payload.project.topology.nodes).toHaveLength(24);
+    )).rejects.toThrow("Reached maximum number of turns");
+    expect(stageRunner).not.toHaveBeenCalled();
   });
 
-  it("recovers a flow planning stage result when the SDK stops at the turn limit", async () => {
+  it("does not synthesize a flow planning stage result when the SDK stops at the turn limit", async () => {
     const query = async function* () {
       yield { type: "system", session_id: "session-flow-turn-limit" };
       throw new Error("Bash returned an error result: Reached maximum number of turns (3)");
@@ -218,8 +412,12 @@ describe("claude-agent-worker", () => {
     const project = runTopologyStage({
       userIntent: "我需要3个交换机，每个交换机连接3个端系统，使用环形互联",
     }).payload.project;
+    const stageRunner = vi.fn(async ({ input, resultPath }) => {
+      const { runFlowPlanningStage } = await import("./stage-skills/tsn-stage-runner");
+      await writeStageResult(runFlowPlanningStage(input), resultPath);
+    });
 
-    const result = await runClaude(
+    await expect(runClaude(
       "再加3条视频流吧",
       {
         stageRunnerInput: {
@@ -228,31 +426,11 @@ describe("claude-agent-worker", () => {
           scenarioConfigId: "generic-tsn",
           project,
         },
-        stageRunner: async ({ input, resultPath }) => {
-          const { runFlowPlanningStage } = await import("./stage-skills/tsn-stage-runner");
-          await writeStageResult(runFlowPlanningStage(input), resultPath);
-        },
+        stageRunner,
       },
       query,
-    );
-
-    expect(result).toMatchObject({
-      assistantText: expect.stringContaining("已根据本轮需求更新流量规划"),
-      sessionId: "session-flow-turn-limit",
-    });
-    expect(result.assistantText).toContain("确认流量规划后生成仿真输入");
-    expect(result.stageResults).toHaveLength(1);
-    expect(result.stageResults[0]).toMatchObject({
-      stage: "flow-template",
-      skillName: "tsn-flow-planning",
-      status: "success",
-    });
-    expect(result.stageResults[0].payload.project.flows.map((flow) => flow.name)).toEqual([
-      "控制流-1",
-      "视频流-1",
-      "视频流-2",
-      "视频流-3",
-    ]);
+    )).rejects.toThrow("Reached maximum number of turns");
+    expect(stageRunner).not.toHaveBeenCalled();
   });
 
   it("ignores malformed stage result files", async () => {
@@ -346,18 +524,44 @@ describe("claude-agent-worker", () => {
       "我需要4个交换机",
       "历史上下文",
       "/tmp/result.json",
+      "/tmp/skill-output",
       { userIntent: "我需要4个交换机", scenarioConfigId: "generic-tsn" },
     );
 
     expect(prompt).toContain("我需要4个交换机");
     expect(prompt).toContain("历史上下文");
-    expect(prompt).toContain("建议传给 stage runner 的结构化输入");
+    expect(prompt).toContain("stage runner 结构化输入");
     expect(prompt).toContain('"scenarioConfigId": "generic-tsn"');
     expect(prompt).toContain("只描述当前阶段已经完成或正在等待确认的内容");
     expect(prompt).toContain("拓扑 -> 时间同步 -> 流量规划 -> 模拟仿真");
     expect(prompt).toContain("当前应用没有接入 OMNeT++/远程服务器仿真 runner");
     expect(prompt).toContain("/tmp/result.json");
+    expect(prompt).toContain("/tmp/skill-output");
+    expect(prompt).toContain("--skill-output-dir");
     expect(prompt).not.toContain("然后继续生成控制流模板和导出文件");
+  });
+
+  it("keeps large stage runner input out of the prompt when an input path is provided", () => {
+    const prompt = buildPrompt(
+      "再加个视频流",
+      "历史上下文",
+      "/tmp/result.json",
+      "/tmp/skill-output",
+      {
+        userIntent: "再加个视频流",
+        stage: "flow-template",
+        project: {
+          topology: {
+            nodes: Array.from({ length: 20 }, (_, index) => ({ id: `node-${index}` })),
+          },
+        },
+      },
+      "/tmp/runner.mjs",
+      "/tmp/stage-runner-input.json",
+    );
+
+    expect(prompt).toContain("/tmp/stage-runner-input.json");
+    expect(prompt).not.toContain("node-19");
   });
 
   it("redacts common secret shapes", () => {
@@ -409,6 +613,58 @@ describe("claude-agent-worker", () => {
     ]);
   });
 
+  it("keeps later detailed tool-use events when an earlier stream event had empty input", () => {
+    const toolUseNamesById = new Map();
+    const emptyTrace = extractOperationTraceEvents({
+      type: "stream_event",
+      event: {
+        content_block: {
+          type: "tool_use",
+          id: "read-1",
+          name: "Read",
+          input: {},
+        },
+      },
+    }, toolUseNamesById);
+    const detailedTrace = extractOperationTraceEvents({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "tool_use", id: "read-1", name: "Read", input: { file_path: "/tmp/skill-output/topology.json" } },
+        ],
+      },
+    }, toolUseNamesById);
+
+    expect(emptyTrace.map((trace) => trace.text)).toEqual([]);
+    expect(detailedTrace.map((trace) => trace.text)).toEqual(["[文件] 读取 topology.json"]);
+  });
+
+  it("summarizes successful and failed tool results", () => {
+    const toolUseNamesById = new Map([["bash-1", "Bash"], ["write-1", "Write"]]);
+    const traces = extractOperationTraceEvents({
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "bash-1",
+            content: "Intermediate JSON written.",
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "write-1",
+            content: "<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>",
+          },
+        ],
+      },
+    }, toolUseNamesById);
+
+    expect(traces.map((trace) => trace.text)).toEqual([
+      "[工具结果] Bash 已返回：Intermediate JSON written.",
+      "[工具结果] Write 已返回（失败）：File has not been read yet. Read it first before writing to it.",
+    ]);
+  });
+
   it("does not expose empty tool input objects in operation traces", () => {
     const traces = extractOperationTraceEvents({
       type: "assistant",
@@ -420,10 +676,7 @@ describe("claude-agent-worker", () => {
       },
     });
 
-    expect(traces.map((trace) => trace.text)).toEqual([
-      "[Skill] 调用",
-      "[工具] Bash",
-    ]);
+    expect(traces.map((trace) => trace.text)).toEqual([]);
     expect(traces.map((trace) => trace.text).join("\n")).not.toContain("{}");
   });
 });

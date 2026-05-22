@@ -6,8 +6,28 @@ export type ManifestValidationResult =
 
 export function validateExportManifest(bundle: ArtifactBundle): ManifestValidationResult {
   const errors: string[] = [];
-  const artifactPaths = new Set(bundle.artifacts.map((artifact) => artifact.path));
-  const manifestPaths = new Set(bundle.manifest.files.map((file) => file.path));
+  const artifactPaths = new Set<string>();
+  const manifestPaths = new Set<string>();
+
+  for (const artifact of bundle.artifacts) {
+    if (artifactPaths.has(artifact.path)) {
+      errors.push(`${artifact.path} is duplicated in artifacts.`);
+    }
+
+    artifactPaths.add(artifact.path);
+  }
+
+  for (const file of bundle.manifest.files) {
+    if (manifestPaths.has(file.path)) {
+      errors.push(`${file.path} is duplicated in manifest.`);
+    }
+
+    manifestPaths.add(file.path);
+  }
+
+  if (!artifactPaths.has("manifest.json")) {
+    errors.push("manifest.json artifact content is required.");
+  }
 
   for (const artifact of bundle.artifacts) {
     if (artifact.path === "manifest.json") {
@@ -27,22 +47,36 @@ export function validateExportManifest(bundle: ArtifactBundle): ManifestValidati
     if (file.purpose === "planner-output" && !file.observedExternal) {
       errors.push(`${file.path} must be marked observedExternal when purpose is planner-output.`);
     }
+
+    if (file.purpose === "planner-output" && !isAllowedPlannerOutputPath(file.path)) {
+      errors.push(`${file.path} is not an allowed planner output path.`);
+    }
   }
 
-  if (manifestPaths.has("flow_plan_result_1.json")) {
-    const resultFile = bundle.manifest.files.find((file) => file.path === "flow_plan_result_1.json");
+  for (const resultPath of ALLOWED_PLANNER_OUTPUT_PATHS) {
+    if (!manifestPaths.has(resultPath)) {
+      continue;
+    }
+
+    const resultFile = bundle.manifest.files.find((file) => file.path === resultPath);
 
     if (resultFile?.purpose !== "planner-output" || resultFile.observedExternal !== true) {
-      errors.push("flow_plan_result_1.json must be classified as observed external planner output.");
+      errors.push(`${resultPath} must be classified as observed external planner output.`);
     }
   }
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true };
 }
 
+const ALLOWED_PLANNER_OUTPUT_PATHS = ["flow_plan_result_1.json", "planner/flow_plan_result_1.json"] as const;
+
+function isAllowedPlannerOutputPath(path: string): boolean {
+  return (ALLOWED_PLANNER_OUTPUT_PATHS as readonly string[]).includes(path);
+}
+
 export function withObservedPlannerResult(
   manifest: ExportManifest,
-  path = "flow_plan_result_1.json",
+  path = "planner/flow_plan_result_1.json",
 ): ExportManifest {
   if (manifest.files.some((file) => file.path === path)) {
     return manifest;

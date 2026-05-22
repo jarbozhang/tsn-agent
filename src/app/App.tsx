@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -27,7 +27,8 @@ import {
 import { DiagnosticsLogView } from "../ui/diagnostics/DiagnosticsDrawer";
 import { redactProviderNamesForDisplay } from "../ui/display-redaction";
 import { isEndSystem, isSwitch } from "../domain/canonical";
-import { createArtifactBundle } from "../export/artifact-bundle";
+import { createArtifactBundle, type ExportedArtifact } from "../export/artifact-bundle";
+import { classifyArtifact, type ArtifactClassification, type ArtifactGroupId } from "../export/artifact-classification";
 import { exportReactFlowTopology } from "../export/react-flow-exporter";
 import { getScenarioConfig } from "../domain/scenario-config";
 import {
@@ -45,11 +46,13 @@ import {
   type SessionRepository,
   type TsnSession,
 } from "../sessions/session-repository";
-import tsnAgentMark from "../assets/tsn-agent-mark.svg";
+import tsnAgentMark from "../assets/tsn-agent-mark.png";
 
 const repository: SessionRepository = createSessionRepository();
 const diagnosticsRepository: DiagnosticLogRepository = createDiagnosticLogRepository();
 const ASSISTANT_CONNECTING_MESSAGE = "正在连接智能助手，并结合当前会话上下文生成下一步规划...";
+const INTENT_PLACEHOLDER = "例如：我需要 4 个交换机，每个交换机连接 5 个端系统";
+const AGENT_STREAM_STALL_MS = 3000;
 
 const nodeTypes = {
   tsnNode: TsnTopologyNode,
@@ -61,6 +64,8 @@ type SelectedTopologyItem =
   | { kind: "node"; id: string }
   | { kind: "link"; id: string };
 
+type AgentRunPhase = "idle" | "connecting" | "streaming" | "waiting";
+
 const CONFIG_TABS: Array<{ id: ConfigTabId; label: string }> = [
   { id: "flows", label: "流量列表" },
   { id: "node-detail", label: "节点详情" },
@@ -69,14 +74,20 @@ const CONFIG_TABS: Array<{ id: ConfigTabId; label: string }> = [
   { id: "steps", label: "执行步骤" },
 ];
 
+const ARTIFACT_GROUP_ORDER: ArtifactGroupId[] = ["workspace", "planner", "simulation-inet", "manifest", "legacy"];
+
 export function App() {
   const initialSession = useMemo(() => createEmptySession(), []);
   const [sessions, setSessions] = useState<TsnSession[]>([initialSession]);
   const [currentSession, setCurrentSession] = useState<TsnSession>(initialSession);
-  const [input, setInput] = useState("我需要4个交换机，每个交换机连接5个端系统");
+  const [input, setInput] = useState("");
   const [isSessionOpen, setIsSessionOpen] = useState(false);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
+  const [agentRunPhase, setAgentRunPhase] = useState<AgentRunPhase>("idle");
+  const [agentRunStartedAt, setAgentRunStartedAt] = useState<number | undefined>();
+  const [agentRunElapsedSeconds, setAgentRunElapsedSeconds] = useState(0);
+  const [lastAgentChunkAt, setLastAgentChunkAt] = useState<number | undefined>();
   const [pendingAssistantMessageId, setPendingAssistantMessageId] = useState<string | undefined>();
   const [exportResult, setExportResult] = useState<ProjectExportResult | undefined>();
   const [exportError, setExportError] = useState<string | undefined>();
@@ -84,6 +95,7 @@ export function App() {
   const [activeConfigTab, setActiveConfigTab] = useState<ConfigTabId>("flows");
   const [selectedTopologyItem, setSelectedTopologyItem] = useState<SelectedTopologyItem | undefined>();
   const [selectedFlowId, setSelectedFlowId] = useState<string | undefined>();
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -143,6 +155,54 @@ export function App() {
     setSelectedTopologyItem(undefined);
     setSelectedFlowId(undefined);
   }, [currentSession.id]);
+
+  useEffect(() => {
+    if (!isAgentRunning || agentRunPhase !== "streaming") {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setAgentRunPhase((phase) => (phase === "streaming" ? "waiting" : phase));
+    }, AGENT_STREAM_STALL_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [agentRunPhase, isAgentRunning, lastAgentChunkAt]);
+
+  useEffect(() => {
+    if (!isAgentRunning || agentRunStartedAt === undefined) {
+      return;
+    }
+
+    const updateElapsedSeconds = () => {
+      setAgentRunElapsedSeconds(Math.max(0, Math.floor((Date.now() - agentRunStartedAt) / 1000)));
+    };
+
+    updateElapsedSeconds();
+    const intervalId = window.setInterval(updateElapsedSeconds, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [agentRunStartedAt, isAgentRunning]);
+
+  useEffect(() => {
+    const messagesContainer = messagesContainerRef.current;
+
+    if (!messagesContainer) {
+      return;
+    }
+
+    if (typeof messagesContainer.scrollTo === "function") {
+      messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior: isAgentRunning ? "smooth" : "auto",
+      });
+    } else {
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+  }, [currentSession.id, currentSession.messages, isAgentRunning]);
 
   const project = currentSession.project;
   const bundle = currentSession.bundle;
@@ -217,6 +277,7 @@ export function App() {
   const endSystemCount = project?.topology.nodes.filter(isEndSystem).length ?? 0;
   const linkCount = project?.topology.links.length ?? 0;
   const flowCount = visibleFlows.length;
+  const artifactGroups = useMemo(() => groupArtifacts(bundle?.artifacts ?? []), [bundle]);
 
   useEffect(() => {
     if (!project || !selectedTopologyItem) {
@@ -286,6 +347,10 @@ export function App() {
 
     setInput((value) => (value.trim() === trimmedInput ? "" : value));
     setIsAgentRunning(true);
+    setAgentRunPhase("connecting");
+    setAgentRunStartedAt(Date.now());
+    setAgentRunElapsedSeconds(0);
+    setLastAgentChunkAt(undefined);
     setPendingAssistantMessageId(assistantMessage.id);
     setExportResult(undefined);
     setExportError(undefined);
@@ -313,14 +378,17 @@ export function App() {
         diagnostics: diagnosticsRepository,
         onChunk: (chunk) => {
           streamedText += chunk;
+          setAgentRunPhase("streaming");
+          setLastAgentChunkAt(Date.now());
           setPendingAssistantMessageId(undefined);
           updateAssistantMessage(pendingSession.id, assistantMessage.id, redactProviderNamesForDisplay(streamedText));
         },
       });
       const completedAt = new Date().toISOString();
+      const shouldApplyProject = result.shouldApplyProject !== false;
       const nextSession: TsnSession = {
         ...pendingSession,
-        title: result.project.name,
+        title: shouldApplyProject ? result.project.name : pendingSession.title,
         updatedAt: completedAt,
         messages: pendingSession.messages.map((message) =>
           message.id === assistantMessage.id
@@ -329,9 +397,9 @@ export function App() {
         ),
         claudeSessionId: result.claudeSessionId ?? pendingSession.claudeSessionId,
         agentEvents: [...pendingSession.agentEvents, ...stampAgentEvents(result.events, completedAt)],
-        workflow: result.workflow,
-        project: result.project,
-        bundle: result.bundle,
+        workflow: shouldApplyProject ? result.workflow : pendingSession.workflow,
+        project: shouldApplyProject ? result.project : pendingSession.project,
+        bundle: shouldApplyProject ? result.bundle : pendingSession.bundle,
       };
 
       if (!(await sessionExists(nextSession.id))) {
@@ -359,6 +427,7 @@ export function App() {
       setCurrentSession((session) => (session.id === nextSession.id ? nextSession : session));
       setSessions(await repository.list());
     } catch (error) {
+      setInput(trimmedInput);
       setPendingAssistantMessageId(undefined);
       logDiagnostic(diagnosticsRepository, {
         sessionId: pendingSession.id,
@@ -385,6 +454,10 @@ export function App() {
       });
     } finally {
       setPendingAssistantMessageId(undefined);
+      setAgentRunPhase("idle");
+      setAgentRunStartedAt(undefined);
+      setAgentRunElapsedSeconds(0);
+      setLastAgentChunkAt(undefined);
       setIsAgentRunning(false);
     }
   }
@@ -576,7 +649,7 @@ export function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" aria-busy={isAgentRunning}>
       <header className="brand-header">
         <div className="brand-logo" aria-hidden="true">
           <img src={tsnAgentMark} alt="" />
@@ -597,6 +670,8 @@ export function App() {
           日志
         </button>
       </header>
+
+      {isAgentRunning && <AgentRunStatusBar elapsedSeconds={agentRunElapsedSeconds} phase={agentRunPhase} />}
 
       {isSessionOpen && (
         <div className="session-overlay" role="presentation" onMouseDown={() => setIsSessionOpen(false)}>
@@ -696,7 +771,7 @@ export function App() {
             ))}
           </div>
 
-          <div className="messages" aria-live="polite">
+          <div className="messages" aria-live="polite" ref={messagesContainerRef}>
             {currentSession.messages.map((message) => (
               <article
                 className={[
@@ -733,10 +808,11 @@ export function App() {
                 id="intent"
                 aria-label="输入你的 TSN 需求"
                 value={input}
+                placeholder={INTENT_PLACEHOLDER}
                 onChange={(event) => setInput(event.target.value)}
                 rows={3}
               />
-              <button type="button" aria-label="生成规划草案" onClick={handleSubmit} disabled={isAgentRunning}>
+              <button type="button" aria-label="生成规划草案" onClick={handleSubmit} disabled={isAgentRunning || !input.trim()}>
                 <TelegramSendIcon />
               </button>
             </div>
@@ -935,8 +1011,8 @@ export function App() {
                 >
                 <div className="panel-heading inline">
                   <div>
-                    <h2>仿真输入文件</h2>
-                    <p>NED、最小 INET ini、React Flow JSON、规划器输入和 manifest；当前不会执行 OMNeT++。</p>
+                    <h2>项目导出文件</h2>
+                    <p>按用途分组的工作台数据、规划器输入和 INET 仿真输入；当前不会执行 OMNeT++。</p>
                   </div>
                   <button className="btn" type="button" onClick={refreshBundle} disabled={!canRefreshBundle}>
                     <RefreshCw size={14} aria-hidden="true" />
@@ -965,16 +1041,29 @@ export function App() {
                   </div>
                 </div>
                 <div className="artifact-list">
-                  {(bundle?.artifacts ?? []).map((artifact) => (
-                    <article className="artifact-item" key={artifact.path}>
-                      <FileText size={15} aria-hidden="true" />
-                      <div>
-                        <span>{artifact.path}</span>
-                        <p>{artifact.label ?? artifact.purpose}</p>
+                  {artifactGroups.map((group) => (
+                    <section className="artifact-group" key={group.id} aria-label={group.label}>
+                      <div className="artifact-group-heading">
+                        <span>{group.label}</span>
+                        <small>{group.items.length} 个文件</small>
                       </div>
-                    </article>
+                      {group.items.map(({ artifact, classification }) => (
+                        <article className="artifact-item" key={artifact.path}>
+                          <FileText size={15} aria-hidden="true" />
+                          <div>
+                            <span>{artifact.path}</span>
+                            <p>
+                              {artifact.label ?? artifact.purpose}
+                              <strong>{classification.roleLabel}</strong>
+                              {classification.isEntrypoint && <em>入口</em>}
+                              {artifact.observedExternal && <em>外部观测</em>}
+                            </p>
+                          </div>
+                        </article>
+                      ))}
+                    </section>
                   ))}
-                  {!bundle && <div className="empty-panel mono">完成“模拟仿真”阶段后显示仿真输入文件</div>}
+                  {!bundle && <div className="empty-panel mono">完成“模拟仿真”阶段后显示项目导出文件</div>}
                 </div>
                 {exportResult && (
                   <p className="export-status mono" role="status">
@@ -1078,6 +1167,34 @@ function AgentWaitingIndicator() {
   );
 }
 
+function AgentRunStatusBar({ elapsedSeconds, phase }: { elapsedSeconds: number; phase: AgentRunPhase }) {
+  const message = getAgentRunStatusMessage(phase);
+
+  return (
+    <div className={`agent-run-status ${phase}`} role="status" aria-live="polite" data-testid="agent-run-status">
+      <span className="agent-waiting-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+      <span>{message}</span>
+      <span className="agent-run-elapsed mono">已运行 {elapsedSeconds} 秒</span>
+    </div>
+  );
+}
+
+function getAgentRunStatusMessage(phase: AgentRunPhase): string {
+  if (phase === "waiting") {
+    return "智能助手仍在处理，可能正在等待工具或子任务返回";
+  }
+
+  if (phase === "streaming") {
+    return "智能助手正在持续推理，结果会继续更新";
+  }
+
+  return "智能助手正在连接并准备当前会话上下文";
+}
+
 function TelegramSendIcon() {
   return (
     <svg
@@ -1119,6 +1236,37 @@ function DetailRow({ label, value }: { label: string; value: string | number }) 
     </div>
   );
 }
+
+function groupArtifacts(artifacts: ExportedArtifact[]) {
+  const grouped = new Map<ArtifactGroupId, Array<{ artifact: ExportedArtifact; classification: ArtifactClassification }>>();
+
+  for (const artifact of artifacts) {
+    const classification = classifyArtifact(artifact);
+    const artifactsForGroup = grouped.get(classification.group) ?? [];
+    artifactsForGroup.push({ artifact, classification });
+    grouped.set(classification.group, artifactsForGroup);
+  }
+
+  return ARTIFACT_GROUP_ORDER
+    .map((groupId) => {
+      const items = grouped.get(groupId) ?? [];
+
+      return {
+        id: groupId,
+        label: items[0]?.classification.groupLabel ?? artifactGroupFallbackLabels[groupId],
+        items,
+      };
+    })
+    .filter((group) => group.items.length > 0);
+}
+
+const artifactGroupFallbackLabels: Record<ArtifactGroupId, string> = {
+  workspace: "工作台展示",
+  planner: "外部规划器",
+  "simulation-inet": "INET 仿真输入",
+  manifest: "清单",
+  legacy: "旧版文件",
+};
 
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", {

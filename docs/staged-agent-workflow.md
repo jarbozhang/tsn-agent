@@ -7,7 +7,7 @@ TSN Agent 当前使用四个稳定阶段 ID：
 - `topology`：解析自然语言拓扑规模，生成 canonical 拓扑。
 - `time-sync`：展示时间同步默认假设，后续再细化 gPTP、GM 和端口关系。
 - `flow-template`：用户可见为“流量规划”，基于当前拓扑准备 ST 控制流/视频流等流量输入。
-- `planning-export`：用户可见为“模拟仿真”，刷新仿真输入、`flow_plan_1.json`、NED、React Flow JSON 和 manifest；当前不执行 OMNeT++。
+- `planning-export`：用户可见为“模拟仿真”，刷新项目导出文件，包括 `simulation/inet/omnetpp.ini`、`simulation/inet/traffic.ini`、NED、`workspace/react-flow-topology.json`、`planner/flow_plan_1.json` 和 manifest；当前不执行 OMNeT++。
 
 阶段完成后进入 `waiting_confirmation`，用户点击“确认并继续”才进入下一阶段。显式输入“直接生成”会走快速路径，一次完成四个阶段。
 
@@ -38,4 +38,4 @@ session/workflow state 只保存 scenario config id。未知 id 会回退到 `ge
 
 拓扑、时间同步和流量规划阶段可以存在 project 草案，但 UI 不显示“仿真已执行”或“导出已完成”。只有到 `planning-export` 阶段后，用户才看到仿真输入文件和保存/导出动作。
 
-`flow_plan_1.json` 是规划器输入，不是规划器运行结果。`flow_plan_result_1.json` 仍属于后续外置规划器输出。
+`planner/flow_plan_1.json` 是规划器输入，不是规划器运行结果。`planner/flow_plan_result_1.json` 仍属于后续外置规划器输出。

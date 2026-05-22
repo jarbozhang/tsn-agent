@@ -7,6 +7,7 @@ export const NED_CONTRACT = {
   endSystemModule: "TsnDevice",
   connectionChannel: "EthernetLink",
   relativePath: "tsnagent/generated/network.ned",
+  artifactPath: "simulation/inet/tsnagent/generated/network.ned",
   imports: [
     "inet.networks.base.TsnNetworkBase",
     "inet.node.ethernet.EthernetLink",

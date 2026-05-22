@@ -9,7 +9,7 @@ import { getScenarioConfig } from "../domain/scenario-config";
 import type { CanonicalTsnProjectV0, TopologyIntent } from "../domain/canonical";
 import { repairSessionTopologyFromMessages } from "../sessions/session-topology-repair";
 import { redactProviderNamesForDisplay } from "../ui/display-redaction";
-import { recordStageResult } from "../project/project-state";
+import { normalizeWorkflowState, recordStageResult } from "../project/project-state";
 import {
   parseStageSkillResult,
   summarizeStageSkillResult,
@@ -35,6 +35,7 @@ interface ClaudeAgentResponse {
   assistantText: string;
   sessionId?: string;
   stageResults?: unknown[];
+  auditPath?: string;
 }
 
 interface ClaudeAgentEvent {
@@ -49,6 +50,7 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
   const { userIntent } = request;
   const normalizedSession = normalizeSessionForDeterministicRun(request.session);
   const deterministicResult = runFakeTsnAgent(userIntent, normalizedSession?.project, normalizedSession?.workflow);
+  const preserveResult = createPreservedAgentResult(userIntent, deterministicResult, normalizedSession);
   const runId = request.runId ?? createRunId();
   const sessionId = request.session?.id;
   const startedAt = Date.now();
@@ -124,8 +126,8 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
         appSessionId: normalizedSession?.id,
         resumeSessionId: normalizedSession?.claudeSessionId,
         conversationContext: normalizedSession
-          ? buildConversationContext(normalizedSession, userIntent, deterministicResult)
-          : buildGeneratedProjectContext(deterministicResult),
+          ? buildConversationContext(normalizedSession, userIntent)
+          : buildEmptySessionContext(deterministicResult),
         stageRunnerInput: buildStageRunnerInput(userIntent, deterministicResult, normalizedSession?.project),
       },
     });
@@ -133,6 +135,7 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
       stageResults: claude.stageResults ?? [],
       fallbackResult: deterministicResult,
       previousSession: normalizedSession,
+      userIntent,
     });
     logAgent(request.diagnostics, {
       sessionId,
@@ -146,10 +149,13 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
         stageResultCount: claude.stageResults?.length ?? 0,
         appliedStageResult: stageResultApplication.applied?.skillName,
         rejectedStageResults: stageResultApplication.rejections.length,
+        auditPath: claude.auditPath,
       },
     });
 
-    const assistantText = sanitizeClaudeAssistantText(claude.assistantText, stageResultApplication.result);
+    const assistantText = stageResultApplication.result.shouldApplyProject === false
+      ? stageResultApplication.result.assistantText
+      : sanitizeClaudeAssistantText(claude.assistantText, stageResultApplication.result);
 
     return {
       ...stageResultApplication.result,
@@ -171,12 +177,9 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
     });
 
     return {
-      ...deterministicResult,
-      assistantText: [
-        "本机智能助手暂时不可用，已切换到内置规划器完成当前草案。",
-        deterministicResult.assistantText,
-      ].join("\n"),
-      mode: "fake",
+      ...preserveResult,
+      assistantText: buildAgentFailureText(error, userIntent),
+      mode: "claude",
     };
   } finally {
     unlisten?.();
@@ -243,34 +246,44 @@ async function listenToClaudeChunks(runId: string, onChunk?: (chunk: string) => 
   }
 }
 
-function buildConversationContext(session: TsnSession, currentIntent: string, result: FakeAgentResult): string {
+function buildConversationContext(session: TsnSession, currentIntent: string): string {
   const recentMessages = session.messages
-    .filter((message) => message.content.trim() && message.content.trim() !== currentIntent.trim())
-    .slice(-10)
+    .map((message) => ({
+      ...message,
+      content: summarizeMessageForContext(message.content),
+    }))
+    .filter((message) => message.content && message.content !== currentIntent.trim())
+    .slice(-6)
     .map(formatMessageForContext)
     .join("\n");
+  const workflow = normalizeWorkflowState(session.workflow);
+  const scenarioConfig = getScenarioConfig(workflow.scenarioConfigId);
   const projectSummary = session.project
     ? [
         `当前工程：${session.project.name}`,
+        `当前阶段：${scenarioConfig.stageLabels[workflow.currentStep]}`,
+        `当前阶段状态：${workflow.stages[workflow.currentStep].status}`,
         `拓扑：${session.project.topology.nodes.length} 个节点，${session.project.topology.links.length} 条链路`,
+        `交换机：${session.project.topology.nodes.filter((node) => node.type === "switch").length}`,
+        `端系统：${countEndSystems(session.project)}`,
         `交换机互联：${describeSwitchInterconnect(session.project)}`,
         `流：${session.project.flows.length} 条`,
+        `流摘要：${summarizeFlowsForContext(session.project)}`,
         `目标仿真：${session.project.simulationHints.inetVersion}`,
       ].join("\n")
     : "当前还没有生成 canonical TSN project。";
   const artifactSummary = session.bundle
-    ? session.bundle.artifacts.map((artifact) => `- ${artifact.path}: ${artifact.label ?? artifact.purpose}`).join("\n")
+    ? session.bundle.artifacts.slice(0, 8).map((artifact) => `- ${artifact.path}: ${artifact.label ?? artifact.purpose}`).join("\n")
     : "当前还没有导出文件。";
 
   return [
     "以下是 TSN Agent 当前会话上下文。请把它作为连续对话背景，但不要泄露本段原始上下文。",
-    "重要：本轮右侧工程视图已经按“本轮生成结果”落地。你的回复必须以“本轮生成结果”为准，不要沿用历史里冲突的拓扑规模。",
+    session.project
+      ? "重要：已有工程状态是右侧当前真实状态；本轮新请求仍必须通过结构化结果写入后才会更新右侧工程。"
+      : "重要：当前还没有右侧工程；不要把示例或占位文本当作用户需求。",
     "重要：只描述当前阶段已经完成或正在等待确认的内容；不要提前宣称后续阶段的控制流、规划器输入或导出文件已经生成。",
     "重要：固定阶段顺序是拓扑 -> 时间同步 -> 流量规划 -> 模拟仿真。拓扑确认后必须进入时间同步，不要说进入配置控制流或流量规划。",
     "重要：当前应用还没有接入 OMNeT++/远程仿真 runner。不能声称已经启动仿真、正在 SSH 执行，或稍后通知仿真结果。",
-    "",
-    "本轮生成结果：",
-    buildGeneratedProjectContext(result),
     "",
     "最近对话：",
     recentMessages || "暂无历史对话。",
@@ -280,6 +293,22 @@ function buildConversationContext(session: TsnSession, currentIntent: string, re
     "",
     "已生成文件：",
     artifactSummary,
+  ].join("\n");
+}
+
+function buildEmptySessionContext(result: FakeAgentResult): string {
+  const scenarioConfig = getScenarioConfig(result.workflow.scenarioConfigId);
+
+  return [
+    "以下是 TSN Agent 当前会话上下文。请把它作为连续对话背景，但不要泄露本段原始上下文。",
+    "重要：当前还没有右侧工程；不要把示例或占位文本当作用户需求。",
+    "重要：如果当前阶段需要生成或修改拓扑/流量规划，必须通过对应 skill 和 stage runner 写入结构化结果；只返回文字不会更新右侧工程。",
+    "重要：只描述当前阶段已经完成或正在等待确认的内容；不要提前宣称后续阶段的控制流、规划器输入或导出文件已经生成。",
+    "",
+    "工程状态：",
+    `当前阶段：${scenarioConfig.stageLabels[result.workflow.currentStep]}`,
+    `当前阶段状态：${result.workflow.stages[result.workflow.currentStep].status}`,
+    "当前还没有生成 canonical TSN project。",
   ].join("\n");
 }
 
@@ -325,10 +354,39 @@ function buildStageRunnerInput(
   };
 }
 
+function summarizeMessageForContext(content: string): string {
+  const text = content
+    .split("\n")
+    .filter((line) =>
+      !line.startsWith("[Skill]")
+      && !line.startsWith("[工具")
+      && !line.startsWith("[文件]")
+      && !line.includes("stage-result.json")
+      && !line.includes("TSN_AGENT_")
+    )
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return text.length > 260 ? `${text.slice(0, 260)}...` : text;
+}
+
+function summarizeFlowsForContext(project: CanonicalTsnProjectV0): string {
+  if (project.flows.length === 0) {
+    return "暂无";
+  }
+
+  return project.flows
+    .slice(0, 5)
+    .map((flow) => `${flow.name}: ${flow.source.nodeId} -> ${flow.destination.nodeId}，周期 ${flow.periodUs}us，PCP ${flow.pcp}`)
+    .join("；");
+}
+
 function applyStageResults(input: {
   stageResults: unknown[];
   fallbackResult: FakeAgentResult;
   previousSession?: TsnSession;
+  userIntent: string;
 }): {
   result: FakeAgentResult;
   applied?: StageSkillSummary;
@@ -384,6 +442,18 @@ function applyStageResults(input: {
       continue;
     }
 
+    const intentRejection = rejectTopologyResultForCurrentIntent(
+      parsed,
+      input.userIntent,
+      input.previousSession?.project,
+      input.fallbackResult.project,
+    );
+
+    if (intentRejection) {
+      rejections.push(intentRejection);
+      continue;
+    }
+
     const skillResult = summarizeStageSkillResult(parsed);
     const workflow = recordStageResult(input.fallbackResult.workflow, {
       step: "topology",
@@ -405,8 +475,15 @@ function applyStageResults(input: {
     };
   }
 
+  if (isTopologyRequestWithoutExistingProject(input.fallbackResult, input.previousSession)) {
+    return {
+      result: markFallbackResult(input.fallbackResult, input.previousSession, ["未收到结构化拓扑结果。"]),
+      rejections: ["未收到结构化拓扑结果。"],
+    };
+  }
+
   return {
-    result: markFallbackResult(input.fallbackResult, input.stageResults.length > 0 ? rejections : []),
+    result: markFallbackResult(input.fallbackResult, input.previousSession, input.stageResults.length > 0 ? rejections : []),
     rejections,
   };
 }
@@ -420,7 +497,7 @@ function createAppliedTopologyEvents(result: StageSkillResult & { stage: "topolo
       kind: "tool-availability",
       stage: "topology",
       title: "工具权限",
-      content: "本轮智能助手已启用 Bash、Edit、Write 工具权限；右侧工程状态只应用通过校验的结构化结果。",
+      content: "本轮智能助手已启用 Read、Bash、Edit、Write 工具权限；右侧工程状态只应用通过校验的结构化结果。",
       status: "info",
     }),
     createEvent({
@@ -461,7 +538,7 @@ function createAppliedFlowPlanningEvents(result: StageSkillResult & { stage: "fl
       kind: "tool-availability",
       stage: "flow-template",
       title: "工具权限",
-      content: "本轮智能助手已启用 Bash、Edit、Write 工具权限；右侧工程状态只应用通过校验的结构化结果。",
+      content: "本轮智能助手已启用 Read、Bash、Edit、Write 工具权限；右侧工程状态只应用通过校验的结构化结果。",
       status: "info",
     }),
     createEvent({
@@ -493,23 +570,44 @@ function createAppliedFlowPlanningEvents(result: StageSkillResult & { stage: "fl
   ];
 }
 
-function markFallbackResult(result: FakeAgentResult, rejections: string[]): FakeAgentResult {
-  const events = result.events.map((event) => {
-    if (event.kind !== "tool-availability" && event.kind !== "skill-result") {
-      return event;
-    }
+function markFallbackResult(result: FakeAgentResult, previousSession: TsnSession | undefined, rejections: string[]): FakeAgentResult {
+  if (result.workflow.currentStep !== "topology") {
+    const events = result.events.map((event) => {
+      if (event.kind !== "tool-availability" && event.kind !== "skill-result") {
+        return event;
+      }
 
-    const suffix = event.kind === "tool-availability"
-      ? "当前工程状态来自本地 fallback。"
-      : "本轮未收到可应用的结构化 skill 结果，已使用本地 fallback 生成。";
+      const suffix = event.kind === "tool-availability"
+        ? "当前工程状态来自本地 fallback。"
+        : "本轮未收到可应用的结构化 skill 结果，已使用本地 fallback 生成。";
+
+      return {
+        ...event,
+        title: event.kind === "tool-availability" ? "本地 fallback" : event.title,
+        content: `${event.content}${event.content.endsWith("。") ? "" : "。"}${suffix}`,
+        status: event.status === "error" ? event.status : "warning",
+      } satisfies AgentEvent;
+    });
+    const rejectionEvents = rejections.length > 0
+      ? [
+          createEvent({
+            id: "event-stage-result-rejected",
+            kind: "error",
+            stage: result.workflow.currentStep,
+            title: "结构化结果未应用",
+            content: `本轮 skill 结果未通过校验，已使用本地 fallback。原因：${rejections.join("；")}`,
+            status: "error",
+          }),
+        ]
+      : [];
 
     return {
-      ...event,
-      title: event.kind === "tool-availability" ? "本地 fallback" : event.title,
-      content: `${event.content}${event.content.endsWith("。") ? "" : "。"}${suffix}`,
-      status: event.status === "error" ? event.status : "warning",
-    } satisfies AgentEvent;
-  });
+      ...result,
+      events: [...events, ...rejectionEvents],
+    };
+  }
+
+  const preservedResult = createPreservedAgentResult("", result, previousSession);
   const rejectionEvents = rejections.length > 0
     ? [
         createEvent({
@@ -517,16 +615,85 @@ function markFallbackResult(result: FakeAgentResult, rejections: string[]): Fake
           kind: "error",
           stage: result.workflow.currentStep,
           title: "结构化结果未应用",
-          content: `本轮 skill 结果未通过校验，已使用本地 fallback。原因：${rejections.join("；")}`,
+          content: `本轮 skill 结果未通过校验，已保留当前工程状态。原因：${rejections.join("；")}`,
           status: "error",
         }),
       ]
     : [];
 
   return {
-    ...result,
-    events: [...events, ...rejectionEvents],
+    ...preservedResult,
+    assistantText: buildTopologyFailureText(rejections),
+    events: [...preservedResult.events, ...rejectionEvents],
   };
+}
+
+function createPreservedAgentResult(
+  userIntent: string,
+  deterministicResult: FakeAgentResult,
+  previousSession?: TsnSession,
+): FakeAgentResult {
+  if (!previousSession?.project) {
+    const events = [
+      createEvent({
+        id: "event-topology-no-result",
+        kind: "error",
+        stage: deterministicResult.workflow.currentStep,
+        title: "拓扑未更新",
+        content: "本轮没有生成可应用的拓扑结果，右侧工程暂不落图。请补充交换机数量、网卡/端系统数量、连接关系，或按错误提示修改后重试。",
+        status: "error",
+      }),
+    ] satisfies AgentEvent[];
+
+    return {
+      ...deterministicResult,
+      bundle: undefined,
+      events,
+      assistantText: buildTopologyFailureText([]),
+      shouldApplyProject: false,
+    };
+  }
+
+  const events = [
+    createEvent({
+      id: "event-project-preserved",
+      kind: "error",
+      stage: deterministicResult.workflow.currentStep,
+      title: "工程已保留",
+      content: "本轮没有生成可应用的结构化结果，右侧工程保持上一版，不会用本地默认拓扑覆盖。",
+      status: "warning",
+    }),
+  ] satisfies AgentEvent[];
+
+  return {
+    ...deterministicResult,
+    project: previousSession.project,
+    bundle: previousSession.bundle,
+    workflow: previousSession.workflow,
+    events,
+    assistantText: userIntent ? buildTopologyFailureText([]) : "",
+    shouldApplyProject: false,
+  };
+}
+
+function buildAgentFailureText(error: unknown, userIntent: string): string {
+  return buildTopologyFailureText([
+    `智能助手执行失败：${normalizeError(error)}`,
+    `本轮需求：${userIntent}`,
+  ]);
+}
+
+function buildTopologyFailureText(reasons: string[]): string {
+  const reasonText = reasons.length > 0
+    ? `\n失败原因：${reasons.join("；")}`
+    : "";
+
+  return [
+    "本轮拓扑没有更新，因为没有拿到可应用的结构化结果。",
+    "右侧工程已保持原状态，不会自动 fallback 到默认拓扑。",
+    `${reasonText}`,
+    "请检查或补充：交换机数量、网卡/端系统数量、每个网卡连接到哪台交换机、双归属网卡是否使用两个不同端口。",
+  ].filter((line) => line.trim()).join("\n");
 }
 
 function createEvent(input: AgentEvent): AgentEvent {
@@ -542,7 +709,12 @@ function shouldUseDeterministicOnly(userIntent: string, result: FakeAgentResult)
 }
 
 function isBoundaryProgressionIntent(userIntent: string, result: FakeAgentResult): boolean {
-  if (!/^(确认|可以|好的|没问题|按这个|就这样|同意|通过|使用|采用|先给默认|默认|用默认|采用默认|使用默认|继续|下一步)\s*[。.!！]?$/i.test(userIntent.trim())) {
+  const trimmed = userIntent.trim();
+  const isShortConfirmation = /^(确认|可以|好的|没问题|对|正确|按这个|就这样|同意|通过|使用|采用|先给默认|默认|用默认|采用默认|使用默认|继续|下一步)\s*[。.!！]?$/i.test(trimmed);
+  const confirmsPreviousUnderstanding = /^理解的对(?:，|,|\s|。|！|!|$)/i.test(trimmed)
+    || /按照上面的理解/.test(trimmed);
+
+  if (!isShortConfirmation && !confirmsPreviousUnderstanding) {
     return false;
   }
 
@@ -594,7 +766,7 @@ function inferTopologyIntentFromProject(project: CanonicalTsnProjectV0): Topolog
       endSystemsPerSwitch: 0,
       switchInterconnect: "line",
       topologyTemplate: "aerospace-redundant",
-      endSystemCount: 7,
+      endSystemCount: countEndSystems(project),
     };
   }
 
@@ -606,6 +778,95 @@ function inferTopologyIntentFromProject(project: CanonicalTsnProjectV0): Topolog
     endSystemsPerSwitch: Math.max(1, Math.round(endSystemCount / switchCount)),
     switchInterconnect: describeSwitchInterconnect(project) === "环形互联" ? "ring" : "line",
   };
+}
+
+function rejectTopologyResultForCurrentIntent(
+  result: StageSkillResult & { stage: "topology" },
+  userIntent: string,
+  previousProject: CanonicalTsnProjectV0 | undefined,
+  fallbackProject: CanonicalTsnProjectV0,
+): string | undefined {
+  const previousCount = previousProject ? countEndSystems(previousProject) : undefined;
+  const expectedCount = inferRequestedEndSystemCount(userIntent, previousCount);
+
+  if (expectedCount === undefined) {
+    return undefined;
+  }
+
+  const actualCount = countEndSystems(result.payload.project);
+  const fallbackCount = countEndSystems(fallbackProject);
+
+  if (actualCount === expectedCount || fallbackCount !== expectedCount) {
+    return undefined;
+  }
+
+  return `拓扑 skill 结果与本轮用户意图不一致：用户请求 ${expectedCount} 个网卡/端系统，但 skill 返回 ${actualCount} 个。`;
+}
+
+function isTopologyRequestWithoutExistingProject(result: FakeAgentResult, previousSession?: TsnSession): boolean {
+  return !previousSession?.project && result.workflow.currentStep === "topology";
+}
+
+function inferRequestedEndSystemCount(text: string, previousCount?: number): number | undefined {
+  const values: number[] = [];
+  const totalPatterns = [
+    /(?:从|由)?\s*[一二两三四五六七八九十\d]+\s*(?:个|块|张|台)?\s*(?:网卡|端系统|终端|端(?!口))\s*(?:改成|改为|变为|调整为|设为|改至|到)\s*([一二两三四五六七八九十\d]+)\s*(?:个|块|张|台)?\s*(?:网卡|端系统|终端|端(?!口))?/gi,
+    /([一二两三四五六七八九十\d]+)\s*(?:个|块|张|台)?\s*(?:网卡|端系统|终端|端(?!口))/gi,
+  ];
+
+  for (const pattern of totalPatterns) {
+    for (const match of text.matchAll(pattern)) {
+      values.push(parseChineseNumber(match[1]));
+    }
+  }
+
+  for (const match of text.matchAll(/(?:网卡|端系统|终端)\s*([一二两三四五六七八九十\d]+)/gi)) {
+    values.push(parseChineseNumber(match[1]));
+  }
+
+  for (const match of text.matchAll(/(?:网卡|端系统|终端)\s*((?:[一二两三四五六七八九十\d]+\s*(?:、|,|，|和|及|与)?\s*)+)/gi)) {
+    for (const value of match[1].matchAll(/[一二两三四五六七八九十\d]+/g)) {
+      values.push(parseChineseNumber(value[0]));
+    }
+  }
+
+  const addMatch = text.match(/(?:再加|再添加|新增|添加|加|增加)\s*([一二两三四五六七八九十\d]+)\s*(?:个|块|张|台)?\s*(?:网卡|端系统|终端)/i);
+  if (addMatch && previousCount !== undefined) {
+    values.push(previousCount + parseChineseNumber(addMatch[1]));
+  }
+
+  const validValues = values.filter((value) => Number.isFinite(value) && value > 0);
+  return validValues.length > 0 ? Math.max(...validValues) : undefined;
+}
+
+function parseChineseNumber(value?: string): number {
+  if (!value) {
+    return 0;
+  }
+
+  if (/^\d+$/.test(value)) {
+    return Number(value);
+  }
+
+  const digits: Record<string, number> = {
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10,
+  };
+
+  return digits[value] ?? 0;
+}
+
+function countEndSystems(project: CanonicalTsnProjectV0): number {
+  return project.topology.nodes.filter((node) => node.type === "endSystem").length;
 }
 
 function isAerospaceRedundantProject(project: CanonicalTsnProjectV0): boolean {

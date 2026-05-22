@@ -17,6 +17,10 @@ async function main() {
     errors.push(`${skillRoot} must contain at least one project skill.`);
   }
 
+  if (!/allowedTools:\s*\[[^\]]*["']Skill["']/s.test(workerSource)) {
+    errors.push("src-node/claude-agent-worker.mjs must allow the Skill tool when project skills are configured.");
+  }
+
   for (const skillName of skillNames) {
     const skillPath = `${skillRoot}/${skillName}/SKILL.md`;
     const skillSource = await readFile(skillPath, "utf8");
@@ -30,14 +34,17 @@ async function main() {
       errors.push(`src-node/claude-agent-worker.mjs must declare skill "${skillName}".`);
     }
 
-    const resourceSource = `../${skillPath}`;
-    const resourceTarget = `${skillPath}`;
-    if (resources[resourceSource] !== resourceTarget) {
-      errors.push(`src-tauri/tauri.conf.json must map "${resourceSource}" to "${resourceTarget}".`);
-    }
+    const skillFiles = await listSkillFiles(`${skillRoot}/${skillName}`);
+    for (const filePath of skillFiles) {
+      const resourceSource = `../${filePath}`;
+      const resourceTarget = `${filePath}`;
+      if (resources[resourceSource] !== resourceTarget) {
+        errors.push(`src-tauri/tauri.conf.json must map "${resourceSource}" to "${resourceTarget}".`);
+      }
 
-    if (await isGitIgnored(skillPath)) {
-      errors.push(`${skillPath} is ignored by git; update .gitignore so the project skill is tracked.`);
+      if (await isGitIgnored(filePath)) {
+        errors.push(`${filePath} is ignored by git; update .gitignore so the project skill is tracked.`);
+      }
     }
   }
 
@@ -50,6 +57,26 @@ async function main() {
   }
 
   console.log(`verify:skills: ${skillNames.join(", ")} ok`);
+}
+
+async function listSkillFiles(skillDir) {
+  const entries = await readdir(skillDir, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    if (entry.name === ".DS_Store" || entry.name.endsWith(".swp")) {
+      continue;
+    }
+
+    const path = `${skillDir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      files.push(...await listSkillFiles(path));
+    } else if (entry.isFile()) {
+      files.push(path);
+    }
+  }
+
+  return files.sort();
 }
 
 async function listProjectSkills() {

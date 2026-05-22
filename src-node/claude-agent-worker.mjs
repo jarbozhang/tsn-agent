@@ -1,8 +1,7 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { mkdir, readFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 export const responseSchema = {
@@ -28,13 +27,124 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
   const operationTraceKeys = new Set();
   const toolUseNamesById = new Map();
   const stageResultPath = resolvedOptions.stageResultPath ?? await createStageResultPath();
+  const skillOutputDir = resolvedOptions.skillOutputDir ?? await createSkillOutputDir(stageResultPath);
   const stageRunnerPath = resolvedOptions.stageRunnerPath ?? resolveStageRunnerPath(cwd);
+  const stageRunnerInputPath = await writeStageRunnerInputFile(stageResultPath, resolvedOptions.stageRunnerInput);
+  const finalPrompt = buildPrompt(
+    userPrompt,
+    resolvedOptions.conversationContext,
+    stageResultPath,
+    skillOutputDir,
+    resolvedOptions.stageRunnerInput,
+    stageRunnerPath,
+    stageRunnerInputPath,
+  );
+  const sdkOptions = {
+    cwd,
+    settingSources: ["user", "project"],
+    permissionMode: "dontAsk",
+    tools: { type: "preset", preset: "claude_code" },
+    allowedTools: ["Skill", "Read", "Bash", "Edit", "Write"],
+    disallowedTools: [],
+    skills: ["tsn-topology", "tsn-flow-planning"],
+    env: {
+      ...process.env,
+      TSN_AGENT_STAGE_RESULT_PATH: stageResultPath,
+      TSN_AGENT_SKILL_OUTPUT_DIR: skillOutputDir,
+      TSN_AGENT_STAGE_RUNNER_PATH: stageRunnerPath,
+      ...(stageRunnerInputPath ? { TSN_AGENT_STAGE_RUNNER_INPUT_PATH: stageRunnerInputPath } : {}),
+    },
+    maxTurns: resolvedOptions.maxTurns ?? 8,
+    includePartialMessages: true,
+    ...(typeof resolvedOptions.resumeSessionId === "string" && resolvedOptions.resumeSessionId.length > 0
+      ? { resume: resolvedOptions.resumeSessionId }
+      : {}),
+    systemPrompt:
+      "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。可以使用本轮启用的工具和 TSN 项目 skill，但工程状态只接受结构化校验结果。除 TSN_AGENT_SKILL_OUTPUT_DIR 和 TSN_AGENT_STAGE_RESULT_PATH 指向的位置外，不要写入仓库文件。固定阶段顺序是拓扑、时间同步、流量规划、模拟仿真；拓扑确认后必须进入时间同步。当前应用没有接入 OMNeT++/远程仿真 runner，不能声称已启动仿真、SSH 执行或稍后通知结果。",
+  };
+  const auditLog = await createAgentRunAuditLog({
+    auditDir: resolvedOptions.auditDir,
+    appSessionId: resolvedOptions.appSessionId,
+    runId: resolvedOptions.runId,
+    cwd,
+    userPrompt,
+    prompt: finalPrompt,
+    conversationContext: resolvedOptions.conversationContext,
+    stageRunnerInput: resolvedOptions.stageRunnerInput,
+    stageRunnerInputPath,
+    stageResultPath,
+    skillOutputDir,
+    stageRunnerPath,
+    sdkOptions,
+  });
+  let currentPromptRunId = "initial";
+  const handleSdkMessage = (message) => {
+    if (message.type === "system" && message.session_id) {
+      sessionId = message.session_id;
+      if (sessionId !== emittedSessionId) {
+        emittedSessionId = sessionId;
+        recordAuditTimeline(auditLog, { type: "sdk_session", sessionId });
+        resolvedOptions.onEvent?.({ event: "session", sessionId });
+      }
+    }
+
+    if (message.type === "assistant") {
+      sessionId = message.session_id ?? sessionId;
+
+      for (const trace of extractOperationTraceEvents(message, toolUseNamesById)) {
+        emitOperationTrace(trace);
+      }
+
+      if (emittedText.length === 0) {
+        for (const text of extractAssistantTextBlocks(message)) {
+          emitAssistantChunk(text);
+        }
+      }
+    }
+
+    if (message.type === "stream_event") {
+      sessionId = message.session_id ?? sessionId;
+
+      for (const trace of extractOperationTraceEvents(message, toolUseNamesById)) {
+        emitOperationTrace(trace);
+      }
+
+      for (const text of extractStreamEventText(message)) {
+        emitAssistantChunk(text);
+      }
+    }
+
+    if (message.type === "user" || message.type === "tool_result") {
+      for (const trace of extractOperationTraceEvents(message, toolUseNamesById)) {
+        emitOperationTrace(trace);
+      }
+    }
+
+    if (message.type === "result") {
+      sessionId = message.session_id ?? sessionId;
+      recordAuditTimeline(auditLog, { type: "sdk_result", sessionId });
+
+      let resultText = "";
+      if (message.structured_output?.assistantText) {
+        assistantText = message.structured_output.assistantText;
+        resultText = assistantText;
+      } else if (typeof message.result === "string") {
+        assistantText = parseAssistantText(message.result);
+        resultText = assistantText;
+      }
+      recordAuditPromptResult(auditLog, currentPromptRunId, {
+        sessionId,
+        resultText,
+      });
+    }
+  };
   const emitAssistantChunk = (text) => {
     if (!text) {
       return;
     }
 
     emittedText.push(text);
+    recordAuditTimeline(auditLog, { type: "assistant_chunk", text });
     resolvedOptions.onEvent?.({ event: "chunk", text });
   };
   const emitOperationTrace = (trace) => {
@@ -44,111 +154,47 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
 
     operationTraceKeys.add(trace.key);
     operationTraceLines.push(trace.text);
+    recordAuditToolTrace(auditLog, trace);
     resolvedOptions.onEvent?.({ event: "chunk", text: `${trace.text}\n` });
   };
 
   try {
     for await (const message of queryFn({
-      prompt: buildPrompt(
-        userPrompt,
-        resolvedOptions.conversationContext,
-        stageResultPath,
-        resolvedOptions.stageRunnerInput,
-        stageRunnerPath,
-      ),
-      options: {
-        cwd,
-        settingSources: ["user", "project"],
-        permissionMode: "dontAsk",
-        tools: { type: "preset", preset: "claude_code" },
-        allowedTools: ["Bash", "Edit", "Write"],
-        disallowedTools: [],
-        skills: ["tsn-topology", "tsn-flow-planning"],
-        env: {
-          ...process.env,
-          TSN_AGENT_STAGE_RESULT_PATH: stageResultPath,
-          TSN_AGENT_STAGE_RUNNER_PATH: stageRunnerPath,
-        },
-        maxTurns: 3,
-        includePartialMessages: true,
-        ...(typeof resolvedOptions.resumeSessionId === "string" && resolvedOptions.resumeSessionId.length > 0
-          ? { resume: resolvedOptions.resumeSessionId }
-          : {}),
-        systemPrompt:
-          "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。可以使用本轮启用的工具和 tsn-topology skill，但工程状态只接受结构化校验结果。除 TSN_AGENT_STAGE_RESULT_PATH 指向的结果文件外，不要写入仓库文件。固定阶段顺序是拓扑、时间同步、流量规划、模拟仿真；拓扑确认后必须进入时间同步。当前应用没有接入 OMNeT++/远程仿真 runner，不能声称已启动仿真、SSH 执行或稍后通知结果。",
-      },
+      prompt: finalPrompt,
+      options: sdkOptions,
     })) {
-      if (message.type === "system" && message.session_id) {
-        sessionId = message.session_id;
-        if (sessionId !== emittedSessionId) {
-          emittedSessionId = sessionId;
-          resolvedOptions.onEvent?.({ event: "session", sessionId });
-        }
-      }
-
-      if (message.type === "assistant") {
-        sessionId = message.session_id ?? sessionId;
-
-        for (const trace of extractOperationTraceEvents(message, toolUseNamesById)) {
-          emitOperationTrace(trace);
-        }
-
-        if (emittedText.length === 0) {
-          for (const text of extractAssistantTextBlocks(message)) {
-            emitAssistantChunk(text);
-          }
-        }
-      }
-
-      if (message.type === "stream_event") {
-        sessionId = message.session_id ?? sessionId;
-
-        for (const trace of extractOperationTraceEvents(message, toolUseNamesById)) {
-          emitOperationTrace(trace);
-        }
-
-        for (const text of extractStreamEventText(message)) {
-          emitAssistantChunk(text);
-        }
-      }
-
-      if (message.type === "user" || message.type === "tool_result") {
-        for (const trace of extractOperationTraceEvents(message, toolUseNamesById)) {
-          emitOperationTrace(trace);
-        }
-      }
-
-      if (message.type === "result") {
-        sessionId = message.session_id ?? sessionId;
-
-        if (message.structured_output?.assistantText) {
-          assistantText = message.structured_output.assistantText;
-        } else if (typeof message.result === "string") {
-          assistantText = parseAssistantText(message.result);
-        }
-      }
+      handleSdkMessage(message);
     }
   } catch (error) {
-    const stageResults = await readOrCreateStageResults({
-      stageResultPath,
-      stageRunnerInput: resolvedOptions.stageRunnerInput,
-      stageRunnerPath,
-      cwd,
-      stageRunner: resolvedOptions.stageRunner,
-      onTrace: emitOperationTrace,
-    });
+    const stageResults = await readStageResults(stageResultPath, emitOperationTrace);
 
     if (hasRecoverableStageResult(stageResults)) {
-      return {
-        assistantText: prependOperationTrace(
-          buildRecoveredStageResultAssistantText(stageResults),
-          operationTraceLines,
-        ),
+      const recoveredText = prependOperationTrace(
+        buildRecoveredStageResultAssistantText(stageResults),
+        operationTraceLines,
+      );
+      const auditPath = await finalizeAgentRunAudit(auditLog, {
+        assistantText: recoveredText,
         sessionId,
         stageResults,
+        error,
+        recovered: true,
+      });
+
+      return {
+        assistantText: recoveredText,
+        sessionId,
+        stageResults,
+        ...(auditPath ? { auditPath } : {}),
       };
     }
 
+    await finalizeAgentRunAudit(auditLog, {
+      assistantText,
+      sessionId,
+      stageResults,
+      error,
+    });
     throw error;
   }
 
@@ -156,42 +202,201 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     assistantText = emittedText.join("");
   }
 
-  const stageResults = await readOrCreateStageResults({
-    stageResultPath,
-    stageRunnerInput: resolvedOptions.stageRunnerInput,
-    stageRunnerPath,
-    cwd,
-    stageRunner: resolvedOptions.stageRunner,
-    onTrace: emitOperationTrace,
-  });
+  const stageResults = await readStageResults(stageResultPath, emitOperationTrace);
+  const stageResultRetry = getStageResultRetry(stageResults, resolvedOptions.stageRunnerInput);
+  if (stageResultRetry) {
+    const retryPrompt = buildStageResultRetryPrompt({
+      userPrompt,
+      stageRunnerInput: resolvedOptions.stageRunnerInput,
+      stageRunnerInputPath,
+      stageResultPath,
+      skillOutputDir,
+      stageRunnerPath,
+      reason: stageResultRetry.reason,
+      validationErrors: stageResultRetry.validationErrors,
+    });
+    recordAuditTimeline(auditLog, {
+      type: "stage_result_retry",
+      reason: stageResultRetry.reason,
+      stage: resolvedOptions.stageRunnerInput.stage,
+      validationErrors: stageResultRetry.validationErrors,
+    });
+    currentPromptRunId = recordAuditPrompt(auditLog, {
+      kind: `${stageResultRetry.reason}_retry`,
+      prompt: retryPrompt,
+    });
 
-  if (!assistantText.trim() && hasRecoverableStageResult(stageResults)) {
-    assistantText = buildRecoveredStageResultAssistantText(stageResults);
+    try {
+      const retryOptions = {
+        ...sdkOptions,
+        ...(sessionId ? { resume: sessionId } : {}),
+      };
+      for await (const message of queryFn({
+        prompt: retryPrompt,
+        options: retryOptions,
+      })) {
+        handleSdkMessage(message);
+      }
+    } catch (error) {
+      const recoveredStageResults = await readStageResults(stageResultPath, emitOperationTrace);
+      if (hasRecoverableStageResult(recoveredStageResults)) {
+        const recoveredText = prependOperationTrace(
+          buildRecoveredStageResultAssistantText(recoveredStageResults),
+          operationTraceLines,
+        );
+        const auditPath = await finalizeAgentRunAudit(auditLog, {
+          assistantText: recoveredText,
+          sessionId,
+          stageResults: recoveredStageResults,
+          error,
+          recovered: true,
+        });
+
+        return {
+          assistantText: recoveredText,
+          sessionId,
+          stageResults: recoveredStageResults,
+          ...(auditPath ? { auditPath } : {}),
+        };
+      }
+
+      await finalizeAgentRunAudit(auditLog, {
+        assistantText,
+        sessionId,
+        stageResults: recoveredStageResults,
+        error,
+      });
+      throw error;
+    }
+  }
+
+  const finalStageResults = await readStageResults(stageResultPath, emitOperationTrace);
+
+  if (!assistantText.trim() && hasRecoverableStageResult(finalStageResults)) {
+    assistantText = buildRecoveredStageResultAssistantText(finalStageResults);
   }
 
   if (!assistantText.trim()) {
-    throw new Error("Claude returned no assistantText");
+    const error = new Error("Claude returned no assistantText");
+    await finalizeAgentRunAudit(auditLog, {
+      assistantText,
+      sessionId,
+      stageResults: finalStageResults,
+      error,
+    });
+    throw error;
   }
 
-  return {
-    assistantText: prependOperationTrace(assistantText, operationTraceLines),
+  const finalAssistantText = prependOperationTrace(assistantText, operationTraceLines);
+  const auditPath = await finalizeAgentRunAudit(auditLog, {
+    assistantText: finalAssistantText,
     sessionId,
-    stageResults,
+    stageResults: finalStageResults,
+  });
+
+  return {
+    assistantText: finalAssistantText,
+    sessionId,
+    stageResults: finalStageResults,
+    ...(auditPath ? { auditPath } : {}),
   };
+}
+
+function getStageResultRetry(stageResults, stageRunnerInput) {
+  if (!isRecord(stageRunnerInput) || (stageRunnerInput.stage !== "topology" && stageRunnerInput.stage !== "flow-template")) {
+    return undefined;
+  }
+
+  if (stageResults.length === 0) {
+    return { reason: "missing_stage_result", validationErrors: [] };
+  }
+
+  const failedResult = stageResults.find((result) =>
+    isRecord(result)
+      && result.stage === stageRunnerInput.stage
+      && (result.status !== "success" || isRecord(result.validation) && result.validation.ok === false)
+  );
+  if (!isRecord(failedResult)) {
+    return undefined;
+  }
+
+  const validation = isRecord(failedResult.validation) ? failedResult.validation : undefined;
+  const validationErrors = Array.isArray(validation?.errors)
+    ? validation.errors.filter((error) => typeof error === "string")
+    : [];
+
+  return { reason: "invalid_stage_result", validationErrors };
+}
+
+function buildStageResultRetryPrompt({
+  userPrompt,
+  stageRunnerInput,
+  stageRunnerInputPath,
+  stageResultPath,
+  skillOutputDir,
+  stageRunnerPath,
+  reason,
+  validationErrors = [],
+}) {
+  const stage = stageRunnerInput.stage;
+  const skillName = skillNameForStage(stage);
+  const command = stage === "topology"
+    ? `node "$TSN_AGENT_STAGE_RUNNER_PATH" --stage topology --input '<json>' --skill-output-dir "$TSN_AGENT_SKILL_OUTPUT_DIR" --result-path "$TSN_AGENT_STAGE_RESULT_PATH"`
+    : `node "$TSN_AGENT_STAGE_RUNNER_PATH" --stage flow-template --input '<json>' --result-path "$TSN_AGENT_STAGE_RESULT_PATH"`;
+  const reasonText = reason === "invalid_stage_result"
+    ? `上一轮已经写入 stage result，但校验未通过，所以右侧工程不会更新。\n\n校验错误：\n${validationErrors.length > 0 ? validationErrors.map((error) => `- ${error}`).join("\n") : "- 未提供具体错误"}`
+    : "上一轮只返回了文字说明，但 TSN Agent 没有收到可应用的结构化 stage result，所以右侧工程不会更新。";
+
+  return `${reasonText}
+
+现在必须修复本轮执行结果：
+1. 必须调用 ${skillName} skill 或按该 skill 的集成步骤执行。
+2. 必须调用项目 stage runner 写入 TSN_AGENT_STAGE_RESULT_PATH。
+3. 必须先确认 ${stageResultPath} 已写入结构化 JSON，再生成给用户看的中文回复。
+4. 不要只解释拓扑或流量规划；只返回文字会被 App 判定为失败。
+
+用户原始需求：
+${userPrompt}
+
+stage runner 结构化输入：
+${stageRunnerInputPath
+  ? `优先读取文件：${stageRunnerInputPath}`
+  : JSON.stringify(stageRunnerInput, null, 2)}
+
+路径：
+- TSN_AGENT_STAGE_RESULT_PATH=${stageResultPath}
+- TSN_AGENT_SKILL_OUTPUT_DIR=${skillOutputDir}
+- TSN_AGENT_STAGE_RUNNER_PATH=${stageRunnerPath}
+- TSN_AGENT_STAGE_RUNNER_INPUT_PATH=${stageRunnerInputPath ?? "未提供"}
+
+必须执行的 runner 命令形态：
+${command}
+
+完成后，用简体中文简要说明当前阶段结果，并等待用户确认。`;
 }
 
 export function buildPrompt(
   userPrompt,
   conversationContext,
   stageResultPath = "$TSN_AGENT_STAGE_RESULT_PATH",
+  skillOutputDir = "$TSN_AGENT_SKILL_OUTPUT_DIR",
   stageRunnerInput,
   stageRunnerPath = resolveStageRunnerPath(process.cwd()),
+  stageRunnerInputPath,
 ) {
+  if (typeof skillOutputDir !== "string") {
+    stageRunnerPath = typeof stageRunnerInput === "string" ? stageRunnerInput : stageRunnerPath;
+    stageRunnerInput = skillOutputDir;
+    skillOutputDir = "$TSN_AGENT_SKILL_OUTPUT_DIR";
+  }
+
   const contextBlock = conversationContext
     ? `\n会话上下文：\n${conversationContext}\n`
     : "";
   const stageRunnerInputBlock = stageRunnerInput
-    ? `\n建议传给 stage runner 的结构化输入：\n${JSON.stringify(stageRunnerInput, null, 2)}\n`
+    ? `\nstage runner 结构化输入：\n${stageRunnerInputPath
+      ? `- 已写入文件：${stageRunnerInputPath}\n- 调用 runner 时先读取该文件的 JSON 文本，再把 JSON 文本作为 --input 参数值。`
+      : JSON.stringify(stageRunnerInput, null, 2)}\n`
     : "";
 
   return `用户正在通过 TSN Agent 桌面应用配置一个 TSN 网络。
@@ -206,22 +411,351 @@ ${userPrompt}
 - 当前阶段如果需要生成或修改流量规划，必须使用 tsn-flow-planning skill。
 - 结构化结果必须由项目 runner 写入 TSN_AGENT_STAGE_RESULT_PATH。
 - TSN_AGENT_STAGE_RESULT_PATH=${stageResultPath}
+- TSN_AGENT_SKILL_OUTPUT_DIR=${skillOutputDir}
 - TSN_AGENT_STAGE_RUNNER_PATH=${stageRunnerPath}
-- 如果上方提供了 stage runner 结构化输入，调用 runner 时优先使用该 JSON；只可根据用户本轮需求补充缺失字段。
+- TSN_AGENT_STAGE_RUNNER_INPUT_PATH=${stageRunnerInputPath ?? "未提供"}
+- 调用 tsn-topology skill 时，把 target_dir 设置为 TSN_AGENT_SKILL_OUTPUT_DIR，并设置 overwrite=true。
+- tsn-topology skill 完成后，必须调用 runner：node "$TSN_AGENT_STAGE_RUNNER_PATH" --stage topology --input '<json>' --skill-output-dir "$TSN_AGENT_SKILL_OUTPUT_DIR" --result-path "$TSN_AGENT_STAGE_RESULT_PATH"。
+- 如果提供了 TSN_AGENT_STAGE_RUNNER_INPUT_PATH，调用 runner 时必须先读取该文件的 JSON 文本，再把 JSON 文本作为 --input 参数值；只可根据用户本轮需求补充缺失字段。
 
-请直接生成左侧对话框要展示给用户的中文内容，不要输出 JSON。要求：
+执行顺序要求：
+1. 先完成当前阶段需要的 skill 调用和 stage runner 调用，确保 TSN_AGENT_STAGE_RESULT_PATH 已写入结构化 JSON。
+2. 再生成左侧对话框要展示给用户的中文内容，不要输出 JSON。
+
+回复要求：
 1. 用新手能理解的语言解释你识别到了哪些拓扑规模和默认假设。
 2. 只描述当前阶段已经完成或正在等待确认的内容；不要提前宣称后续阶段的控制流、规划器输入或导出文件已经生成。
 3. 固定阶段顺序是“拓扑 -> 时间同步 -> 流量规划 -> 模拟仿真”。如果上下文显示当前阶段是时间同步，只能说明同步假设和等待确认，不能引导用户配置控制流。
 4. 当前应用没有接入 OMNeT++/远程服务器仿真 runner；遇到启动仿真、SSH、devserver 或远程运行请求时，必须说明当前不会实际执行，也不会后台通知结果。
-5. 不要修改仓库文件；如需生成拓扑结构化结果，只允许写入 TSN_AGENT_STAGE_RESULT_PATH 指向的结果文件；不要输出 Markdown 表格。
-6. 如果需求缺少关键参数，请给出合理默认值并说明这些默认值后续可以调整。`;
+5. 不要修改仓库文件；如需生成拓扑中间产物，只允许写入 TSN_AGENT_SKILL_OUTPUT_DIR；结构化结果只允许写入 TSN_AGENT_STAGE_RESULT_PATH；不要输出 Markdown 表格。
+6. 如果需求缺少关键参数，请给出合理默认值并说明这些默认值后续可以调整。
+7. 通用分布式拓扑默认需要交换机互联：用户说“N 个交换机，每个交换机连接 M 个端系统/网卡/端”或“X 个端系统分配到 N 台交换机”时，除非用户明确说交换机相互独立、不互联或不连接，否则必须生成 N*M + (N-1) 条物理链路，其中 N-1 条是交换机线型互联链路。
+8. 如果当前阶段是拓扑或流量规划，不能只返回文字说明；没有写入 TSN_AGENT_STAGE_RESULT_PATH 就不要声称阶段已生成。`;
 }
 
 async function createStageResultPath() {
   const dir = join(tmpdir(), `tsn-agent-stage-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   await mkdir(dir, { recursive: true });
   return join(dir, "stage-result.json");
+}
+
+async function createSkillOutputDir(stageResultPath) {
+  const dir = join(dirname(stageResultPath), "skill-output");
+  await mkdir(dir, { recursive: true });
+  return dir;
+}
+
+async function writeStageRunnerInputFile(stageResultPath, stageRunnerInput) {
+  if (!isRecord(stageRunnerInput)) {
+    return undefined;
+  }
+
+  const inputPath = join(dirname(stageResultPath), "stage-runner-input.json");
+  await mkdir(dirname(inputPath), { recursive: true });
+  await writeFile(inputPath, `${JSON.stringify(stageRunnerInput, null, 2)}\n`, "utf8");
+  return inputPath;
+}
+
+async function createAgentRunAuditLog(input) {
+  if (typeof input.auditDir !== "string" || !input.auditDir.trim()) {
+    return undefined;
+  }
+
+  const createdAt = new Date().toISOString();
+  const appSessionId = safePathSegment(input.appSessionId ?? "no-session");
+  const runId = safePathSegment(input.runId ?? `agent-run-${Date.now()}`);
+  const sessionDir = join(input.auditDir, appSessionId);
+  const auditPath = join(sessionDir, `${timestampForFile(createdAt)}-${runId}.json`);
+  const latestPath = join(sessionDir, "latest.json");
+  await mkdir(sessionDir, { recursive: true });
+
+  return {
+    path: auditPath,
+    latestPath,
+    data: {
+      schemaVersion: "tsn-agent.agent-run-audit.v1",
+      createdAt,
+      completedAt: undefined,
+      status: "running",
+      appSessionId: input.appSessionId ?? null,
+      runId: input.runId ?? null,
+      summary: buildAuditSummary({
+        status: "running",
+        userPrompt: input.userPrompt,
+        stageRunnerInput: input.stageRunnerInput,
+        stageRunnerInputPath: input.stageRunnerInputPath,
+        prompt: input.prompt,
+        conversationContext: input.conversationContext,
+      }),
+      cwd: input.cwd,
+      prompt: redactSecrets(input.prompt),
+      userPrompt: redactSecrets(input.userPrompt),
+      conversationContext: typeof input.conversationContext === "string" ? redactSecrets(input.conversationContext) : null,
+      stageRunnerInput: redactJsonValue(input.stageRunnerInput ?? null),
+      stageRunnerInputPath: input.stageRunnerInputPath ?? null,
+      promptRuns: [
+        {
+          id: "initial",
+          kind: "initial",
+          createdAt,
+          promptSummary: summarizePromptForAudit(input.prompt),
+          prompt: redactSecrets(input.prompt),
+          resultText: "",
+          sessionId: null,
+        },
+      ],
+      stageResultPath: input.stageResultPath,
+      skillOutputDir: input.skillOutputDir,
+      stageRunnerPath: input.stageRunnerPath,
+      sdkOptions: summarizeSdkOptionsForAudit(input.sdkOptions),
+      timeline: [],
+      toolCalls: [],
+      operationTraceLines: [],
+      result: null,
+    },
+  };
+}
+
+function recordAuditPrompt(auditLog, input) {
+  if (!auditLog) {
+    return "";
+  }
+
+  const id = `${auditLog.data.promptRuns.length + 1}-${input.kind}`;
+  auditLog.data.promptRuns.push({
+    id,
+    kind: input.kind,
+    createdAt: new Date().toISOString(),
+    promptSummary: summarizePromptForAudit(input.prompt),
+    prompt: redactSecrets(input.prompt),
+    resultText: "",
+    sessionId: null,
+  });
+  return id;
+}
+
+function recordAuditPromptResult(auditLog, promptRunId, result) {
+  if (!auditLog || !promptRunId) {
+    return;
+  }
+
+  const promptRun = auditLog.data.promptRuns.find((candidate) => candidate.id === promptRunId);
+  if (!promptRun) {
+    return;
+  }
+
+  promptRun.completedAt = new Date().toISOString();
+  promptRun.resultText = redactSecrets(result.resultText ?? "");
+  promptRun.sessionId = result.sessionId ?? null;
+}
+
+function recordAuditTimeline(auditLog, event) {
+  if (!auditLog) {
+    return;
+  }
+
+  auditLog.data.timeline.push(redactJsonValue({
+    at: new Date().toISOString(),
+    ...event,
+  }));
+}
+
+function recordAuditToolTrace(auditLog, trace) {
+  if (!auditLog?.data || !trace?.text) {
+    return;
+  }
+
+  const text = redactSecrets(trace.text);
+  auditLog.data.operationTraceLines.push(text);
+  auditLog.data.toolCalls.push({
+    at: new Date().toISOString(),
+    key: trace.key,
+    kind: classifyToolTrace(text),
+    text,
+  });
+}
+
+async function finalizeAgentRunAudit(auditLog, output) {
+  if (!auditLog) {
+    return undefined;
+  }
+
+  const completedAt = new Date().toISOString();
+  const errorMessage = output.error ? normalizeError(output.error) : undefined;
+  auditLog.data.completedAt = completedAt;
+  auditLog.data.status = errorMessage && !output.recovered ? "error" : "success";
+  auditLog.data.sdkSessionId = output.sessionId ?? null;
+  auditLog.data.result = {
+    assistantText: redactSecrets(output.assistantText ?? ""),
+    stageResults: redactJsonValue(output.stageResults ?? []),
+    recovered: Boolean(output.recovered),
+    error: errorMessage,
+  };
+  auditLog.data.summary = buildAuditSummary({
+    status: auditLog.data.status,
+    userPrompt: auditLog.data.userPrompt,
+    stageRunnerInput: auditLog.data.stageRunnerInput,
+    stageRunnerInputPath: auditLog.data.stageRunnerInputPath,
+    prompt: auditLog.data.prompt,
+    conversationContext: auditLog.data.conversationContext,
+    completedAt,
+    sdkSessionId: auditLog.data.sdkSessionId,
+    stageResults: output.stageResults ?? [],
+    toolCallCount: auditLog.data.toolCalls.length,
+    promptRunCount: auditLog.data.promptRuns.length,
+    recovered: Boolean(output.recovered),
+    error: errorMessage,
+  });
+
+  const serialized = `${JSON.stringify(auditLog.data, null, 2)}\n`;
+
+  try {
+    await writeFile(auditLog.path, serialized, "utf8");
+    await writeFile(auditLog.latestPath, serialized, "utf8");
+    return auditLog.path;
+  } catch {
+    return undefined;
+  }
+}
+
+function summarizeSdkOptionsForAudit(options) {
+  return {
+    cwd: options.cwd,
+    settingSources: options.settingSources,
+    permissionMode: options.permissionMode,
+    tools: options.tools,
+    allowedTools: options.allowedTools,
+    disallowedTools: options.disallowedTools,
+    skills: options.skills,
+    maxTurns: options.maxTurns,
+    includePartialMessages: options.includePartialMessages,
+    hasResumeSession: typeof options.resume === "string" && options.resume.length > 0,
+    systemPrompt: redactSecrets(options.systemPrompt ?? ""),
+    env: {
+      TSN_AGENT_STAGE_RESULT_PATH: options.env?.TSN_AGENT_STAGE_RESULT_PATH,
+      TSN_AGENT_SKILL_OUTPUT_DIR: options.env?.TSN_AGENT_SKILL_OUTPUT_DIR,
+      TSN_AGENT_STAGE_RUNNER_PATH: options.env?.TSN_AGENT_STAGE_RUNNER_PATH,
+      TSN_AGENT_STAGE_RUNNER_INPUT_PATH: options.env?.TSN_AGENT_STAGE_RUNNER_INPUT_PATH,
+    },
+  };
+}
+
+function buildAuditSummary(input) {
+  const stage = isRecord(input.stageRunnerInput) && typeof input.stageRunnerInput.stage === "string"
+    ? input.stageRunnerInput.stage
+    : undefined;
+  const stageResultSummaries = Array.isArray(input.stageResults)
+    ? input.stageResults
+        .filter(isRecord)
+        .map((result) => ({
+          stage: result.stage,
+          skillName: result.skillName,
+          status: result.status,
+          summary: typeof result.summary === "string" ? truncateForAudit(result.summary, 220) : undefined,
+        }))
+    : [];
+
+  return redactJsonValue({
+    status: input.status,
+    stage,
+    userPromptPreview: truncateForAudit(input.userPrompt, 220),
+    prompt: summarizePromptForAudit(input.prompt),
+    context: summarizeContextForAudit(input.conversationContext),
+    stageRunnerInputPath: input.stageRunnerInputPath ?? null,
+    stageResults: stageResultSummaries,
+    promptRunCount: input.promptRunCount ?? 1,
+    toolCallCount: input.toolCallCount ?? 0,
+    recovered: Boolean(input.recovered),
+    sdkSessionId: input.sdkSessionId ?? null,
+    completedAt: input.completedAt,
+    error: input.error ? truncateForAudit(input.error, 220) : undefined,
+  });
+}
+
+function summarizePromptForAudit(prompt) {
+  const source = typeof prompt === "string" ? prompt : "";
+
+  return {
+    charCount: source.length,
+    lineCount: source ? source.split("\n").length : 0,
+    hasInlineStageRunnerInputJson: source.includes('"userIntent"') || source.includes('"project"'),
+    usesStageRunnerInputPath: source.includes("TSN_AGENT_STAGE_RUNNER_INPUT_PATH") || source.includes("stage-runner-input.json"),
+    preview: truncateForAudit(source.replace(/\s+/g, " ").trim(), 320),
+  };
+}
+
+function summarizeContextForAudit(context) {
+  if (typeof context !== "string" || !context.trim()) {
+    return {
+      charCount: 0,
+      includesLocalCandidate: false,
+      recentMessageLines: 0,
+    };
+  }
+
+  return {
+    charCount: context.length,
+    includesLocalCandidate: context.includes("本地预解析候选"),
+    recentMessageLines: extractContextSection(context, "最近对话：", "工程状态：")
+      .split("\n")
+      .filter((line) => line.trim())
+      .length,
+    preview: truncateForAudit(context.replace(/\s+/g, " ").trim(), 260),
+  };
+}
+
+function extractContextSection(source, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  if (start === -1) {
+    return "";
+  }
+
+  const contentStart = start + startMarker.length;
+  const end = source.indexOf(endMarker, contentStart);
+  return source.slice(contentStart, end === -1 ? undefined : end).trim();
+}
+
+function truncateForAudit(value, maxLength) {
+  const text = String(value ?? "");
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function redactJsonValue(value) {
+  try {
+    return JSON.parse(redactSecrets(JSON.stringify(value)));
+  } catch {
+    return redactSecrets(String(value ?? ""));
+  }
+}
+
+function safePathSegment(value) {
+  const sanitized = String(value ?? "unknown")
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 120);
+
+  return sanitized || "unknown";
+}
+
+function timestampForFile(value) {
+  return value.replace(/[:.]/g, "-");
+}
+
+function classifyToolTrace(text) {
+  if (text.startsWith("[Skill]")) {
+    return "skill";
+  }
+
+  if (text.startsWith("[文件]")) {
+    return "file";
+  }
+
+  if (text.startsWith("[工具结果]")) {
+    return "tool_result";
+  }
+
+  return "tool_use";
 }
 
 async function readStageResults(stageResultPath, onTrace) {
@@ -240,9 +774,10 @@ async function readStageResults(stageResultPath, onTrace) {
           ? result.skillName
           : skillNameForStage(isRecord(result) && typeof result.stage === "string" ? result.stage : undefined);
         if (skillName) {
+          const resultSummary = summarizeStageResultForTrace(result);
           onTrace?.({
             key: `skill:result:${isRecord(result) ? result.stage ?? "unknown" : "unknown"}:${skillName}`,
-            text: `[Skill] ${skillName} 结果已返回`,
+            text: `[Skill] ${skillName} 结果已返回${resultSummary ? `：${resultSummary}` : ""}`,
           });
         }
       }
@@ -254,49 +789,40 @@ async function readStageResults(stageResultPath, onTrace) {
   }
 }
 
-async function readOrCreateStageResults({ stageResultPath, stageRunnerInput, stageRunnerPath, cwd, stageRunner, onTrace }) {
-  const stageResults = await readStageResults(stageResultPath, onTrace);
-
-  if (stageResults.length > 0 || !shouldRunLocalStageRunner(stageRunnerInput)) {
-    return stageResults;
+function summarizeStageResultForTrace(result) {
+  if (!isRecord(result)) {
+    return "";
   }
 
-  try {
-    const skillName = skillNameForStage(stageRunnerInput.stage);
-    if (skillName) {
-      onTrace?.({
-        key: `skill:invoke:${stageRunnerInput.stage}:${skillName}`,
-        text: `[Skill] 调用 ${skillName}`,
-      });
-    }
-
-    onTrace?.({
-      key: `tool:stage-runner:${stageRunnerInput.stage}`,
-      text: `[工具] Bash: node tsn-stage-runner --stage ${stageRunnerInput.stage} --result-path stage-result.json`,
-    });
-
-    if (typeof stageRunner === "function") {
-      await stageRunner({ input: stageRunnerInput, resultPath: stageResultPath, cwd, runnerPath: stageRunnerPath });
-    } else {
-      await runStageRunnerProcess({ input: stageRunnerInput, resultPath: stageResultPath, cwd, runnerPath: stageRunnerPath });
-    }
-
-    onTrace?.({
-      key: `file:write:${stageRunnerInput.stage}:${stageResultPath}`,
-      text: `[文件] 写入阶段结果 ${formatPathForDisplay(stageResultPath)}`,
-    });
-
-    return readStageResults(stageResultPath, onTrace);
-  } catch {
-    return [];
+  const summary = typeof result.summary === "string" ? result.summary : "";
+  const validation = isRecord(result.validation) ? result.validation : undefined;
+  const validationErrors = Array.isArray(validation?.errors)
+    ? validation.errors.filter((error) => typeof error === "string")
+    : [];
+  if (result.status !== "success" || validation?.ok === false) {
+    return validationErrors.length > 0
+      ? `校验失败：${truncate(validationErrors.join("；"), 120)}`
+      : `状态为 ${String(result.status ?? "unknown")}`;
   }
-}
 
-function shouldRunLocalStageRunner(stageRunnerInput) {
-  return isRecord(stageRunnerInput)
-    && (stageRunnerInput.stage === "topology" || stageRunnerInput.stage === "flow-template")
-    && typeof stageRunnerInput.userIntent === "string"
-    && stageRunnerInput.userIntent.trim().length > 0;
+  const project = isRecord(result.payload) && isRecord(result.payload.project) ? result.payload.project : undefined;
+  const topology = isRecord(project?.topology) ? project.topology : undefined;
+  const nodes = Array.isArray(topology?.nodes) ? topology.nodes : undefined;
+  const links = Array.isArray(topology?.links) ? topology.links : undefined;
+
+  if (nodes && links) {
+    const switchCount = nodes.filter((node) => isRecord(node) && node.type === "switch").length;
+    const endSystemCount = nodes.filter((node) => isRecord(node) && node.type === "endSystem").length;
+    const flowCount = Array.isArray(project?.flows) ? project.flows.length : undefined;
+    const parts = [`${switchCount} 个交换机`, `${endSystemCount} 个端系统`, `${links.length} 条链路`];
+    if (typeof flowCount === "number" && flowCount > 0) {
+      parts.push(`${flowCount} 条流`);
+    }
+
+    return parts.join("，");
+  }
+
+  return summary ? truncate(summary.replace(/\s+/g, " "), 120) : "";
 }
 
 function hasRecoverableStageResult(stageResults) {
@@ -333,37 +859,6 @@ function buildRecoveredStageResultAssistantText(stageResults) {
     summary,
     "确认拓扑后进入时间同步阶段，或继续描述需要修改的拓扑规模。",
   ].join("\n");
-}
-
-function runStageRunnerProcess({ input, resultPath, cwd, runnerPath }) {
-  return new Promise((resolve, reject) => {
-    execFile(
-      process.execPath,
-      [
-        runnerPath,
-        "--stage",
-        input.stage,
-        "--input",
-        JSON.stringify(input),
-        "--result-path",
-        resultPath,
-      ],
-      {
-        cwd,
-        env: {
-          ...process.env,
-          TSN_AGENT_STAGE_RESULT_PATH: resultPath,
-        },
-      },
-      (error) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
-        }
-      },
-    );
-  });
 }
 
 function resolveStageRunnerPath(cwd) {
@@ -413,7 +908,7 @@ export function extractOperationTraceEvents(message, toolUseNamesById = new Map(
         toolUseNamesById.set(block.id, name);
       }
       traces.push({
-        key: `tool_use:${block.id ?? `${name}:${stableStringify(block.input)}`}`,
+        key: `tool_use:${block.id ?? `${name}:${stableStringify(block.input)}`}:${traceDetailKey(block.input)}`,
         text: formatToolUseTrace(name, block.input),
       });
     }
@@ -421,10 +916,10 @@ export function extractOperationTraceEvents(message, toolUseNamesById = new Map(
     if (block?.type === "tool_result") {
       const toolUseId = typeof block.tool_use_id === "string" ? block.tool_use_id : undefined;
       const name = toolUseId ? toolUseNamesById.get(toolUseId) : undefined;
-      const failed = block.is_error === true || block.error === true;
+      const failed = isFailedToolResult(block);
       traces.push({
-        key: `tool_result:${toolUseId ?? stableStringify(block)}`,
-        text: `[工具结果] ${formatToolName(name ?? "工具")} 已返回${failed ? "（失败）" : ""}`,
+        key: `tool_result:${toolUseId ?? stableStringify(block)}:${failed ? "error" : "ok"}:${traceDetailKey(block.content ?? block.toolUseResult)}`,
+        text: formatToolResultTrace(name ?? "工具", block, failed),
       });
     }
   }
@@ -463,33 +958,80 @@ function formatToolUseTrace(name, input) {
   const toolName = formatToolName(name);
   const normalizedName = String(name ?? "").toLowerCase();
   const inputRecord = isRecord(input) ? input : {};
+  const inputSummary = summarizeInput(input);
 
   if (normalizedName === "skill") {
     const skillName = stringValue(inputRecord.skill)
       ?? stringValue(inputRecord.skillName)
       ?? stringValue(inputRecord.name);
-    return skillName ? `[Skill] 调用 ${skillName}` : "[Skill] 调用";
+    return skillName ? `[Skill] 调用 ${skillName}` : "";
   }
 
   if (normalizedName === "read") {
-    return `[文件] 读取 ${formatPathForDisplay(stringValue(inputRecord.file_path) ?? stringValue(inputRecord.path))}`;
+    const path = formatPathForDisplay(stringValue(inputRecord.file_path) ?? stringValue(inputRecord.path));
+    return path ? `[文件] 读取 ${path}` : "";
   }
 
   if (normalizedName === "write") {
-    return `[文件] 写入 ${formatPathForDisplay(stringValue(inputRecord.file_path) ?? stringValue(inputRecord.path))}`;
+    const path = formatPathForDisplay(stringValue(inputRecord.file_path) ?? stringValue(inputRecord.path));
+    const contentSummary = summarizeWriteContent(inputRecord.content);
+    return path ? `[文件] 写入 ${path}${contentSummary}` : "";
   }
 
   if (normalizedName === "edit" || normalizedName === "multiedit") {
-    return `[文件] 修改 ${formatPathForDisplay(stringValue(inputRecord.file_path) ?? stringValue(inputRecord.path))}`;
+    const path = formatPathForDisplay(stringValue(inputRecord.file_path) ?? stringValue(inputRecord.path));
+    return path ? `[文件] 修改 ${path}` : "";
   }
 
   if (normalizedName === "bash") {
     const command = summarizeCommand(stringValue(inputRecord.command) ?? stringValue(inputRecord.cmd));
-    return command ? `[工具] Bash: ${command}` : "[工具] Bash";
+    const description = stringValue(inputRecord.description);
+    if (command && description) {
+      return `[工具] Bash: ${command}（${truncate(redactSecrets(description), 60)}）`;
+    }
+
+    return command ? `[工具] Bash: ${command}` : "";
   }
 
-  const summary = summarizeInput(input);
-  return summary ? `[工具] ${toolName}: ${summary}` : `[工具] ${toolName}`;
+  return inputSummary ? `[工具] ${toolName}: ${inputSummary}` : "";
+}
+
+function formatToolResultTrace(name, block, failed) {
+  const toolName = formatToolName(name);
+  const summary = summarizeToolResult(block);
+
+  if (failed) {
+    return summary
+      ? `[工具结果] ${toolName} 已返回（失败）：${summary}`
+      : `[工具结果] ${toolName} 已返回（失败）`;
+  }
+
+  return summary ? `[工具结果] ${toolName} 已返回：${summary}` : `[工具结果] ${toolName} 已返回`;
+}
+
+function isFailedToolResult(block) {
+  if (block?.is_error === true || block?.error === true) {
+    return true;
+  }
+
+  const content = block?.content;
+  if (typeof content === "string" && /<tool_use_error>|^Error:|Exit code\s+[1-9]/i.test(content.trim())) {
+    return true;
+  }
+
+  const toolUseResult = block?.toolUseResult;
+  if (typeof toolUseResult === "string" && /^Error:|Exit code\s+[1-9]/i.test(toolUseResult.trim())) {
+    return true;
+  }
+
+  if (isRecord(toolUseResult)) {
+    const interrupted = toolUseResult.interrupted === true;
+    const stderr = stringValue(toolUseResult.stderr);
+    const exitCode = Number(toolUseResult.exitCode ?? toolUseResult.code);
+    return interrupted || Boolean(stderr) && Number.isFinite(exitCode) && exitCode !== 0;
+  }
+
+  return false;
 }
 
 function formatToolName(name) {
@@ -535,7 +1077,7 @@ function summarizeInput(input) {
 
 function formatPathForDisplay(path) {
   if (!path) {
-    return "目标文件";
+    return "";
   }
 
   const value = String(path);
@@ -548,6 +1090,80 @@ function formatPathForDisplay(path) {
   }
 
   return truncate(value.startsWith("/") ? basename(value) : value, 140);
+}
+
+function summarizeWriteContent(content) {
+  if (typeof content !== "string" || !content.trim()) {
+    return "";
+  }
+
+  const bytes = Buffer.byteLength(content, "utf8");
+  const lineCount = content.split(/\r?\n/).length;
+  return `（${lineCount} 行，${bytes} bytes）`;
+}
+
+function summarizeToolResult(block) {
+  const content = block?.content ?? block?.toolUseResult;
+  const summary = summarizeToolResultContent(content);
+
+  if (summary) {
+    return summary;
+  }
+
+  if (isRecord(block?.toolUseResult)) {
+    const stdout = stringValue(block.toolUseResult.stdout);
+    const stderr = stringValue(block.toolUseResult.stderr);
+    if (stderr) {
+      return truncate(redactSecrets(stderr.replace(/\s+/g, " ")), 180);
+    }
+    if (stdout) {
+      return truncate(redactSecrets(stdout.replace(/\s+/g, " ")), 180);
+    }
+  }
+
+  return "";
+}
+
+function summarizeToolResultContent(content) {
+  if (typeof content === "string") {
+    const cleaned = content.replace(/<tool_use_error>|<\/tool_use_error>/g, "").replace(/\s+/g, " ").trim();
+    return cleaned ? truncate(redactSecrets(cleaned), 180) : "";
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => isRecord(item) ? summarizeToolResultContent(item.text ?? item.content ?? item.file?.filePath) : summarizeToolResultContent(item))
+      .filter(Boolean)
+      .join("；")
+      .slice(0, 180);
+  }
+
+  if (isRecord(content)) {
+    const filePath = isRecord(content.file) ? stringValue(content.file.filePath) : undefined;
+    const error = stringValue(content.error) ?? stringValue(content.message);
+    const stdout = stringValue(content.stdout);
+    const stderr = stringValue(content.stderr);
+
+    if (error) {
+      return truncate(redactSecrets(error.replace(/\s+/g, " ")), 180);
+    }
+    if (stderr) {
+      return truncate(redactSecrets(stderr.replace(/\s+/g, " ")), 180);
+    }
+    if (stdout) {
+      return truncate(redactSecrets(stdout.replace(/\s+/g, " ")), 180);
+    }
+    if (filePath) {
+      return `文件 ${formatPathForDisplay(filePath)}`;
+    }
+  }
+
+  return "";
+}
+
+function traceDetailKey(value) {
+  const summary = summarizeInput(value) || summarizeToolResultContent(value);
+  return summary ? stableStringify(summary) : "empty";
 }
 
 function stringValue(value) {
@@ -626,6 +1242,9 @@ export async function runWorker(rawInput) {
     conversationContext: typeof input.conversationContext === "string" ? input.conversationContext : undefined,
     resumeSessionId: typeof input.resumeSessionId === "string" ? input.resumeSessionId : undefined,
     stageRunnerInput: isRecord(input.stageRunnerInput) ? input.stageRunnerInput : undefined,
+    appSessionId: typeof input.appSessionId === "string" ? input.appSessionId : undefined,
+    runId: typeof input.runId === "string" ? input.runId : undefined,
+    auditDir: typeof input.auditDir === "string" ? input.auditDir : undefined,
     onEvent: (event) => {
       if (typeof input.runId !== "string" || !input.runId) {
         return;
@@ -640,7 +1259,7 @@ function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (await isCliEntryPoint(import.meta.url, process.argv[1])) {
   const [, , rawInput = "{}"] = process.argv;
 
   try {
@@ -649,5 +1268,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } catch (error) {
     process.stderr.write(`${JSON.stringify({ error: normalizeError(error) })}\n`);
     process.exitCode = 1;
+  }
+}
+
+async function isCliEntryPoint(moduleUrl, argvPath) {
+  if (!argvPath) {
+    return false;
+  }
+
+  try {
+    return await realpath(new URL(moduleUrl).pathname) === await realpath(argvPath);
+  } catch {
+    return moduleUrl === `file://${argvPath}`;
   }
 }

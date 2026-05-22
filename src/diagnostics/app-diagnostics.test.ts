@@ -24,12 +24,18 @@ describe("app diagnostics helpers", () => {
     const bundle = createArtifactBundle(createProjectFromIntent("我需要4个交换机，每个交换机连接5个端系统"));
 
     expect(artifactBundleSummary(bundle).files.map((file) => file.path)).toEqual([
-      "tsnagent/generated/network.ned",
-      "omnetpp.ini",
-      "react-flow-topology.json",
-      "flow_plan_1.json",
+      "simulation/inet/tsnagent/generated/network.ned",
+      "simulation/inet/omnetpp.ini",
+      "simulation/inet/traffic.ini",
+      "workspace/react-flow-topology.json",
+      "planner/flow_plan_1.json",
       "manifest.json",
     ]);
+    expect(artifactBundleSummary(bundle).files[1]).toMatchObject({
+      group: "simulation-inet",
+      isEntrypoint: true,
+      roleLabel: "INET 入口",
+    });
     expect(artifactBundleSummary(bundle).files[0].contentLength).toBeGreaterThan(0);
   });
 

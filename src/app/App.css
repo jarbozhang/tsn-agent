@@ -105,6 +105,42 @@ textarea:focus-visible {
   background: var(--bg-primary);
 }
 
+.agent-run-status {
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 9px;
+  min-height: 34px;
+  padding: 7px 20px;
+  border-bottom: 1px solid rgba(250, 84, 28, 0.18);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  background:
+    linear-gradient(90deg, rgba(250, 84, 28, 0.08), rgba(255, 255, 255, 0.72), rgba(250, 84, 28, 0.08)),
+    #ffffff;
+  background-size: 220% 100%;
+  animation: waitingSurface 1.7s ease-in-out infinite;
+}
+
+.agent-run-status.streaming {
+  border-bottom-color: rgba(22, 119, 255, 0.16);
+}
+
+.agent-run-status.waiting {
+  border-bottom-color: rgba(250, 84, 28, 0.28);
+  color: var(--text-primary);
+}
+
+.agent-run-elapsed {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .brand-logo {
   display: inline-flex;
   align-items: center;
@@ -962,6 +998,27 @@ textarea:focus-visible {
   gap: 7px;
 }
 
+.artifact-group {
+  display: grid;
+  gap: 6px;
+}
+
+.artifact-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.artifact-group-heading small {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
 .export-directory {
   display: grid;
   gap: 5px;
@@ -1032,9 +1089,30 @@ textarea:focus-visible {
 }
 
 .artifact-item p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
   margin: 3px 0 0;
   color: var(--text-secondary);
   font-size: 11.5px;
+}
+
+.artifact-item p strong,
+.artifact-item p em {
+  font-style: normal;
+  font-weight: 600;
+}
+
+.artifact-item p strong {
+  color: var(--text-primary);
+}
+
+.artifact-item p em {
+  padding: 1px 5px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .export-status {

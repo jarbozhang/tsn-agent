@@ -38,6 +38,7 @@ export async function writeProjectArtifacts(
     const destination = resolveArtifactPath(safeOutputDir, artifact.path);
     const tempPath = `${destination}.tmp-${Date.now()}`;
 
+    await assertArtifactParentsAreNotSymlinks(safeOutputDir, destination);
     await mkdir(path.dirname(destination), { recursive: true });
     await writeFile(tempPath, artifact.content, "utf8");
     await rename(tempPath, destination);
@@ -87,6 +88,10 @@ function resolveArtifactPath(baseDir: string, artifactPath: string): string {
     throw new Error(`Artifact path must be relative: ${artifactPath}`);
   }
 
+  if (artifactPath.split(/[\\/]+/).includes("..")) {
+    throw new Error(`Artifact path escapes project directory: ${artifactPath}`);
+  }
+
   const resolved = path.resolve(baseDir, artifactPath);
 
   if (!isParentOrSame(baseDir, resolved)) {
@@ -119,6 +124,28 @@ async function assertTargetIsNotSymlink(targetPath: string): Promise<void> {
   } catch (error) {
     if (error instanceof Error && error.message.includes("through symlink")) {
       throw error;
+    }
+  }
+}
+
+async function assertArtifactParentsAreNotSymlinks(baseDir: string, destination: string): Promise<void> {
+  const relativeParent = path.relative(baseDir, path.dirname(destination));
+  const segments = relativeParent.split(path.sep).filter(Boolean);
+  let current = baseDir;
+
+  for (const segment of segments) {
+    current = path.join(current, segment);
+
+    try {
+      const stat = await lstat(current);
+
+      if (stat.isSymbolicLink()) {
+        throw new Error(`Refusing to export project artifacts through symlink: ${current}`);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("through symlink")) {
+        throw error;
+      }
     }
   }
 }
