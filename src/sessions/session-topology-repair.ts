@@ -6,6 +6,7 @@ import {
   withFlowsFromIntent,
 } from "../domain/topology-factory";
 import { createArtifactBundle, type ArtifactBundle } from "../export/artifact-bundle";
+import { normalizePlannerRunState, type PlannerRunState } from "../planner/planner-contract";
 import type { WorkflowState } from "../project/project-state";
 
 export interface RepairableSession {
@@ -14,6 +15,7 @@ export interface RepairableSession {
     content: string;
   }>;
   workflow: WorkflowState;
+  plannerRun?: PlannerRunState;
   project?: CanonicalTsnProjectV0;
   bundle?: ArtifactBundle;
 }
@@ -37,7 +39,9 @@ export function repairSessionTopologyFromMessages<T extends RepairableSession>(s
   return {
     ...session,
     project: projectWithFlows,
-    bundle: session.bundle ? createArtifactBundle(projectWithFlows) : undefined,
+    bundle: session.bundle ? createArtifactBundle(projectWithFlows, {
+      plannerResult: normalizePlannerRunState(session.plannerRun).resultSnapshot,
+    }) : undefined,
   };
 }
 

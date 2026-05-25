@@ -62,8 +62,16 @@ function inferArtifactRole(artifact: Pick<ExportedArtifact, "path" | "purpose" |
     return "UDP 业务流配置";
   }
 
+  if (artifact.path.startsWith("simulation/inet/planner-gcl")) {
+    return "GCL 追溯数据";
+  }
+
   if (artifact.purpose === "planner-input") {
     return "规划器输入";
+  }
+
+  if (artifact.purpose === "planner-request") {
+    return "规划器请求快照";
   }
 
   if (artifact.purpose === "planner-output" || artifact.observedExternal) {

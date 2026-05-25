@@ -6,6 +6,7 @@ import { exportInetTrafficIni } from "./inet-traffic-exporter";
 import { exportNed } from "./ned-exporter";
 import { exportPlannerInput } from "./planner-exporter";
 import { exportReactFlowTopology } from "./react-flow-exporter";
+import { summarizePlannerResult, type PlannerResultSnapshot } from "../planner/planner-contract";
 
 describe("exporters", () => {
   const project = createProjectFromIntent("我需要4个交换机，每个交换机连接5个端系统");
@@ -82,16 +83,52 @@ describe("exporters", () => {
     expect(topology.edges).toHaveLength(23);
   });
 
-  it("exports planner input with the existing stream_info shape", () => {
+  it("exports planner input in planner service request shape", () => {
     const plannerInput = exportPlannerInput(project);
+    const sourceConfig = plannerInput.sendData.source_config;
+    const firstFlow = sourceConfig.flow_feature[0];
+    const firstPath = firstFlow.path[0];
+    const routeLinkIds = project.flows[0].routeLinkIds.map((linkId) => {
+      const link = project.topology.links.find((candidate) => candidate.id === linkId);
+      return link?.numericId;
+    });
+    const switchNode = sourceConfig.cfg_parameter.cfg_parameter.node.find((node) => node.node_type === "0");
+    const endSystemNode = sourceConfig.cfg_parameter.cfg_parameter.node.find((node) => node.node_type === "1");
 
-    expect(plannerInput.base.name).toBe(project.name);
-    expect(plannerInput.stream_info).toHaveLength(1);
-    expect(plannerInput.stream_info[0].path[0]).toMatchObject({
+    expect(plannerInput.sendData.mode).toBe("time-trigger");
+    expect(sourceConfig.cfg_parameter.cfg_parameter.node).toHaveLength(project.topology.nodes.length);
+    expect(sourceConfig.flow_feature).toHaveLength(1);
+    expect(sourceConfig.topo_feature).toHaveLength(project.topology.links.length);
+    expect(switchNode).toMatchObject({
+      system_clock: "125",
+      rc_threshold: "8",
+      port_num: String(project.topology.nodes[0].ports.length),
+      node_type: "0",
+    });
+    expect(endSystemNode).toMatchObject({
+      system_clock: "125",
+      node_type: "1",
+    });
+    expect(firstFlow).toMatchObject({
+      stream_id: project.flows[0].numericId,
+      src_node: 4,
+      dst_node: 19,
+      path_number: 1,
+      size: project.flows[0].frameSizeBytes,
+      period: project.flows[0].periodUs,
+    });
+    expect(firstPath).toMatchObject({
+      route: routeLinkIds,
       flow_type: "ST",
       ip_protocol: 17,
-      pcp: "6",
+      redundant: 0,
+      fl_api_flag: 0,
+      delay_para: 100,
+      fivetuple_mask: 0,
     });
+    expect(firstPath.route.every((linkId) =>
+      sourceConfig.topo_feature.some((link) => link.link_id === linkId)
+    )).toBe(true);
   });
 
   it("exports requested video flow in planner input", () => {
@@ -103,22 +140,57 @@ describe("exporters", () => {
     );
 
     const plannerInput = exportPlannerInput(projectWithVideo);
+    const flows = plannerInput.sendData.source_config.flow_feature;
 
-    expect(plannerInput.stream_info).toHaveLength(2);
-    expect(plannerInput.stream_info.map((stream) => stream.stream_name)).toEqual(["控制流-1", "视频流-1"]);
-    expect(plannerInput.stream_info[1]).toMatchObject({
+    expect(flows).toHaveLength(2);
+    expect(flows.map((stream) => stream.stream_id)).toEqual([1, 2]);
+    expect(flows[1]).toMatchObject({
       stream_id: 2,
-      stream_name: "视频流-1",
-      size: String(50 * 1024),
-      period: "33333",
+      size: 50 * 1024,
+      period: 33_333,
+      src_node: 3,
+      dst_node: 6,
     });
-    expect(plannerInput.stream_info[1].path[0]).toMatchObject({
+    expect(flows[1].path[0]).toMatchObject({
       src_ip: "10.0.1.2",
       dst_ip: "10.0.2.2",
-      src_port: "25564",
-      dst_port: "26029",
-      pcp: "5",
+      src_port: 25564,
+      dst_port: 26029,
+      dst_mac: "00:1B:44:11:3A:05",
     });
+  });
+
+  it("rejects planner input when project has no flows", () => {
+    const projectWithoutFlows = createProjectFromIntent("我需要2个交换机，每个交换机连接3个端系统", undefined, {
+      includeControlFlow: false,
+    });
+
+    expect(() => exportPlannerInput(projectWithoutFlows)).toThrow("project has no flows");
+  });
+
+  it("rejects planner input when a flow references a missing route link", () => {
+    const brokenProject = {
+      ...project,
+      flows: [
+        {
+          ...project.flows[0],
+          routeLinkIds: ["missing-link"],
+        },
+      ],
+    };
+
+    expect(() => exportPlannerInput(brokenProject)).toThrow("flow flow-control-1 references missing route link missing-link");
+  });
+
+  it("rejects planner input for non-ST flows unsupported by the first planner API version", () => {
+    const projectWithBestEffort = withFlowsFromIntent(
+      createProjectFromIntent("我需要2个交换机，每个交换机连接3个端系统", undefined, {
+        includeControlFlow: false,
+      }),
+      "我还需要一条BE流",
+    );
+
+    expect(() => exportPlannerInput(projectWithBestEffort)).toThrow("unsupported flow type BE");
   });
 
   it("creates the MVP artifact bundle", () => {
@@ -141,4 +213,78 @@ describe("exporters", () => {
     ]);
     expect(bundle.artifacts.some((artifact) => artifact.path === "planner/flow_plan_result_1.json")).toBe(false);
   });
+
+  it("adds real planner output and INET GCL trace artifacts only when result snapshot exists", () => {
+    const snapshot = createPlannerResultSnapshot(project.flows[0].numericId);
+    const bundle = createArtifactBundle(project, {
+      plannerRequest: exportPlannerInput(project),
+      plannerResult: snapshot,
+    });
+    const plannerOutput = bundle.artifacts.find((artifact) => artifact.path === "planner/flow_plan_result_1.json");
+    const gclJson = bundle.artifacts.find((artifact) => artifact.path === "simulation/inet/planner-gcl.json");
+    const gclNotes = bundle.artifacts.find((artifact) => artifact.path === "simulation/inet/planner-gcl-notes.md");
+
+    expect(bundle.artifacts.map((artifact) => artifact.path)).toContain("planner/planner_request_1.json");
+    expect(plannerOutput).toMatchObject({
+      purpose: "planner-output",
+      observedExternal: true,
+    });
+    expect(plannerOutput?.content).toContain('"solution_json"');
+    expect(gclJson?.content).toContain('"planId": "plan-1"');
+    expect(gclJson?.content).toContain('"canonicalLinkId": "link-0"');
+    expect(gclJson?.content).toContain('"flowName": "控制流-1"');
+    expect(gclNotes?.content).toContain("尚未声明为可直接运行的 TAS gate schedule");
+    expect(bundle.manifest.files).toContainEqual(
+      expect.objectContaining({
+        path: "planner/flow_plan_result_1.json",
+        purpose: "planner-output",
+        observedExternal: true,
+      }),
+    );
+  });
 });
+
+function createPlannerResultSnapshot(streamId: number): PlannerResultSnapshot {
+  const sourceOutputs = {
+    solution_json: [
+      {
+        link_id: 0,
+        gcl_entries: [
+          {
+            interval: 32,
+            state: "open",
+            stream_id: streamId,
+          },
+        ],
+      },
+    ],
+    tsnlight_plan_cfg_json: {
+      network_plan_cfg: {
+        node: [],
+      },
+    },
+  };
+
+  return {
+    planId: "plan-1",
+    state: "succeeded",
+    sourceOutputs,
+    outputFingerprints: {
+      solution_json: {
+        file_name: "solution.json",
+        size_bytes: 128,
+        sha256: "a".repeat(64),
+        mtime_ns: 1,
+      },
+    },
+    receivedAt: "2026-05-22T10:00:00.000Z",
+    summary: summarizePlannerResult(sourceOutputs, {
+      solution_json: {
+        file_name: "solution.json",
+        size_bytes: 128,
+        sha256: "a".repeat(64),
+        mtime_ns: 1,
+      },
+    }),
+  };
+}

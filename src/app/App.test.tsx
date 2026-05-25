@@ -5,9 +5,60 @@ import { createProjectFromIntent } from "../domain/topology-factory";
 import { createInitialWorkflowState } from "../project/project-state";
 import { App } from "./App";
 
+type PlannerStartResponse = {
+  err_code: number;
+  err_msg: string;
+  data: {
+    state: string;
+    plan_id?: string;
+    started_at?: string;
+  };
+  trace_id?: string;
+  timestamp?: string;
+};
+
+type PlannerQueryResponse = {
+  err_code: number;
+  err_msg: string;
+  data: {
+    state: string;
+    plan_id?: string;
+    running_duration_ms?: number;
+    started_at?: string;
+    updated_at?: string;
+    finished_at?: string;
+    internal_result?: unknown;
+    error_code?: string | number | null;
+    error_message?: string | null;
+  };
+  trace_id?: string;
+  timestamp?: string;
+};
+
+type PlannerResultResponse = {
+  err_code: number;
+  err_msg: string;
+  data: {
+    state: string;
+    plan_id?: string;
+    source_outputs?: {
+      solution_json?: unknown;
+      tsnlight_plan_cfg_json?: unknown;
+    };
+    output_fingerprints?: Record<string, unknown>;
+    error_message?: string | null;
+  };
+  trace_id?: string;
+  timestamp?: string;
+};
+
 const runTsnAgentMock = vi.hoisted(() => vi.fn());
 const openDialogMock = vi.hoisted(() => vi.fn());
 const invokeMock = vi.hoisted(() => vi.fn());
+const startPlannerPlanMock = vi.hoisted(() => vi.fn());
+const queryPlannerPlanStatusMock = vi.hoisted(() => vi.fn());
+const getPlannerPlanResultMock = vi.hoisted(() => vi.fn());
+const stopPlannerPlanMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@xyflow/react", () => ({
   Background: () => null,
@@ -69,6 +120,13 @@ vi.mock("../agent/agent-adapter", () => ({
   runTsnAgent: runTsnAgentMock,
 }));
 
+vi.mock("../planner/planner-client", () => ({
+  startPlannerPlan: startPlannerPlanMock,
+  queryPlannerPlanStatus: queryPlannerPlanStatusMock,
+  getPlannerPlanResult: getPlannerPlanResultMock,
+  stopPlannerPlan: stopPlannerPlanMock,
+}));
+
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
 }));
@@ -98,6 +156,80 @@ function createDefaultTestWorkflow() {
   return createInitialWorkflowState();
 }
 
+function createPlannerStartResponse(state = "running", planId = "plan-1"): PlannerStartResponse {
+  return {
+    err_code: 0,
+    err_msg: "规划任务已启动",
+    data: {
+      state,
+      plan_id: planId,
+      started_at: "2026-05-22T10:00:00+08:00",
+    },
+    trace_id: "trace-start",
+    timestamp: "2026-05-22T10:00:00+08:00",
+  };
+}
+
+function createPlannerQueryResponse(state = "succeeded", planId = "plan-1"): PlannerQueryResponse {
+  return {
+    err_code: 0,
+    err_msg: state === "succeeded" ? "规划完成" : "规划运行中",
+    data: {
+      plan_id: planId,
+      state,
+      running_duration_ms: state === "running" ? 2000 : 4200,
+      started_at: "2026-05-22T10:00:00+08:00",
+      updated_at: "2026-05-22T10:00:04+08:00",
+      finished_at: state === "succeeded" ? "2026-05-22T10:00:04+08:00" : undefined,
+      internal_result: state === "succeeded" ? 1 : undefined,
+      error_code: null,
+      error_message: null,
+    },
+    trace_id: "trace-query",
+    timestamp: "2026-05-22T10:00:04+08:00",
+  };
+}
+
+function createPlannerResultResponse(planId = "plan-1"): PlannerResultResponse {
+  return {
+    err_code: 0,
+    err_msg: "ok",
+    data: {
+      state: "succeeded",
+      plan_id: planId,
+      source_outputs: {
+        solution_json: [
+          {
+            link_id: 0,
+            gcl_entries: [
+              {
+                interval: 32,
+                state: "open",
+                stream_id: 1,
+              },
+            ],
+          },
+        ],
+        tsnlight_plan_cfg_json: {
+          network_plan_cfg: {
+            node: [],
+          },
+        },
+      },
+      output_fingerprints: {
+        solution_json: {
+          file_name: "solution.json",
+          size_bytes: 128,
+          sha256: "a".repeat(64),
+          mtime_ns: 1,
+        },
+      },
+    },
+    trace_id: "trace-result",
+    timestamp: "2026-05-22T10:00:05+08:00",
+  };
+}
+
 async function typeDefaultIntent(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText("输入你的 TSN 需求"), "我需要4个交换机，每个交换机连接5个端系统");
 }
@@ -111,6 +243,10 @@ describe("App", () => {
   beforeEach(async () => {
     window.localStorage.clear();
     runTsnAgentMock.mockReset();
+    startPlannerPlanMock.mockReset();
+    queryPlannerPlanStatusMock.mockReset();
+    getPlannerPlanResultMock.mockReset();
+    stopPlannerPlanMock.mockReset();
     invokeMock.mockReset();
     openDialogMock.mockReset();
     Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
@@ -368,6 +504,171 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "日志" }));
     expect(await screen.findByText("项目文件已导出")).toBeInTheDocument();
   });
+
+  it("runs planner task from running to succeeded and adds result artifacts", async () => {
+    const user = userEvent.setup();
+    startPlannerPlanMock.mockResolvedValue(createPlannerStartResponse());
+    queryPlannerPlanStatusMock.mockResolvedValue(createPlannerQueryResponse());
+    getPlannerPlanResultMock.mockResolvedValue(createPlannerResultResponse());
+
+    render(<App />);
+
+    await typeDefaultIntent(user);
+    await user.click(screen.getByRole("button", { name: /生成规划草案/ }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(screen.getByRole("tab", { name: "导出文件" }));
+
+    expect(screen.getByLabelText("规划任务")).toHaveTextContent("未提交");
+    expect(screen.getByDisplayValue("http://100.78.48.43:18080")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "启动规划" }));
+
+    expect(startPlannerPlanMock).toHaveBeenCalledWith({
+      baseUrl: "http://100.78.48.43:18080",
+      request: expect.objectContaining({
+        sendData: expect.objectContaining({
+          mode: "time-trigger",
+        }),
+      }),
+    });
+    expect(await screen.findByText("plan-1")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(getPlannerPlanResultMock).toHaveBeenCalledWith({
+        baseUrl: "http://100.78.48.43:18080",
+        planId: "plan-1",
+      });
+    });
+    expect(await screen.findByText("planner/flow_plan_result_1.json")).toBeInTheDocument();
+    expect(screen.getByText("simulation/inet/planner-gcl.json")).toBeInTheDocument();
+    expect(screen.getByText("simulation/inet/planner-gcl-notes.md")).toBeInTheDocument();
+    expect(screen.getByText("外部观测输出")).toBeInTheDocument();
+    expect(screen.getAllByText("GCL 追溯数据").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByLabelText("规划任务")).toHaveTextContent("1 条链路 · 1 条 GCL");
+  }, 10000);
+
+  it("does not create planner output when result endpoint returns a business error", async () => {
+    const user = userEvent.setup();
+    startPlannerPlanMock.mockResolvedValue(createPlannerStartResponse());
+    queryPlannerPlanStatusMock.mockResolvedValue(createPlannerQueryResponse());
+    getPlannerPlanResultMock.mockResolvedValue({
+      err_code: 1004,
+      err_msg: "规划任务尚未完成",
+      data: {
+        state: "running",
+        plan_id: "plan-1",
+        error_message: "规划任务尚未完成",
+      },
+      trace_id: "trace-result",
+      timestamp: "2026-05-22T10:00:05+08:00",
+    });
+
+    render(<App />);
+
+    await typeDefaultIntent(user);
+    await user.click(screen.getByRole("button", { name: /生成规划草案/ }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(screen.getByRole("tab", { name: "导出文件" }));
+    await user.click(screen.getByRole("button", { name: "启动规划" }));
+
+    expect(await screen.findByText("规划任务尚未完成")).toBeInTheDocument();
+    expect(screen.queryByText("planner/flow_plan_result_1.json")).not.toBeInTheDocument();
+    expect(screen.queryByText("simulation/inet/planner-gcl.json")).not.toBeInTheDocument();
+  }, 10000);
+
+  it("invalidates planner result artifacts when the project changes", async () => {
+    const user = userEvent.setup();
+    startPlannerPlanMock.mockResolvedValue(createPlannerStartResponse());
+    queryPlannerPlanStatusMock.mockResolvedValue(createPlannerQueryResponse());
+    getPlannerPlanResultMock.mockResolvedValue(createPlannerResultResponse());
+
+    render(<App />);
+
+    await typeDefaultIntent(user);
+    await user.click(screen.getByRole("button", { name: /生成规划草案/ }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(screen.getByRole("tab", { name: "导出文件" }));
+    await user.click(screen.getByRole("button", { name: "启动规划" }));
+    expect(await screen.findByText("planner/flow_plan_result_1.json")).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("输入你的 TSN 需求"));
+    await user.type(screen.getByLabelText("输入你的 TSN 需求"), "改成3个交换机，每个交换机连接3个端系统");
+    await user.click(screen.getByRole("button", { name: /生成规划草案/ }));
+    await user.click(screen.getByRole("tab", { name: "导出文件" }));
+
+    expect(await screen.findByText("工程输入已更新，原规划结果已失效，请重新启动规划任务。")).toBeInTheDocument();
+    expect(screen.queryByText("planner/flow_plan_result_1.json")).not.toBeInTheDocument();
+    expect(screen.queryByText("simulation/inet/planner-gcl.json")).not.toBeInTheDocument();
+  }, 12000);
+
+  it("keeps polling after a transient planner status failure", async () => {
+    const user = userEvent.setup();
+    startPlannerPlanMock.mockResolvedValue(createPlannerStartResponse());
+    queryPlannerPlanStatusMock
+      .mockRejectedValueOnce(new Error("temporary timeout"))
+      .mockResolvedValueOnce(createPlannerQueryResponse());
+    getPlannerPlanResultMock.mockResolvedValue(createPlannerResultResponse());
+
+    render(<App />);
+
+    await typeDefaultIntent(user);
+    await user.click(screen.getByRole("button", { name: /生成规划草案/ }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(screen.getByRole("tab", { name: "导出文件" }));
+    await user.click(screen.getByRole("button", { name: "启动规划" }));
+
+    expect(await screen.findByText("temporary timeout")).toBeInTheDocument();
+    expect(await screen.findByText("planner/flow_plan_result_1.json")).toBeInTheDocument();
+    expect(queryPlannerPlanStatusMock).toHaveBeenCalledTimes(2);
+  }, 12000);
+
+  it("prevents an in-flight poll from writing results after the user stops a planner task", async () => {
+    const user = userEvent.setup();
+    const queryDeferred = createDeferred<PlannerQueryResponse>();
+    startPlannerPlanMock.mockResolvedValue(createPlannerStartResponse());
+    queryPlannerPlanStatusMock.mockReturnValue(queryDeferred.promise);
+    stopPlannerPlanMock.mockResolvedValue({
+      err_code: 0,
+      err_msg: "已取消",
+      data: {
+        state: "cancelled",
+        stopped_plan_id: "plan-1",
+      },
+      trace_id: "trace-stop",
+      timestamp: "2026-05-22T10:00:06+08:00",
+    });
+    getPlannerPlanResultMock.mockResolvedValue(createPlannerResultResponse());
+
+    render(<App />);
+
+    await typeDefaultIntent(user);
+    await user.click(screen.getByRole("button", { name: /生成规划草案/ }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(await screen.findByRole("button", { name: "确认并继续" }));
+    await user.click(screen.getByRole("tab", { name: "导出文件" }));
+    await user.click(screen.getByRole("button", { name: "启动规划" }));
+
+    await waitFor(() => {
+      expect(queryPlannerPlanStatusMock).toHaveBeenCalledTimes(1);
+    });
+    await user.click(screen.getByRole("button", { name: "停止" }));
+    expect(await screen.findByText("已取消")).toBeInTheDocument();
+
+    queryDeferred.resolve(createPlannerQueryResponse());
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+
+    expect(getPlannerPlanResultMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("planner/flow_plan_result_1.json")).not.toBeInTheDocument();
+  }, 12000);
 
   it("highlights flow route nodes and links when selecting a flow row", async () => {
     const user = userEvent.setup();

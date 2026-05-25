@@ -1,6 +1,6 @@
 # 测试说明
 
-TSN Agent MVP 的默认测试只验证新手纵向闭环和本地确定性导出，不依赖真实 Claude 凭证、真实规划器或本机 INET 仿真工具。
+TSN Agent 的默认测试验证新手纵向闭环、本地确定性导出和规划服务客户端边界，不依赖真实 Agent 凭证、真实规划器或本机 INET 仿真工具。
 
 ## 默认测试
 
@@ -11,10 +11,10 @@ npm run e2e
 npm run cargo:test
 ```
 
-- `npm test`：运行 Vitest，覆盖 canonical 拓扑、NED/`omnetpp.ini`/`traffic.ini`/React Flow/规划器导出、项目快照、安全写盘、会话持久化、诊断日志、fake agent 和关键 React 行为。
+- `npm test`：运行 Vitest，覆盖 canonical 拓扑、NED/`omnetpp.ini`/`traffic.ini`/React Flow/规划器导出、规划服务 mock 流程、项目快照、安全写盘、会话持久化、诊断日志、fake agent 和关键 React 行为。
 - `npm run build`：执行 TypeScript 类型检查和 Vite 生产构建。
 - `npm run e2e`：运行 Web smoke E2E，使用 fake agent 验证一句话拓扑输入、拓扑展示、导出文件列表、保存入口和诊断日志。
-- `npm run cargo:test`：运行 Tauri/Rust 单元测试，覆盖会话数据库 schema、诊断日志和 Claude bridge 的基础安全校验。
+- `npm run cargo:test`：运行 Tauri/Rust 单元测试，覆盖会话数据库 schema、诊断日志、Agent bridge、规划服务 URL/响应边界和写盘安全校验。
 
 ## 当前不进默认测试
 
@@ -23,9 +23,9 @@ npm run cargo:test
 - 真实 INET/OMNeT++ 编译或仿真不进入默认 CI；当前可在 devserver 上手动运行。
 - Tauri 桌面文件选择器；当前 Tauri 写盘 command 由 Rust 单元测试覆盖，Web E2E 只验证保存入口状态。
 - gate schedule configurator、GCL/TAS 回写、gPTP/CBS/FRER 和完整 TSN 行为配置。
-- 外置规划器执行和 `flow_plan_result_1.json` 内容解析。
+- 真实规划服务执行不进入默认 CI；单测使用 mock 覆盖 start -> query -> get result -> artifact 刷新。默认服务地址为 `http://100.78.48.43:18080`，真实 smoke 需要手动触发。
 
-这些内容属于 hardening 或后续专门 skill 的验收范围。MVP 只要求 `planner/flow_plan_result_1.json` 在外部存在时能被识别为 `planner-output` / `observedExternal`，不由默认导出生成。
+这些内容属于 hardening 或后续专门 skill 的验收范围。默认导出仍不伪造规划结果；只有真实 planner result snapshot 存在时才生成 `planner/flow_plan_result_1.json`、`simulation/inet/planner-gcl.json` 和 `simulation/inet/planner-gcl-notes.md`。
 
 ## INET 手动验证
 

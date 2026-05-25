@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<!-- saved from url=(0111)file:///D:/workspace_study/tsn-agent-tools/collections/03-tsn-northbound-adapter/docs/04-interface-mapping.html -->
+<html lang="zh-CN"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  
+  <title>TSN 规划中转服务 API 对接文档</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --text: #202124;
+      --muted: #57606a;
+      --line: #d0d7de;
+      --soft: #f6f8fa;
+      --blue: #0969da;
+      --blue-soft: #ddf4ff;
+      --green: #116329;
+      --red: #b42318;
+      --note: #fff8c5;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.58;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 318px minmax(0, 1fr);
+      gap: 24px;
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    aside {
+      position: sticky;
+      top: 16px;
+      align-self: start;
+      max-height: calc(100vh - 32px);
+      overflow: auto;
+      border: 1px solid var(--line);
+      background: #fff;
+      padding: 14px 16px;
+    }
+    main { min-width: 0; }
+    h1, h2, h3, h4 { line-height: 1.28; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 34px 0 12px; padding-top: 10px; border-top: 2px solid #eaeef2; font-size: 22px; }
+    h3 { margin: 26px 0 10px; font-size: 18px; }
+    h4 { margin: 20px 0 8px; font-size: 15px; }
+    section, h2[id], h3[id], h4[id] { scroll-margin-top: 24px; }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    nav strong { display: block; margin-bottom: 8px; }
+    nav ul { margin: 8px 0 0; padding-left: 0; list-style: none; }
+    nav li { margin: 5px 0; }
+    nav a {
+      display: block;
+      padding: 5px 8px;
+      border-left: 3px solid transparent;
+      color: #24292f;
+      border-radius: 2px;
+      font-size: 14px;
+    }
+    nav a.sub { padding-left: 18px; color: var(--muted); font-size: 13px; }
+    nav a.active,
+    nav a[aria-current="true"] {
+      border-left-color: var(--blue);
+      background: var(--blue-soft);
+      color: #0550ae;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 20px;
+      table-layout: fixed;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      vertical-align: top;
+      word-break: break-word;
+    }
+    th { background: var(--soft); text-align: left; }
+    code, pre { font-family: Consolas, "Courier New", monospace; font-size: 13px; }
+    pre {
+      margin: 10px 0 18px;
+      padding: 12px 14px;
+      overflow: auto;
+      background: var(--soft);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+    }
+    details {
+      margin: 12px 0 20px;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 4px;
+    }
+    summary {
+      cursor: pointer;
+      padding: 8px 10px;
+      background: var(--soft);
+      font-weight: 700;
+    }
+    details pre { margin: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+    .note { background: var(--note); border: 1px solid #eac54f; padding: 10px 12px; margin: 12px 0 18px; border-radius: 4px; }
+    .meta { color: var(--muted); margin: 0 0 16px; }
+    .ok { color: var(--green); font-weight: 700; }
+    .bad { color: var(--red); font-weight: 700; }
+    .nowrap { white-space: nowrap; }
+    .small { color: var(--muted); font-size: 13px; }
+    .tag {
+      display: inline-block;
+      padding: 2px 7px;
+      border: 1px solid #afb8c1;
+      border-radius: 999px;
+      background: #fff;
+      color: #57606a;
+      font-size: 12px;
+      font-weight: 700;
+      vertical-align: 1px;
+    }
+    .tag.real { border-color: #4ac26b; color: var(--green); background: #dafbe1; }
+    @media (max-width: 1120px) {
+      .layout { grid-template-columns: 1fr; padding: 16px; }
+      aside { position: static; max-height: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <nav>
+        <strong>API 对接目录</strong>
+        <ul>
+          <li><a href="file:///D:/workspace_study/tsn-agent-tools/collections/03-tsn-northbound-adapter/docs/04-interface-mapping.html#overview" class="active" aria-current="true">接口总览</a></li>
+          <li><a href="file:///D:/workspace_study/tsn-agent-tools/collections/03-tsn-northbound-adapter/docs/04-interface-mapping.html#common">公共协议</a></li>
+          <li><a href="file:///D:/workspace_study/tsn-agent-tools/collections/03-tsn-northbound-adapter/docs/04-interface-mapping.html#start">POST /api/start_plan/</a></li>
+          <li><a class="sub" href="file:///D:/workspace_study/tsn-agent-tools/collections/03-tsn-northbound-adapter/docs/04-interface-mapping.html#start-request">启动规划：入参</a></li>
+          <li><a class="sub" href="file:///D:/workspace_study/tsn-agent-tools/collections/03-tsn-northbound-adapter/docs/04-interface-mapping.html#start-response">启动规划：出参</a></li>
+          <li><a class="sub" href="file:///D:/workspace_study/tsn-agent-tools/collections/03-tsn-northbound-adapter/docs/04-interface-mapping.html#start-examples">启动规划：示例</a></li>
+          <li><a href="file:///D:/workspace_study/tsn-agent-tools/collections/03-tsn-northbound-adapter/docs/04-interface-mapping.html#query">POST /api/query_plan_status/</a></li>
+          <li><a href="file:///D:/workspace_study/tsn-agent-tools/collections/03-tsn-northbound-adapter/docs/04-interface-mapping.html#result">POST /api/get_plan_result/</a></li>
+          <li><a href="file:///D:/workspace_study/tsn-agent-tools/collections/03-tsn-northbound-adapter/docs/04-interface-mapping.html#stop">POST /api/stop_plan/</a></li>
+          <li><a href="file:///D:/workspace_study/tsn-agent-tools/collections/03-tsn-northbound-adapter/docs/04-interface-mapping.html#states">状态与错误码</a></li>
+          <li><a href="file:///D:/workspace_study/tsn-agent-tools/collections/03-tsn-northbound-adapter/docs/04-interface-mapping.html#appendix">附录：边界与待确认</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main>
+      <h1>TSN 规划中转服务 API 对接文档</h1>
+      <p class="meta">版本：v0.1.0　日期：2026-05-22　适用范围：第一版时间触发/ST 规划闭环。</p>
+      <p class="note">本文是唯一对外接口文档。调用方按本文完成接口对接；方案背景、部署运维、推进 TODO 不写入本文正文。</p>
+
+      <section id="overview">
+        <h2>接口总览</h2>
+        <table>
+          <thead>
+            <tr><th style="width: 250px;">接口</th><th style="width: 110px;">方法</th><th>用途</th><th style="width: 230px;">成功核心返回</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>/api/start_plan/</code></td><td>POST</td><td>提交完整规划输入并启动规划。</td><td><code>plan_id</code>、<code>state</code></td></tr>
+            <tr><td><code>/api/query_plan_status/</code></td><td>POST</td><td>查询任务状态；任务运行中时刷新一次内部规划结果。</td><td><code>state</code>、<code>internal_result</code></td></tr>
+            <tr><td><code>/api/get_plan_result/</code></td><td>POST</td><td>任务成功后读取绑定到该任务的源码输出快照。</td><td><code>source_outputs</code>、<code>output_fingerprints</code></td></tr>
+            <tr><td><code>/api/stop_plan/</code></td><td>POST</td><td>停止当前正在运行的规划任务。</td><td><code>stopped_plan_id</code></td></tr>
+          </tbody>
+        </table>
+
+        <h3>调用顺序</h3>
+        <table>
+          <tbody>
+            <tr><th style="width: 120px;">1</th><td>调用 <code>/api/start_plan/</code>，保存响应中的 <code>data.plan_id</code>。</td></tr>
+            <tr><th>2</th><td>轮询 <code>/api/query_plan_status/</code>，直到 <code>data.state=succeeded</code>、<code>failed</code> 或 <code>cancelled</code>。</td></tr>
+            <tr><th>3</th><td>仅当 <code>data.state=succeeded</code> 时调用 <code>/api/get_plan_result/</code>。</td></tr>
+            <tr><th>可选</th><td>需要主动停止时调用 <code>/api/stop_plan/</code>。该接口停止当前运行任务，不做发起人归属校验。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="common">
+        <h2>公共协议</h2>
+        <p class="note">本文示例分为两类：<span class="tag">契约示例</span> 表示按当前接口契约构造、用于说明字段和值格式；<span class="tag real">实测证据</span> 表示来自测试机真实端到端烟测记录。除明确标注为实测证据外，示例中的 <code>plan_id</code>、时间和 hash 均为格式示例。</p>
+        <table>
+          <tbody>
+            <tr><th style="width: 220px;">Base URL</th><td><code>http://100.78.48.43:18080</code>（测试环境）。</td></tr>
+            <tr><th>Content-Type</th><td><code>application/json; charset=utf-8</code>。</td></tr>
+            <tr><th>请求包装</th><td>业务参数统一放在 <code>sendData</code> 中。</td></tr>
+            <tr><th>HTTP 状态码</th><td>接口业务响应统一返回 HTTP <code>200</code>；调用方以 <code>err_code</code> 和 <code>data.state</code> 判断业务结果。未捕获系统异常按 FastAPI 默认错误响应处理，不属于本文业务出参。</td></tr>
+            <tr><th>时间格式</th><td>响应中的时间字段使用 ISO-8601，带时区，例如 <code>2026-05-22T14:00:00+08:00</code>。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>通用响应体</h3>
+        <table>
+          <thead>
+            <tr><th style="width: 180px;">字段</th><th style="width: 100px;">类型</th><th style="width: 80px;">必返</th><th>说明</th><th style="width: 220px;">示例</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>err_code</code></td><td>integer</td><td>是</td><td>业务处理码，<code>0</code> 表示请求已被中转层正常处理。</td><td><code>0</code></td></tr>
+            <tr><td><code>err_msg</code></td><td>string</td><td>是</td><td>中文业务说明。</td><td><code>规划运行中</code></td></tr>
+            <tr><td><code>data</code></td><td>object</td><td>是</td><td>接口业务数据。</td><td><code>{"state":"running"}</code></td></tr>
+            <tr><td><code>trace_id</code></td><td>string</td><td>是</td><td>单次调用追踪 ID。</td><td><code>trace-20260522-140000-000001</code></td></tr>
+            <tr><td><code>timestamp</code></td><td>string</td><td>是</td><td>响应生成时间。</td><td><code>2026-05-22T14:00:00+08:00</code></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="start">
+        <h2>POST /api/start_plan/</h2>
+        <table>
+          <tbody>
+            <tr><th style="width: 220px;">功能</th><td>提交完整规划输入，启动一次时间触发/ST 规划。</td></tr>
+            <tr><th>并发规则</th><td>同一时间只允许一个规划任务运行。已有运行任务时返回 <code>1003 busy</code>，不排队、不创建新任务。</td></tr>
+            <tr><th>第一版模式</th><td><code>sendData.mode</code> 固定为 <code>time-trigger</code>。</td></tr>
+          </tbody>
+        </table>
+
+        <h3 id="start-request">入参字段</h3>
+        <h4>顶层字段</h4>
+        <table>
+          <thead>
+            <tr><th style="width: 300px;">字段</th><th style="width: 110px;">类型</th><th style="width: 80px;">必填</th><th style="width: 190px;">取值范围</th><th style="width: 110px;">单位</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>sendData.mode</code></td><td>string</td><td>是</td><td><code>time-trigger</code></td><td>无</td><td>规划模式。第一版只支持该值。</td></tr>
+            <tr><td><code>sendData.source_config</code></td><td>object</td><td>是</td><td>固定对象</td><td>无</td><td>规划输入配置。</td></tr>
+            <tr><td><code>source_config.cfg_parameter</code></td><td>object</td><td>是</td><td>固定对象</td><td>无</td><td>节点参数配置。</td></tr>
+            <tr><td><code>source_config.flow_feature</code></td><td>array</td><td>是</td><td>非空数组</td><td>无</td><td>流量特征配置。</td></tr>
+            <tr><td><code>source_config.topo_feature</code></td><td>array</td><td>是</td><td>非空数组</td><td>无</td><td>拓扑链路配置。</td></tr>
+          </tbody>
+        </table>
+
+        <h4>cfg_parameter 字段</h4>
+        <table>
+          <thead>
+            <tr><th style="width: 300px;">字段</th><th style="width: 110px;">类型</th><th style="width: 80px;">必填</th><th style="width: 190px;">取值范围</th><th style="width: 110px;">单位</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>cfg_parameter.cfg_parameter.node</code></td><td>array</td><td>是</td><td>非空；<code>node_id</code> 唯一</td><td>无</td><td>节点参数数组。</td></tr>
+            <tr><td><code>node[].node_id</code></td><td>string</td><td>是</td><td>十进制整数字符串</td><td>无</td><td>节点参数 ID。</td></tr>
+            <tr><td><code>node[].system_clock</code></td><td>string</td><td>是</td><td>十进制数字字符串</td><td>待确认</td><td>系统时钟参数。</td></tr>
+            <tr><td><code>node[].rc_threshold</code></td><td>string</td><td>是</td><td>正整数字符串</td><td>待确认</td><td>RC 流监管阈值。</td></tr>
+            <tr><td><code>node[].hpriority_policing_threshold</code></td><td>string</td><td>是</td><td>正整数字符串</td><td>待确认</td><td>高优先级 policing 阈值。</td></tr>
+            <tr><td><code>node[].lpriority_policing_threshold</code></td><td>string</td><td>是</td><td>正整数字符串</td><td>待确认</td><td>低优先级 policing 阈值。</td></tr>
+            <tr><td><code>node[].qbv_or_qch</code></td><td>string</td><td>是</td><td><code>"0"</code> 或 <code>"1"</code></td><td>无</td><td>QBv/Qch 相关配置开关。</td></tr>
+            <tr><td><code>node[].qci_enable</code></td><td>string</td><td>是</td><td><code>"0"</code></td><td>无</td><td>Qci 开关。第一版只确认 <code>"0"</code>。</td></tr>
+            <tr><td><code>node[].ptp_threshold</code></td><td>string/null</td><td>否</td><td><code>"0"</code>、<code>null</code> 或缺省</td><td>待确认</td><td>PTP 阈值；缺省或 <code>null</code> 时不写入源码配置文件。</td></tr>
+            <tr><td><code>node[].port_num</code></td><td>string</td><td>是</td><td>非负整数字符串</td><td>个</td><td>端口数。</td></tr>
+            <tr><td><code>node[].node_type</code></td><td>string</td><td>是</td><td><code>"0"</code> 或 <code>"1"</code></td><td>无</td><td>节点类型。<code>"0"</code> 交换机，<code>"1"</code> 网卡。</td></tr>
+            <tr><td><code>node[].vlan_cfg</code></td><td>string/null</td><td>否</td><td><code>"0"</code>、<code>null</code> 或缺省</td><td>无</td><td>VLAN 配置开关；缺省或 <code>null</code> 时不写入。</td></tr>
+            <tr><td><code>node[].vlan_id</code></td><td>string/null</td><td>否</td><td><code>"0"</code>、<code>null</code> 或缺省</td><td>无</td><td>VLAN ID；缺省或 <code>null</code> 时不写入。</td></tr>
+          </tbody>
+        </table>
+
+        <h4>flow_feature 字段</h4>
+        <table>
+          <thead>
+            <tr><th style="width: 300px;">字段</th><th style="width: 110px;">类型</th><th style="width: 80px;">必填</th><th style="width: 190px;">取值范围</th><th style="width: 110px;">单位</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>flow_feature[].stream_id</code></td><td>integer</td><td>是</td><td><code>&gt;= 0</code>；数组内唯一</td><td>无</td><td>流 ID。</td></tr>
+            <tr><td><code>flow_feature[].src_node</code></td><td>integer/null</td><td>否</td><td><code>&gt;= 0</code></td><td>无</td><td>源节点 ID。存在时必须出现在拓扑端点集合中。</td></tr>
+            <tr><td><code>flow_feature[].dst_node</code></td><td>integer/array/null</td><td>否</td><td>拓扑端点节点 ID，或节点 ID 数组</td><td>无</td><td>目的节点 ID。</td></tr>
+            <tr><td><code>flow_feature[].path_number</code></td><td>integer/null</td><td>否</td><td><code>&gt;= 1</code></td><td>条</td><td>路径数量参数；第一版不强制等于 <code>path.length</code>。</td></tr>
+            <tr><td><code>flow_feature[].size</code></td><td>integer</td><td>是</td><td><code>&gt; 0</code></td><td>byte</td><td>报文大小。</td></tr>
+            <tr><td><code>flow_feature[].period</code></td><td>number</td><td>是</td><td><code>&gt; 0</code></td><td>us</td><td>流量周期。</td></tr>
+            <tr><td><code>flow_feature[].path</code></td><td>array</td><td>是</td><td>非空数组</td><td>无</td><td>候选路径数组。</td></tr>
+            <tr><td><code>flow_feature[]</code> 附加字段</td><td>任意 JSON</td><td>否</td><td>源码字段</td><td>无</td><td>允许随请求透传，例如 <code>cbs_or_ats</code>、<code>bandwidth</code> 等源码字段。</td></tr>
+          </tbody>
+        </table>
+
+        <h4>path 字段</h4>
+        <table>
+          <thead>
+            <tr><th style="width: 300px;">字段</th><th style="width: 110px;">类型</th><th style="width: 80px;">必填</th><th style="width: 190px;">取值范围</th><th style="width: 110px;">单位</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>path[].route</code></td><td>array</td><td>是</td><td>非空非负整数数组；每项必须存在于 <code>topo_feature[].link_id</code></td><td>无</td><td>链路 ID 序列。</td></tr>
+            <tr><td><code>path[].flow_type</code></td><td>string/null</td><td>否</td><td>缺省或 <code>ST</code></td><td>无</td><td>流类型。传入时第一版只允许 <code>ST</code>。</td></tr>
+            <tr><td><code>path[].latency_requirement</code></td><td>number</td><td>是</td><td><code>&gt;= 0</code></td><td>us</td><td>延时要求。</td></tr>
+            <tr><td><code>path[].jitter_requirement</code></td><td>number</td><td>是</td><td><code>&gt;= 0</code></td><td>us</td><td>抖动要求。</td></tr>
+            <tr><td><code>path[].redundant</code></td><td>integer</td><td>是</td><td><code>0</code> 或 <code>1</code></td><td>无</td><td>冗余标识。</td></tr>
+            <tr><td><code>path[].fl_api_flag</code></td><td>integer</td><td>是</td><td><code>0</code> 或 <code>1</code></td><td>无</td><td>源码标识字段。</td></tr>
+            <tr><td><code>path[].delay_para</code></td><td>number</td><td>是</td><td><code>&gt;= 0</code></td><td>待确认</td><td>延时相关参数。</td></tr>
+            <tr><td><code>path[].src_ip</code></td><td>string</td><td>是</td><td>IPv4 地址</td><td>无</td><td>源 IP。</td></tr>
+            <tr><td><code>path[].dst_ip</code></td><td>string</td><td>是</td><td>IPv4 地址</td><td>无</td><td>目的 IP。</td></tr>
+            <tr><td><code>path[].src_port</code></td><td>integer</td><td>是</td><td><code>0..65535</code></td><td>无</td><td>源端口。</td></tr>
+            <tr><td><code>path[].dst_port</code></td><td>integer</td><td>是</td><td><code>0..65535</code></td><td>无</td><td>目的端口。</td></tr>
+            <tr><td><code>path[].dst_mac</code></td><td>string</td><td>是</td><td>冒号分隔 6 字节十六进制 MAC</td><td>无</td><td>目的 MAC。</td></tr>
+            <tr><td><code>path[].ip_protocol</code></td><td>integer</td><td>是</td><td><code>0..255</code></td><td>无</td><td>IP 协议号，例如 UDP 为 <code>17</code>。</td></tr>
+            <tr><td><code>path[].fivetuple_mask</code></td><td>integer</td><td>是</td><td>十进制写法只包含 <code>0/1</code>，长度 1 到 5</td><td>无</td><td>五元组掩码。</td></tr>
+            <tr><td><code>path[]</code> 附加字段</td><td>任意 JSON</td><td>否</td><td>源码字段</td><td>无</td><td>允许随请求透传。</td></tr>
+          </tbody>
+        </table>
+
+        <h4>topo_feature 字段</h4>
+        <table>
+          <thead>
+            <tr><th style="width: 300px;">字段</th><th style="width: 110px;">类型</th><th style="width: 80px;">必填</th><th style="width: 190px;">取值范围</th><th style="width: 110px;">单位</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>topo_feature[].link_id</code></td><td>integer</td><td>是</td><td><code>&gt;= 0</code>；数组内唯一</td><td>无</td><td>链路 ID。</td></tr>
+            <tr><td><code>topo_feature[].src_node</code></td><td>integer</td><td>是</td><td><code>&gt;= 0</code></td><td>无</td><td>链路起点节点 ID。</td></tr>
+            <tr><td><code>topo_feature[].src_port</code></td><td>integer</td><td>是</td><td><code>&gt;= 0</code></td><td>无</td><td>链路起点端口。</td></tr>
+            <tr><td><code>topo_feature[].dst_node</code></td><td>integer</td><td>是</td><td><code>&gt;= 0</code></td><td>无</td><td>链路终点节点 ID。</td></tr>
+            <tr><td><code>topo_feature[].dst_port</code></td><td>integer</td><td>是</td><td><code>&gt;= 0</code></td><td>无</td><td>链路终点端口。</td></tr>
+            <tr><td><code>topo_feature[].speed</code></td><td>number</td><td>是</td><td><code>&gt; 0</code></td><td>待确认</td><td>链路速率。</td></tr>
+            <tr><td><code>topo_feature[].st_queues</code></td><td>integer</td><td>是</td><td><code>&gt;= 1</code></td><td>个</td><td>ST 队列数。</td></tr>
+            <tr><td><code>topo_feature[].macrotick</code></td><td>number</td><td>是</td><td><code>&gt; 0</code></td><td>待确认</td><td>macrotick 参数。</td></tr>
+            <tr><td><code>topo_feature[]</code> 附加字段</td><td>任意 JSON</td><td>否</td><td>源码字段</td><td>无</td><td>允许随请求透传。</td></tr>
+          </tbody>
+        </table>
+
+        <h4>跨字段校验</h4>
+        <table>
+          <tbody>
+            <tr><th style="width: 260px;">唯一性</th><td><code>node[].node_id</code>、<code>flow_feature[].stream_id</code>、<code>topo_feature[].link_id</code> 分别要求数组内唯一。</td></tr>
+            <tr><th>流端点</th><td><code>src_node</code>、<code>dst_node</code> 存在时，必须出现在 <code>topo_feature</code> 的端点集合中。</td></tr>
+            <tr><th>路径链路</th><td><code>path[].route[]</code> 的每个链路 ID 必须存在于 <code>topo_feature[].link_id</code>。</td></tr>
+            <tr><th>空值处理</th><td>可选字段缺省或显式 <code>null</code> 时，写入源码配置文件会被排除，不落盘为 <code>null</code>。</td></tr>
+          </tbody>
+        </table>
+
+        <h3 id="start-response">出参字段</h3>
+        <table>
+          <thead>
+            <tr><th style="width: 260px;">字段</th><th style="width: 110px;">类型</th><th style="width: 80px;">必返</th><th style="width: 210px;">取值范围</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>data.state</code></td><td>string</td><td>是</td><td><code>running</code> / <code>succeeded</code> / <code>failed</code> / <code>busy</code></td><td>启动处理后的任务状态。</td></tr>
+            <tr><td><code>data.plan_id</code></td><td>string</td><td>创建任务时是</td><td><code>plan-YYYYMMDD-HHMMSS-xxxxxx</code></td><td>新任务 ID。</td></tr>
+            <tr><td><code>data.started_at</code></td><td>string/null</td><td>创建任务时是</td><td>ISO-8601</td><td>启动时间。</td></tr>
+            <tr><td><code>data.running_plan_id</code></td><td>string</td><td>busy 时是</td><td><code>plan_id</code></td><td>当前正在运行的任务 ID。</td></tr>
+            <tr><td><code>data.running_duration_ms</code></td><td>integer/null</td><td>busy 时是</td><td><code>&gt;= 0</code></td><td>当前任务运行时长，毫秒。</td></tr>
+            <tr><td><code>data.suggestion</code></td><td>string</td><td>busy 时是</td><td><code>retry_later_or_stop_current</code></td><td>调用方处理口径。</td></tr>
+            <tr><td><code>data.detail</code></td><td>array</td><td>参数错误时是</td><td>Pydantic 错误数组</td><td>字段校验失败详情。</td></tr>
+          </tbody>
+        </table>
+
+        <h3 id="start-examples">完整示例 <span class="tag">契约示例</span></h3>
+        <details open="">
+          <summary>完整请求示例</summary>
+<pre><code>{
+  "sendData": {
+    "mode": "time-trigger",
+    "source_config": {
+      "cfg_parameter": {
+        "cfg_parameter": {
+          "node": [
+            {
+              "node_id": "0",
+              "system_clock": "125",
+              "rc_threshold": "8",
+              "hpriority_policing_threshold": "16",
+              "lpriority_policing_threshold": "32",
+              "qbv_or_qch": "0",
+              "qci_enable": "0",
+              "ptp_threshold": "0",
+              "port_num": "1",
+              "node_type": "0",
+              "vlan_cfg": "0",
+              "vlan_id": "0"
+            },
+            {
+              "node_id": "1",
+              "system_clock": "125",
+              "rc_threshold": "8",
+              "hpriority_policing_threshold": "16",
+              "lpriority_policing_threshold": "32",
+              "qbv_or_qch": "0",
+              "qci_enable": "0",
+              "ptp_threshold": "0",
+              "port_num": "1",
+              "node_type": "1",
+              "vlan_cfg": "0",
+              "vlan_id": "0"
+            }
+          ]
+        }
+      },
+      "flow_feature": [
+        {
+          "stream_id": 0,
+          "src_node": 0,
+          "dst_node": 1,
+          "path_number": 1,
+          "size": 64,
+          "period": 1000,
+          "path": [
+            {
+              "route": [0],
+              "flow_type": "ST",
+              "latency_requirement": 1000,
+              "jitter_requirement": 1000,
+              "redundant": 0,
+              "fl_api_flag": 0,
+              "delay_para": 100,
+              "src_ip": "192.168.1.1",
+              "dst_ip": "192.168.1.2",
+              "src_port": 1024,
+              "dst_port": 2048,
+              "dst_mac": "11:22:33:44:55:66",
+              "ip_protocol": 17,
+              "fivetuple_mask": 0
+            }
+          ]
+        }
+      ],
+      "topo_feature": [
+        {
+          "link_id": 0,
+          "src_node": 0,
+          "src_port": 0,
+          "dst_node": 1,
+          "dst_port": 0,
+          "speed": 1000,
+          "st_queues": 3,
+          "macrotick": 0.032
+        }
+      ]
+    }
+  }
+}</code></pre>
+        </details>
+
+        <h4>成功响应示例 <span class="tag">契约示例</span></h4>
+<pre><code>{
+  "err_code": 0,
+  "err_msg": "规划任务已启动",
+  "data": {
+    "state": "running",
+    "plan_id": "plan-20260522-140000-a1b2c3",
+    "started_at": "2026-05-22T14:00:00+08:00"
+  },
+  "trace_id": "trace-20260522-140000-000001",
+  "timestamp": "2026-05-22T14:00:00+08:00"
+}</code></pre>
+
+        <h4>busy 响应示例 <span class="tag">契约示例</span></h4>
+<pre><code>{
+  "err_code": 1003,
+  "err_msg": "当前已有规划任务运行",
+  "data": {
+    "state": "busy",
+    "running_plan_id": "plan-20260522-135900-qwerty",
+    "running_duration_ms": 61000,
+    "suggestion": "retry_later_or_stop_current"
+  },
+  "trace_id": "trace-20260522-140001-000002",
+  "timestamp": "2026-05-22T14:00:01+08:00"
+}</code></pre>
+      </section>
+
+      <section id="query">
+        <h2>POST /api/query_plan_status/</h2>
+        <table>
+          <tbody>
+            <tr><th style="width: 220px;">功能</th><td>按 <code>plan_id</code> 查询规划任务状态。任务为 <code>running</code> 时，中转层会刷新一次内部规划结果。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>入参字段</h3>
+        <table>
+          <thead>
+            <tr><th style="width: 260px;">字段</th><th style="width: 110px;">类型</th><th style="width: 80px;">必填</th><th style="width: 210px;">取值范围</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>sendData.plan_id</code></td><td>string</td><td>是</td><td>非空字符串</td><td>任务 ID，来自 <code>start_plan</code> 成功响应。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>出参字段</h3>
+        <table>
+          <thead>
+            <tr><th style="width: 260px;">字段</th><th style="width: 110px;">类型</th><th style="width: 80px;">必返</th><th style="width: 210px;">取值范围</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>data.plan_id</code></td><td>string</td><td>是</td><td><code>plan_id</code></td><td>任务 ID。</td></tr>
+            <tr><td><code>data.state</code></td><td>string</td><td>是</td><td><code>running</code> / <code>succeeded</code> / <code>failed</code> / <code>cancel_requested</code> / <code>cancelled</code> / <code>not_found</code></td><td>任务状态。</td></tr>
+            <tr><td><code>data.running_duration_ms</code></td><td>integer/null</td><td>是</td><td><code>&gt;= 0</code> 或 <code>null</code></td><td>运行时长，毫秒。</td></tr>
+            <tr><td><code>data.started_at</code></td><td>string/null</td><td>是</td><td>ISO-8601 或 <code>null</code></td><td>启动时间。</td></tr>
+            <tr><td><code>data.updated_at</code></td><td>string/null</td><td>是</td><td>ISO-8601 或 <code>null</code></td><td>最近更新时间。</td></tr>
+            <tr><td><code>data.finished_at</code></td><td>string/null</td><td>是</td><td>ISO-8601 或 <code>null</code></td><td>结束时间。</td></tr>
+            <tr><td><code>data.internal_result</code></td><td>integer/null</td><td>是</td><td><code>0</code> / <code>1</code> / <code>2</code> / 其他 / <code>null</code></td><td>源码 <code>/api/plan/</code> 原始结果。<code>0</code> 运行中，<code>1</code> 自动规划完成，<code>2</code> 手动规划完成。</td></tr>
+            <tr><td><code>data.error_code</code></td><td>integer/null</td><td>是</td><td>错误码或 <code>null</code></td><td>任务失败时记录的错误码。</td></tr>
+            <tr><td><code>data.error_message</code></td><td>string/null</td><td>是</td><td>字符串或 <code>null</code></td><td>任务失败说明。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>示例 <span class="tag">契约示例</span></h3>
+<pre><code>{
+  "sendData": {
+    "plan_id": "plan-20260522-140000-a1b2c3"
+  }
+}</code></pre>
+<pre><code>{
+  "err_code": 0,
+  "err_msg": "规划运行中",
+  "data": {
+    "plan_id": "plan-20260522-140000-a1b2c3",
+    "state": "running",
+    "running_duration_ms": 60000,
+    "started_at": "2026-05-22T14:00:00+08:00",
+    "updated_at": "2026-05-22T14:01:00+08:00",
+    "finished_at": null,
+    "internal_result": 0,
+    "error_code": null,
+    "error_message": null
+  },
+  "trace_id": "trace-20260522-140100-000003",
+  "timestamp": "2026-05-22T14:01:00+08:00"
+}</code></pre>
+      </section>
+
+      <section id="result">
+        <h2>POST /api/get_plan_result/</h2>
+        <table>
+          <tbody>
+            <tr><th style="width: 220px;">功能</th><td>任务成功后，返回绑定到该 <code>plan_id</code> 的源码输出快照。</td></tr>
+            <tr><th>读取条件</th><td>任务必须为 <code>succeeded</code>，否则返回 <code>1004 plan_not_finished</code>。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>入参字段</h3>
+        <table>
+          <thead>
+            <tr><th style="width: 260px;">字段</th><th style="width: 110px;">类型</th><th style="width: 80px;">必填</th><th style="width: 210px;">取值范围</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>sendData.plan_id</code></td><td>string</td><td>是</td><td>非空字符串</td><td>任务 ID。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>出参字段</h3>
+        <table>
+          <thead>
+            <tr><th style="width: 310px;">字段</th><th style="width: 110px;">类型</th><th style="width: 80px;">必返</th><th style="width: 210px;">取值范围</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>data.plan_id</code></td><td>string</td><td>是</td><td><code>plan_id</code></td><td>任务 ID。</td></tr>
+            <tr><td><code>data.state</code></td><td>string</td><td>是</td><td><code>succeeded</code> / <code>running</code> / <code>failed</code> / <code>not_found</code></td><td>读取状态。</td></tr>
+            <tr><td><code>data.source_outputs.solution_json</code></td><td>array/object</td><td>成功时是</td><td>源码输出</td><td><code>solution.json</code> 内容快照。</td></tr>
+            <tr><td><code>data.source_outputs.tsnlight_plan_cfg_json</code></td><td>object</td><td>成功时是</td><td>源码输出</td><td><code>tsnlight_plan_cfg.json</code> 内容快照。</td></tr>
+            <tr><td><code>data.output_fingerprints.solution_json.file_name</code></td><td>string</td><td>成功时是</td><td><code>solution.json</code></td><td>文件名。</td></tr>
+            <tr><td><code>data.output_fingerprints.solution_json.size_bytes</code></td><td>integer</td><td>成功时是</td><td><code>&gt;= 0</code></td><td>文件大小，字节。</td></tr>
+            <tr><td><code>data.output_fingerprints.solution_json.sha256</code></td><td>string</td><td>成功时是</td><td>64 位十六进制</td><td>文件 SHA-256。</td></tr>
+            <tr><td><code>data.output_fingerprints.solution_json.mtime_ns</code></td><td>integer</td><td>成功时是</td><td><code>&gt;= 0</code></td><td>文件修改时间，纳秒时间戳。</td></tr>
+            <tr><td><code>data.output_fingerprints.tsnlight_plan_cfg_json.*</code></td><td>object</td><td>成功时是</td><td>同上</td><td><code>tsnlight_plan_cfg.json</code> 指纹字段。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>源码输出关键字段</h3>
+        <table>
+          <thead>
+            <tr><th style="width: 310px;">字段</th><th style="width: 110px;">类型</th><th style="width: 90px;">单位</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>solution_json[].link_id</code></td><td>integer</td><td>无</td><td>链路 ID。</td></tr>
+            <tr><td><code>solution_json[].gcl_entries</code></td><td>array</td><td>无</td><td>该链路的门控调度条目数组，可为空。</td></tr>
+            <tr><td><code>gcl_entries[].interval</code></td><td>number</td><td>待确认</td><td>门控持续区间，保持源码值。</td></tr>
+            <tr><td><code>gcl_entries[].state</code></td><td>string</td><td>无</td><td>门控状态，二进制字符串，例如 <code>0b001</code>。</td></tr>
+            <tr><td><code>gcl_entries[].stream_id</code></td><td>array</td><td>无</td><td>该条目承载的流 ID 数组，可为空。</td></tr>
+            <tr><td><code>tsnlight_plan_cfg_json.network_plan_cfg.node</code></td><td>array</td><td>无</td><td>硬件节点配置数组。</td></tr>
+            <tr><td><code>node[].hcp_mid</code></td><td>string</td><td>无</td><td>HCP/节点配置 ID，保持源码字符串。</td></tr>
+            <tr><td><code>node[].entry</code></td><td>array</td><td>无</td><td>寄存器配置数组。</td></tr>
+            <tr><td><code>entry[].addr</code></td><td>string</td><td>无</td><td>寄存器地址，十六进制字符串。</td></tr>
+            <tr><td><code>entry[].data</code></td><td>string/array</td><td>无</td><td>寄存器数据，十六进制字符串或十六进制字符串数组。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>示例 <span class="tag">契约示例</span></h3>
+<pre><code>{
+  "sendData": {
+    "plan_id": "plan-20260522-140000-a1b2c3"
+  }
+}</code></pre>
+<pre><code>{
+  "err_code": 0,
+  "err_msg": "规划结果已返回",
+  "data": {
+    "plan_id": "plan-20260522-140000-a1b2c3",
+    "state": "succeeded",
+    "source_outputs": {
+      "solution_json": [
+        {
+          "link_id": 0,
+          "gcl_entries": [
+            {
+              "interval": 1000,
+              "state": "0b001",
+              "stream_id": [0]
+            }
+          ]
+        }
+      ],
+      "tsnlight_plan_cfg_json": {
+        "network_plan_cfg": {
+          "node": [
+            {
+              "hcp_mid": "0",
+              "entry": [
+                {
+                  "addr": "0x45400002",
+                  "data": "0x00000003"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "output_fingerprints": {
+      "solution_json": {
+        "file_name": "solution.json",
+        "size_bytes": 1234,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "mtime_ns": 1770000000000000000
+      },
+      "tsnlight_plan_cfg_json": {
+        "file_name": "tsnlight_plan_cfg.json",
+        "size_bytes": 5678,
+        "sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        "mtime_ns": 1770000000000000000
+      }
+    }
+  },
+  "trace_id": "trace-20260522-140200-000004",
+  "timestamp": "2026-05-22T14:02:00+08:00"
+}</code></pre>
+
+        <h3>端到端烟测记录 <span class="tag real">实测证据</span></h3>
+        <table>
+          <tbody>
+            <tr><th style="width: 220px;">测试环境</th><td><code>http://100.78.48.43:18080</code></td></tr>
+            <tr><th>验证流程</th><td><code>start_plan -&gt; query_plan_status -&gt; get_plan_result</code></td></tr>
+            <tr><th>验证脚本</th><td><code>.\collections\03-tsn-northbound-adapter\scripts\smoke-adapter-e2e.ps1 -AllowWrite -ForceStopBeforeStart</code></td></tr>
+            <tr><th>最近一次通过记录</th><td><code>plan-20260521-181519-sttksa</code>，内部结果 <code>internal_result=1</code>。</td></tr>
+            <tr><th><code>solution.json</code></th><td>SHA-256：<code>b2a08ab119889a86574b8cde2a75213c709589655dd9c039bbc5ed7237ab832c</code></td></tr>
+            <tr><th><code>tsnlight_plan_cfg.json</code></th><td>SHA-256：<code>192d9fe4a5fe750186c5b7776fb58d939bd17f79e5e438d1e4af60bb573e705f</code></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="stop">
+        <h2>POST /api/stop_plan/</h2>
+        <table>
+          <tbody>
+            <tr><th style="width: 220px;">功能</th><td>停止当前正在运行的规划任务。</td></tr>
+            <tr><th>停止语义</th><td>源码服务只支持停止当前规划。请求中的 <code>plan_id</code> 仅用于审计/回显，不做归属校验。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>入参字段</h3>
+        <table>
+          <thead>
+            <tr><th style="width: 260px;">字段</th><th style="width: 110px;">类型</th><th style="width: 80px;">必填</th><th style="width: 210px;">取值范围</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>sendData.plan_id</code></td><td>string/null</td><td>否</td><td>任务 ID、<code>null</code> 或缺省</td><td>调用方期望停止的任务 ID；不影响实际停止对象。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>出参字段</h3>
+        <table>
+          <thead>
+            <tr><th style="width: 260px;">字段</th><th style="width: 110px;">类型</th><th style="width: 80px;">必返</th><th style="width: 210px;">取值范围</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>data.state</code></td><td>string</td><td>是</td><td><code>cancelled</code> / <code>no_running_plan</code> / <code>failed</code></td><td>停止处理状态。</td></tr>
+            <tr><td><code>data.stopped_plan_id</code></td><td>string/null</td><td>是</td><td>任务 ID 或 <code>null</code></td><td>实际被停止的任务 ID；无运行任务时为 <code>null</code>。</td></tr>
+            <tr><td><code>data.requested_plan_id</code></td><td>string/null</td><td>是</td><td>任务 ID 或 <code>null</code></td><td>请求传入的任务 ID。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>示例 <span class="tag">契约示例</span></h3>
+<pre><code>{
+  "sendData": {
+    "plan_id": "plan-20260522-140000-a1b2c3"
+  }
+}</code></pre>
+<pre><code>{
+  "err_code": 0,
+  "err_msg": "已停止当前规划任务",
+  "data": {
+    "state": "cancelled",
+    "stopped_plan_id": "plan-20260522-140000-a1b2c3",
+    "requested_plan_id": "plan-20260522-140000-a1b2c3"
+  },
+  "trace_id": "trace-20260522-140300-000005",
+  "timestamp": "2026-05-22T14:03:00+08:00"
+}</code></pre>
+<pre><code>{
+  "err_code": 0,
+  "err_msg": "当前无正在执行规划",
+  "data": {
+    "state": "no_running_plan",
+    "stopped_plan_id": null,
+    "requested_plan_id": null
+  },
+  "trace_id": "trace-20260522-140400-000006",
+  "timestamp": "2026-05-22T14:04:00+08:00"
+}</code></pre>
+      </section>
+
+      <section id="states">
+        <h2>状态与错误码</h2>
+        <h3>任务状态</h3>
+        <table>
+          <thead>
+            <tr><th style="width: 210px;">state</th><th>含义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>running</code></td><td>规划任务正在运行。</td></tr>
+            <tr><td><code>succeeded</code></td><td>规划完成，且结果快照已绑定。</td></tr>
+            <tr><td><code>failed</code></td><td>规划失败、停止失败、参数错误或结果绑定异常。</td></tr>
+            <tr><td><code>busy</code></td><td>已有规划任务运行，本次启动请求未创建新任务。</td></tr>
+            <tr><td><code>cancel_requested</code></td><td>已请求停止，内部清理尚未最终确认。</td></tr>
+            <tr><td><code>cancelled</code></td><td>任务已取消。</td></tr>
+            <tr><td><code>no_running_plan</code></td><td>停止请求到达时没有正在运行的任务。</td></tr>
+            <tr><td><code>not_found</code></td><td>任务 ID 不存在。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>错误码</h3>
+        <table>
+          <thead>
+            <tr><th style="width: 120px;">err_code</th><th style="width: 220px;">err_msg</th><th style="width: 190px;">常见 state</th><th>触发条件</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>0</code></td><td>请求处理成功</td><td>视接口而定</td><td>请求被中转层正常处理。</td></tr>
+            <tr><td><code>1001</code></td><td>请求参数不合法</td><td><code>failed</code></td><td>字段缺失、类型错误、枚举不支持或跨字段校验失败。</td></tr>
+            <tr><td><code>1002</code></td><td>规划任务不存在</td><td><code>not_found</code></td><td><code>plan_id</code> 不存在。</td></tr>
+            <tr><td><code>1003</code></td><td>当前已有规划任务运行</td><td><code>busy</code></td><td>已有 active 任务时再次调用 <code>start_plan</code>。</td></tr>
+            <tr><td><code>1004</code></td><td>规划任务尚未完成</td><td><code>running</code> / <code>cancel_requested</code> / <code>failed</code></td><td>任务未成功完成时调用 <code>get_plan_result</code>。</td></tr>
+            <tr><td><code>1005</code></td><td>内部规划服务不可用</td><td><code>failed</code></td><td>预留错误码。当前内部调用失败主要返回 <code>1006</code>。</td></tr>
+            <tr><td><code>1006</code></td><td>内部规划失败</td><td><code>failed</code></td><td>内部规划异常、内部结果失败、输出文件缺失或读取失败。</td></tr>
+            <tr><td><code>1007</code></td><td>停止规划失败</td><td><code>failed</code></td><td>内部停止接口异常或任务状态更新失败。</td></tr>
+            <tr><td><code>1008</code></td><td>规划结果未绑定到当前任务</td><td><code>failed</code></td><td>任务成功但缺少结果快照。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="appendix">
+        <h2>附录：边界与待确认</h2>
+        <table>
+          <thead>
+            <tr><th style="width: 260px;">事项</th><th>第一版处理</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>非时间触发/CBS/ATS</td><td>不纳入第一版接口承诺。第一版只支持 <code>mode=time-trigger</code>。</td></tr>
+            <tr><td>单位未完全确认字段</td><td><code>system_clock</code>、policing 阈值、<code>speed</code>、<code>macrotick</code>、<code>delay_para</code>、结果 <code>interval</code> 保持源码值，不做单位换算。</td></tr>
+            <tr><td>结果结构</td><td><code>solution_json</code> 与 <code>tsnlight_plan_cfg_json</code> 保持源码输出结构；第一版不拆成二次汇总字段。</td></tr>
+            <tr><td>认证/TLS</td><td>当前测试环境不启用认证和 TLS；Base URL 使用 <code>http</code>。</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      const sidebar = document.querySelector("aside");
+      const links = Array.from(document.querySelectorAll('aside a[href^="#"]'));
+      const items = links
+        .map((link) => {
+          const id = decodeURIComponent(link.getAttribute("href").slice(1));
+          const target = document.getElementById(id);
+          return target ? { id, link, target } : null;
+        })
+        .filter(Boolean);
+      const byId = new Map(items.map((item) => [item.id, item]));
+      let activeId = "";
+
+      if (!sidebar || items.length === 0) {
+        return;
+      }
+
+      const clear = () => {
+        links.forEach((link) => {
+          link.classList.remove("active");
+          link.removeAttribute("aria-current");
+        });
+      };
+
+      const setActive = (id, scrollSidebar = true) => {
+        const item = byId.get(id);
+        if (!item) {
+          return;
+        }
+        activeId = id;
+        clear();
+        item.link.classList.add("active");
+        item.link.setAttribute("aria-current", "true");
+        if (!scrollSidebar) {
+          return;
+        }
+        const top = item.link.offsetTop;
+        const bottom = top + item.link.offsetHeight;
+        if (top < sidebar.scrollTop || bottom > sidebar.scrollTop + sidebar.clientHeight) {
+          sidebar.scrollTo({ top: Math.max(0, top - sidebar.clientHeight / 2), behavior: "smooth" });
+        }
+      };
+
+      const refresh = () => {
+        const anchor = Math.min(180, window.innerHeight * 0.28);
+        let current = items[0];
+        for (const item of items) {
+          if (item.target.getBoundingClientRect().top <= anchor) {
+            current = item;
+          } else {
+            break;
+          }
+        }
+        if (current && current.id !== activeId) {
+          setActive(current.id);
+        }
+      };
+
+      let ticking = false;
+      const onScroll = () => {
+        if (ticking) {
+          return;
+        }
+        ticking = true;
+        window.requestAnimationFrame(() => {
+          refresh();
+          ticking = false;
+        });
+      };
+
+      links.forEach((link) => {
+        link.addEventListener("click", () => {
+          const id = decodeURIComponent(link.getAttribute("href").slice(1));
+          setActive(id, false);
+        });
+      });
+
+      window.addEventListener("scroll", onScroll, { passive: true });
+      window.addEventListener("resize", refresh);
+      window.addEventListener("hashchange", () => {
+        const id = decodeURIComponent(window.location.hash.slice(1));
+        if (id) {
+          setActive(id);
+        }
+      });
+
+      if (window.location.hash) {
+        setActive(decodeURIComponent(window.location.hash.slice(1)));
+      } else {
+        refresh();
+      }
+    })();
+  </script>
+
+
+</body></html>

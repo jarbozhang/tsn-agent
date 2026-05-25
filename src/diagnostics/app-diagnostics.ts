@@ -45,6 +45,28 @@ export function artifactBundleSummary(bundle: ArtifactBundle) {
   };
 }
 
+export function plannerRunSummary(session: TsnSession) {
+  const plannerRun = session.plannerRun;
+
+  if (!plannerRun) {
+    return {
+      status: "idle",
+    };
+  }
+
+  return {
+    status: plannerRun.status,
+    planId: plannerRun.planId,
+    baseUrl: plannerRun.baseUrl,
+    runningDurationMs: plannerRun.runningDurationMs,
+    errorCode: plannerRun.errorCode,
+    errorMessage: plannerRun.errorMessage,
+    traceId: plannerRun.traceId,
+    requestSummary: plannerRun.requestSummary,
+    resultSummary: plannerRun.resultSummary,
+  };
+}
+
 export function userIntentPreview(value: string) {
   return {
     preview: summarizeText(value),

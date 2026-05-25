@@ -275,7 +275,28 @@ describe("BrowserSessionRepository", () => {
         currentStep: "planning-export",
       },
       project,
-      bundle: createArtifactBundle(project),
+      bundle: {
+        artifacts: [
+          {
+            path: "planner/flow_plan_1.json",
+            purpose: "planner-input",
+            label: "旧规划器输入",
+            content: "{}",
+          },
+          {
+            path: "manifest.json",
+            purpose: "manifest",
+            label: "导出文件清单",
+            content: "{}",
+          },
+        ],
+        manifest: {
+          schemaVersion: "tsn-agent.export-manifest.v0",
+          projectId: project.id,
+          generatedAt: "2026-05-20T00:00:00.000Z",
+          files: [],
+        },
+      },
     };
 
     await repository.save(session);
@@ -284,7 +305,8 @@ describe("BrowserSessionRepository", () => {
     const flowPlan = restored.bundle?.artifacts.find((artifact) => artifact.path === "planner/flow_plan_1.json");
 
     expect(restored.project?.flows.map((flow) => flow.name)).toEqual(["控制流-1", "视频流-1"]);
-    expect(flowPlan?.content).toContain('"stream_name": "视频流-1"');
+    expect(flowPlan?.content).toContain('"sendData"');
+    expect(flowPlan?.content).toContain('"stream_id": 2');
   });
 
   it("repairs incremental video and BE flows after topology drift repair", async () => {

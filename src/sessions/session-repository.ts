@@ -1,6 +1,7 @@
 import type { AgentEvent } from "../agent/fake-agent";
 import type { CanonicalTsnProjectV0 } from "../domain/canonical";
 import type { ArtifactBundle } from "../export/artifact-bundle";
+import { normalizePlannerRunState, type PlannerRunState } from "../planner/planner-contract";
 import { normalizeWorkflowState, type WorkflowState } from "../project/project-state";
 import { repairSessionTopologyFromMessages } from "./session-topology-repair";
 import { invoke } from "@tauri-apps/api/core";
@@ -25,6 +26,7 @@ export interface TsnSession {
   claudeSessionId?: string;
   agentEvents: AgentEvent[];
   workflow: WorkflowState;
+  plannerRun?: PlannerRunState;
   project?: CanonicalTsnProjectV0;
   bundle?: ArtifactBundle;
 }
@@ -240,6 +242,7 @@ export function createEmptySession(): TsnSession {
     ],
     agentEvents: [],
     workflow: normalizeWorkflowState(),
+    plannerRun: normalizePlannerRunState(),
   };
 }
 
@@ -264,6 +267,7 @@ export function redactSessionForStorage(session: TsnSession): TsnSession {
       content: redactSecrets(event.content),
     })),
     workflow: normalizeWorkflowState(session.workflow),
+    plannerRun: normalizePlannerRunState(session.plannerRun),
   };
 }
 
@@ -296,6 +300,7 @@ function normalizeSession(session: TsnSession): TsnSession {
     ...session,
     agentEvents: session.agentEvents ?? [],
     workflow: normalizeWorkflowState(session.workflow),
+    plannerRun: normalizePlannerRunState(session.plannerRun),
   });
 }
 

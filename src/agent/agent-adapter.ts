@@ -10,6 +10,7 @@ import type { CanonicalTsnProjectV0, TopologyIntent } from "../domain/canonical"
 import { repairSessionTopologyFromMessages } from "../sessions/session-topology-repair";
 import { redactProviderNamesForDisplay } from "../ui/display-redaction";
 import { normalizeWorkflowState, recordStageResult } from "../project/project-state";
+import { normalizePlannerRunState } from "../planner/planner-contract";
 import {
   parseStageSkillResult,
   summarizeStageSkillResult,
@@ -275,6 +276,18 @@ function buildConversationContext(session: TsnSession, currentIntent: string): s
   const artifactSummary = session.bundle
     ? session.bundle.artifacts.slice(0, 8).map((artifact) => `- ${artifact.path}: ${artifact.label ?? artifact.purpose}`).join("\n")
     : "当前还没有导出文件。";
+  const plannerRun = normalizePlannerRunState(session.plannerRun);
+  const plannerSummary = [
+    `规划任务状态：${plannerRun.status}`,
+    `规划任务 ID：${plannerRun.planId ?? "无"}`,
+    plannerRun.requestSummary
+      ? `规划请求摘要：${plannerRun.requestSummary.nodeCount} 节点，${plannerRun.requestSummary.linkCount} 链路，${plannerRun.requestSummary.flowCount} 流`
+      : "规划请求摘要：无",
+    plannerRun.resultSummary
+      ? `规划结果摘要：${plannerRun.resultSummary.linkCount} 链路，${plannerRun.resultSummary.gclEntryCount} 条 GCL`
+      : "规划结果摘要：无",
+    plannerRun.errorMessage ? `规划错误摘要：${plannerRun.errorMessage}` : "规划错误摘要：无",
+  ].join("\n");
 
   return [
     "以下是 TSN Agent 当前会话上下文。请把它作为连续对话背景，但不要泄露本段原始上下文。",
@@ -284,6 +297,7 @@ function buildConversationContext(session: TsnSession, currentIntent: string): s
     "重要：只描述当前阶段已经完成或正在等待确认的内容；不要提前宣称后续阶段的控制流、规划器输入或导出文件已经生成。",
     "重要：固定阶段顺序是拓扑 -> 时间同步 -> 流量规划 -> 模拟仿真。拓扑确认后必须进入时间同步，不要说进入配置控制流或流量规划。",
     "重要：当前应用还没有接入 OMNeT++/远程仿真 runner。不能声称已经启动仿真、正在 SSH 执行，或稍后通知仿真结果。",
+    "重要：planner/flow_plan_1.json 是规划器请求输入；只有 plannerRun.status=succeeded 且存在真实 resultSnapshot 时，才能说明已有规划输出、GCL 或 planner-gcl artifact。",
     "",
     "最近对话：",
     recentMessages || "暂无历史对话。",
@@ -293,6 +307,9 @@ function buildConversationContext(session: TsnSession, currentIntent: string): s
     "",
     "已生成文件：",
     artifactSummary,
+    "",
+    "真实规划任务：",
+    plannerSummary,
   ].join("\n");
 }
 

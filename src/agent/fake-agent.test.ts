@@ -219,8 +219,9 @@ describe("fake tsn agent", () => {
     expect(flow.assistantText).toContain("已准备 2 条流");
     expect(flow.assistantText).toContain("视频流-1");
     expect(planning.project.flows).toHaveLength(2);
-    expect(flowPlan?.content).toContain('"stream_name": "视频流-1"');
-    expect(flowPlan?.content).toContain('"size": "51200"');
+    expect(flowPlan?.content).toContain('"sendData"');
+    expect(flowPlan?.content).toContain('"stream_id": 2');
+    expect(flowPlan?.content).toContain('"size": 51200');
   });
 
   it("does not treat closed-loop control flow text as a topology ring edit", () => {

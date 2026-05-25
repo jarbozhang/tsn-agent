@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod diagnostic_store;
+mod planner_client;
 mod project_writer;
 mod session_store;
 
@@ -27,6 +28,10 @@ pub fn run() {
             diagnostic_store::clear_session_diagnostic_logs,
             diagnostic_store::list_diagnostic_logs,
             commands::run_claude_agent,
+            planner_client::planner_get_plan_result,
+            planner_client::planner_query_plan_status,
+            planner_client::planner_start_plan,
+            planner_client::planner_stop_plan,
             project_writer::open_project_export_dir,
             project_writer::suggest_project_export_dir,
             project_writer::write_project_artifacts,
