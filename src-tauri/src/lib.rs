@@ -4,6 +4,7 @@ mod diagnostic_store;
 mod planner_client;
 mod project_writer;
 mod session_store;
+mod skill_files;
 
 #[tauri::command]
 fn app_health() -> &'static str {
@@ -39,7 +40,10 @@ pub fn run() {
             session_store::list_sessions,
             session_store::remove_session,
             session_store::save_session,
-            session_store::set_current_session
+            session_store::set_current_session,
+            skill_files::list_skill_files,
+            skill_files::read_skill_file,
+            skill_files::write_skill_file
         ])
         .run(tauri::generate_context!())
         .expect("failed to run TSN Agent");

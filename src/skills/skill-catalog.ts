@@ -1,0 +1,63 @@
+import type { StageSkillName } from "../agent/stage-skill-contract";
+import type { WorkflowStep } from "../domain/scenario-config";
+
+export type SkillCatalogStatus = "enabled" | "draft" | "disabled";
+
+export interface SkillCatalogItem {
+  id: StageSkillName;
+  stage: WorkflowStep;
+  stageLabel: string;
+  displayName: string;
+  description: string;
+  inputSummary: string;
+  outputSummary: string;
+  status: SkillCatalogStatus;
+  notes: string;
+}
+
+export const SKILL_CATALOG: SkillCatalogItem[] = [
+  {
+    id: "tsn-topology",
+    stage: "topology",
+    stageLabel: "拓扑",
+    displayName: "拓扑生成",
+    description: "根据用户自然语言需求生成 canonical TSN 拓扑、节点、端口和链路。",
+    inputSummary: "用户需求、场景配置、拓扑默认值",
+    outputSummary: "canonical project、拓扑摘要、阶段确认信息",
+    status: "enabled",
+    notes: "已有独立 skill，可作为后续 skill 详情和执行状态展示的基准。",
+  },
+  {
+    id: "tsn-time-sync",
+    stage: "time-sync",
+    stageLabel: "时间同步",
+    displayName: "时间同步配置",
+    description: "生成 gPTP 或统一时钟假设摘要，为后续仿真和规划保留同步域参数。",
+    inputSummary: "拓扑草案、场景默认时间同步策略",
+    outputSummary: "时间同步摘要、主时钟假设、后续可细化参数",
+    status: "draft",
+    notes: "第一版仍以结构化摘要为主，后续可扩展为真实 gPTP 参数生成。",
+  },
+  {
+    id: "tsn-flow-planning",
+    stage: "flow-template",
+    stageLabel: "流量规划",
+    displayName: "流量模板生成",
+    description: "解析用户业务流需求，生成流模板，并准备提交外部规划器所需的流参数。",
+    inputSummary: "拓扑、用户流量描述、场景流模板",
+    outputSummary: "业务流列表、路径、周期、帧长、优先级、时延和抖动约束",
+    status: "enabled",
+    notes: "已接入规划器输入生成，后续重点补齐更多流参数编辑能力。",
+  },
+  {
+    id: "tsn-inet-export",
+    stage: "planning-export",
+    stageLabel: "模拟仿真",
+    displayName: "INET 导出",
+    description: "汇总拓扑、流、规划结果和仿真参数，生成 INET/OMNeT++ 可消费的数据文件。",
+    inputSummary: "canonical project、规划器输入、规划结果、仿真默认值",
+    outputSummary: "NED、omnetpp.ini、traffic.ini、规划结果追溯文件",
+    status: "enabled",
+    notes: "当前负责生成仿真输入，真实执行 OMNeT++ 仍是后续能力。",
+  },
+];
