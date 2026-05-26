@@ -42,6 +42,7 @@
       "../.claude/skills/tsn-topology/tools/validate-mac-forwarding-table.js": ".claude/skills/tsn-topology/tools/validate-mac-forwarding-table.js",
       "../.claude/skills/tsn-topology/tools/validate-topology.js": ".claude/skills/tsn-topology/tools/validate-topology.js",
       "../.claude/skills/tsn-flow-planning/SKILL.md": ".claude/skills/tsn-flow-planning/SKILL.md",
+      "../CHANGELOG.md": "CHANGELOG.md",
       "../src-node/dist/claude-agent-worker.mjs": "src-node/claude-agent-worker.mjs",
       "../src-node/dist/tsn-stage-runner.mjs": "src-node/tsn-stage-runner.mjs"
     },

@@ -87,6 +87,20 @@
 - Tauri 开发入口：`npm run tauri dev`
 - Vite Web 开发入口：`npm run dev`
 
+## 发布与客户端构建流程
+
+- GitHub 桌面端生产构建只允许在 `release/**` 分支触发；不要通过推送 `main` 触发客户端打包。
+- 准备发布时，从已合入的 `main` 新建发布分支，例如 `release/2026-05-26` 或 `release/v0.2.0`，再 push 该分支触发 `.github/workflows/production-build.yml`。
+- workflow 会在打包前运行 `npm run release:prepare`，根据最近的 `vX.Y.Z` tag 到当前提交之间的 commit 自动决定版本号：
+  - commit 含 `!` 或正文含 `BREAKING CHANGE:` 时升 major。
+  - 存在 `feat:` 时升 minor。
+  - 其他代码变更默认升 patch。
+  - 没有历史 tag 时以 `package.json` 当前版本为基准。
+- `npm run release:prepare` 会同步更新 `package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`，并生成 `CHANGELOG.md` 与 `release-metadata.json`。
+- `CHANGELOG.md` 默认为中文摘要，技术名词、文件名、commit hash 和产品名保留原文；如果自动摘要不够准确，允许在发布分支上人工润色后再重新 push。
+- 发布版本完成后，应创建对应 `vX.Y.Z` tag；后续版本号计算依赖这个 tag 作为比较基准。
+- 若只是本地检查版本计算和 changelog 预览，使用 `npm run release:prepare:check`，该命令不会写文件。
+
 ## 工作习惯
 
 - 修改前优先读相关文件和测试，保持改动聚焦。

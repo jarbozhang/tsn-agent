@@ -4,14 +4,59 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
+      - release/**
 
 permissions:
   contents: read
 
 jobs:
+  prepare-release:
+    name: Prepare release metadata
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      bump: ${{ steps.release.outputs.bump }}
+      previous-tag: ${{ steps.release.outputs.previousTag }}
+      commit-count: ${{ steps.release.outputs.commitCount }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate version and changelog
+        id: release
+        run: npm run release:prepare
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: tsn-agent-release-metadata-v${{ steps.release.outputs.version }}
+          path: |
+            CHANGELOG.md
+            release-metadata.json
+            package.json
+            package-lock.json
+            src-tauri/tauri.conf.json
+            src-tauri/Cargo.toml
+            src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 30
+
   build:
     name: Build ${{ matrix.name }}
+    if: startsWith(github.ref, 'refs/heads/release/')
+    needs: prepare-release
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -45,7 +90,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Install Linux dependencies
         if: matrix.runner == 'ubuntu-22.04'
@@ -58,7 +105,7 @@ jobs:
             patchelf
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
@@ -77,6 +124,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate version and changelog
+        run: npm run release:prepare
+
       - name: Verify bundled skills
         run: npm run verify:skills
 
@@ -94,9 +144,9 @@ jobs:
           args: ${{ matrix.args }}
 
       - name: Upload desktop bundles
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact-name }}
+          name: ${{ matrix.artifact-name }}-v${{ needs.prepare-release.outputs.version }}
           path: ${{ matrix.artifact-path }}
           if-no-files-found: error
           retention-days: 14

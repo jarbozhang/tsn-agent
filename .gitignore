@@ -12,6 +12,9 @@ test-results/
 .vite/
 *.tsbuildinfo
 
+# Release preparation output generated in CI
+release-metadata.json
+
 # Rust/Tauri build output
 target/
 src-tauri/target/
