@@ -264,10 +264,29 @@ describe("App", () => {
   it("shows a product empty state before the first interaction", () => {
     render(<App />);
 
+    expect(screen.getByText("VER 0.2.1")).toBeInTheDocument();
     expect(screen.getByText("描述你的 TSN 需求后生成拓扑图")).toBeInTheDocument();
     expect(screen.queryByText("等待 tsn-topology skill 输出拓扑")).not.toBeInTheDocument();
     expect(screen.getByLabelText("输入你的 TSN 需求")).toHaveAttribute("placeholder", "例如：我需要 4 个交换机，每个交换机连接 5 个端系统");
     expect(screen.getByRole("button", { name: /生成规划草案/ })).toBeDisabled();
+  });
+
+  it("shows customer-facing changelog content on a separate page", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /更新日志/ }));
+
+    expect(screen.getByRole("main", { name: "更新日志" })).toBeInTheDocument();
+    expect(screen.getAllByText("v0.2.1").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("接入外部 TSN 规划服务，支持提交拓扑、流量和规划参数后等待真实规划结果。")).toBeInTheDocument();
+    expect(screen.getByText("优化规划任务轮询逻辑，临时网络错误后会继续等待结果。")).toBeInTheDocument();
+    expect(screen.queryByText(/restrict desktop builds/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/dfa4d68/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "工作台" }));
+    expect(screen.getByText("描述你的 TSN 需求后生成拓扑图")).toBeInTheDocument();
   });
 
   it("generates a topology stage and waits for confirmation from a beginner request", async () => {

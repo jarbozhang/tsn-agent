@@ -7,6 +7,7 @@ import {
   ExternalLink,
   FileText,
   FolderOpen,
+  History,
   ScrollText,
   Plus,
   RefreshCw,
@@ -66,6 +67,7 @@ import {
   suggestProjectExportDirectory,
   type ProjectExportResult,
 } from "../project/project-exporter";
+import { appVersion, releaseNotes, type ReleaseNote } from "../release/release-info";
 import {
   createEmptySession,
   createId,
@@ -89,6 +91,7 @@ const nodeTypes = {
 };
 
 type ConfigTabId = "flows" | "node-detail" | "link-detail" | "artifacts" | "steps";
+type AppPage = "workspace" | "changelog";
 
 type SelectedTopologyItem =
   | { kind: "node"; id: string }
@@ -125,6 +128,7 @@ export function App() {
   const [exportError, setExportError] = useState<string | undefined>();
   const [exportDirectory, setExportDirectory] = useState("");
   const [activeConfigTab, setActiveConfigTab] = useState<ConfigTabId>("flows");
+  const [activePage, setActivePage] = useState<AppPage>("workspace");
   const [selectedTopologyItem, setSelectedTopologyItem] = useState<SelectedTopologyItem | undefined>();
   const [selectedFlowId, setSelectedFlowId] = useState<string | undefined>();
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -1013,12 +1017,31 @@ export function App() {
           <img src={tsnAgentMark} alt="" />
         </div>
         <h1 className="brand-name">TSN Agent</h1>
-        <span className="brand-ver">VER 0.1.0</span>
+        <span className="brand-ver">VER {appVersion}</span>
         <span className={project ? "badge planned" : "badge draft"}>
           <span className="badge-dot" />
           {project ? "草案已生成" : "草稿"}
         </span>
         <div className="brand-spacer" />
+        <nav className="app-nav" aria-label="应用页面">
+          <button
+            className={activePage === "workspace" ? "app-nav-button active" : "app-nav-button"}
+            type="button"
+            aria-current={activePage === "workspace" ? "page" : undefined}
+            onClick={() => setActivePage("workspace")}
+          >
+            工作台
+          </button>
+          <button
+            className={activePage === "changelog" ? "app-nav-button active" : "app-nav-button"}
+            type="button"
+            aria-current={activePage === "changelog" ? "page" : undefined}
+            onClick={() => setActivePage("changelog")}
+          >
+            <History size={14} aria-hidden="true" />
+            更新日志
+          </button>
+        </nav>
         <button className="btn btn-session" type="button" onClick={() => setIsSessionOpen(true)}>
           <FolderOpen size={15} aria-hidden="true" />
           会话
@@ -1109,6 +1132,9 @@ export function App() {
         </div>
       )}
 
+      {activePage === "changelog" ? (
+        <ChangelogPage version={appVersion} releases={releaseNotes} />
+      ) : (
       <main className="project-layout">
         <section className="chat-pane" aria-label="对话区">
           <div className="project-strip">
@@ -1497,7 +1523,58 @@ export function App() {
           </div>
         </section>
       </main>
+      )}
     </div>
+  );
+}
+
+function ChangelogPage({ version, releases }: { version: string; releases: ReleaseNote[] }) {
+  const latestRelease = releases[0];
+
+  return (
+    <main className="changelog-page" aria-label="更新日志">
+      <section className="changelog-hero">
+        <div>
+          <p className="drawer-kicker">Release Notes</p>
+          <h2>更新日志</h2>
+          <p>面向客户展示的版本更新内容，保留功能、修复和体验变化，隐藏内部构建流水线细节。</p>
+        </div>
+        <div className="changelog-current" aria-label="当前版本">
+          <span>当前版本</span>
+          <strong>v{version}</strong>
+          {latestRelease?.date && <small>{latestRelease.date}</small>}
+        </div>
+      </section>
+
+      <section className="release-timeline" aria-label="版本更新列表">
+        {releases.map((release) => (
+          <article className="release-note" key={release.version}>
+            <div className="release-note-header">
+              <div>
+                <span className="release-version mono">v{release.version}</span>
+                <h3>{release.version === version ? "当前版本" : `版本 ${release.version}`}</h3>
+              </div>
+              {release.date && <time dateTime={release.date}>{release.date}</time>}
+            </div>
+            <div className="release-category-list">
+              {release.categories.map((category) => (
+                <section className="release-category" key={`${release.version}-${category.title}`}>
+                  <h4>{category.title}</h4>
+                  <ul>
+                    {category.items.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          </article>
+        ))}
+        {releases.length === 0 && (
+          <div className="empty-panel mono">暂无可展示的更新内容</div>
+        )}
+      </section>
+    </main>
   );
 }
 

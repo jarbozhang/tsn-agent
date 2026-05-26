@@ -179,6 +179,44 @@ textarea:focus-visible {
   min-width: 0;
 }
 
+.app-nav {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-secondary);
+}
+
+.app-nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  background: transparent;
+  white-space: nowrap;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.app-nav-button:hover {
+  color: var(--text-primary);
+}
+
+.app-nav-button.active {
+  color: var(--accent);
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(31, 41, 55, 0.08);
+}
+
 .project-meta {
   overflow: hidden;
   max-width: 280px;
@@ -617,6 +655,135 @@ textarea:focus-visible {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+}
+
+.changelog-page {
+  flex: 1;
+  min-height: 0;
+  padding: 24px clamp(18px, 4vw, 44px) 36px;
+  overflow: auto;
+  background: var(--bg-secondary);
+}
+
+.changelog-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  max-width: 960px;
+  margin: 0 auto 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.changelog-hero h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 22px;
+}
+
+.changelog-hero p:not(.drawer-kicker) {
+  max-width: 620px;
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+.changelog-current {
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.changelog-current span,
+.changelog-current small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.changelog-current strong {
+  color: var(--text-primary);
+  font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+  font-size: 18px;
+}
+
+.release-timeline {
+  display: grid;
+  gap: 12px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.release-note {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.release-note-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.release-note-header h3 {
+  margin: 4px 0 0;
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.release-note-header time {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+  font-size: 11px;
+}
+
+.release-version {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  color: var(--accent);
+  font-size: 11px;
+  background: var(--accent-soft);
+}
+
+.release-category-list {
+  display: grid;
+  gap: 12px;
+}
+
+.release-category {
+  display: grid;
+  gap: 7px;
+}
+
+.release-category h4 {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.release-category ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.release-category li {
+  color: var(--text-primary);
+  line-height: 1.6;
 }
 
 .topology-stage {
@@ -1683,6 +1850,10 @@ textarea:focus-visible {
     display: none;
   }
 
+  .app-nav-button {
+    padding-inline: 8px;
+  }
+
   .config-body {
     grid-template-columns: 1fr 1fr;
   }
@@ -1723,6 +1894,10 @@ textarea:focus-visible {
   .topology-stage {
     min-height: 360px;
   }
+
+  .changelog-page {
+    min-height: calc(100vh - 56px);
+  }
 }
 
 @media (max-width: 700px) {
@@ -1735,6 +1910,20 @@ textarea:focus-visible {
   .brand-header > .badge,
   .btn-primary {
     display: none;
+  }
+
+  .app-nav-button {
+    min-height: 30px;
+    padding-inline: 7px;
+  }
+
+  .app-nav-button svg {
+    display: none;
+  }
+
+  .changelog-hero,
+  .release-note-header {
+    flex-direction: column;
   }
 
   .chat-pane {
