@@ -270,6 +270,19 @@ function writeChangelog(version, entry) {
   writeFileSync(changelogPath, next);
 }
 
+function writeReleaseNotes(version, entry, metadata) {
+  const lines = [
+    `# TSN Agent v${version}`,
+    "",
+    `升级类型：${metadata.bump}`,
+    `提交数量：${metadata.commitCount}`,
+    "",
+    entry.trim(),
+    "",
+  ];
+  writeFileSync(join(rootDir, "release-notes.md"), lines.join("\n"));
+}
+
 function updateCargoTomlVersion(version) {
   const cargoTomlPath = join(rootDir, "src-tauri", "Cargo.toml");
   const lines = readFileSync(cargoTomlPath, "utf8").split("\n");
@@ -366,6 +379,7 @@ if (!dryRun) {
   updateCargoLockVersion(nextVersion);
   writeChangelog(nextVersion, changelogEntry);
   writeJson("release-metadata.json", metadata);
+  writeReleaseNotes(nextVersion, changelogEntry, metadata);
   writeGitHubOutput(metadata);
 }
 

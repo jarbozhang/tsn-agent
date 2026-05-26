@@ -14,6 +14,7 @@ test-results/
 
 # Release preparation output generated in CI
 release-metadata.json
+release-notes.md
 
 # Rust/Tauri build output
 target/

@@ -7,7 +7,7 @@ on:
       - release/**
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   prepare-release:
@@ -37,21 +37,6 @@ jobs:
       - name: Generate version and changelog
         id: release
         run: npm run release:prepare
-
-      - name: Upload release metadata
-        uses: actions/upload-artifact@v7
-        with:
-          name: tsn-agent-release-metadata-v${{ steps.release.outputs.version }}
-          path: |
-            CHANGELOG.md
-            release-metadata.json
-            package.json
-            package-lock.json
-            src-tauri/tauri.conf.json
-            src-tauri/Cargo.toml
-            src-tauri/Cargo.lock
-          if-no-files-found: error
-          retention-days: 30
 
   build:
     name: Build ${{ matrix.name }}
@@ -127,6 +112,16 @@ jobs:
       - name: Generate version and changelog
         run: npm run release:prepare
 
+      - name: Load release notes
+        id: release-notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<EOF'
+            cat release-notes.md
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Verify bundled skills
         run: npm run verify:skills
 
@@ -141,12 +136,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tagName: v${{ needs.prepare-release.outputs.version }}
+          releaseName: TSN Agent v${{ needs.prepare-release.outputs.version }}
+          releaseBody: ${{ steps.release-notes.outputs.body }}
+          releaseDraft: false
+          prerelease: false
           args: ${{ matrix.args }}
-
-      - name: Upload desktop bundles
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.artifact-name }}-v${{ needs.prepare-release.outputs.version }}
-          path: ${{ matrix.artifact-path }}
-          if-no-files-found: error
-          retention-days: 14
