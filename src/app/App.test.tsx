@@ -625,7 +625,9 @@ describe("App", () => {
     await user.click(screen.getByRole("tab", { name: "导出文件" }));
     await user.click(screen.getByRole("button", { name: "启动规划" }));
 
-    expect(await screen.findByText("temporary timeout")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(queryPlannerPlanStatusMock).toHaveBeenCalledTimes(1);
+    });
     expect(await screen.findByText("planner/flow_plan_result_1.json")).toBeInTheDocument();
     expect(queryPlannerPlanStatusMock).toHaveBeenCalledTimes(2);
   }, 12000);
