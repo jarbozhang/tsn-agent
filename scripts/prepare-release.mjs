@@ -203,10 +203,13 @@ const categoryTitles = [
   ["features", "新功能"],
   ["fixes", "修复"],
   ["performance", "性能优化"],
+  ["other", "其他"],
+];
+
+const internalCategoryTitles = [
   ["engineering", "工程与构建"],
   ["docs", "文档"],
   ["tests", "测试"],
-  ["other", "其他"],
 ];
 
 function releaseDate() {
@@ -221,10 +224,6 @@ function releaseDate() {
 function buildChangelogEntry(version, commits, previousTag) {
   const lines = [`## v${version} - ${releaseDate()}`, ""];
 
-  if (previousTag) {
-    lines.push(`基准版本：\`${previousTag}\``, "");
-  }
-
   if (commits.length === 0) {
     lines.push("- 无代码变更，仅重新构建发布产物。", "");
     return lines.join("\n");
@@ -232,10 +231,49 @@ function buildChangelogEntry(version, commits, previousTag) {
 
   const byCategory = new Map(categoryTitles.map(([key]) => [key, []]));
   for (const commit of commits) {
-    byCategory.get(categoryFor(commit)).push(commit);
+    const category = categoryFor(commit);
+    if (byCategory.has(category)) {
+      byCategory.get(category).push(commit);
+    }
   }
 
+  let visibleEntryCount = 0;
   for (const [key, title] of categoryTitles) {
+    const entries = byCategory.get(key);
+    if (!entries.length) {
+      continue;
+    }
+    visibleEntryCount += entries.length;
+    lines.push(`### ${title}`, "");
+    for (const commit of entries) {
+      lines.push(`- ${chineseSummary(commit.summary)}`);
+    }
+    lines.push("");
+  }
+
+  if (visibleEntryCount === 0) {
+    lines.push("### 其他", "", "- 包含稳定性、兼容性和发布流程改进。", "");
+  }
+
+  return lines.join("\n");
+}
+
+function buildInternalReleaseDetails(commits) {
+  const lines = [];
+
+  if (commits.length === 0) {
+    return lines.join("\n");
+  }
+
+  const byCategory = new Map(internalCategoryTitles.map(([key]) => [key, []]));
+  for (const commit of commits) {
+    const category = categoryFor(commit);
+    if (byCategory.has(category)) {
+      byCategory.get(category).push(commit);
+    }
+  }
+
+  for (const [key, title] of internalCategoryTitles) {
     const entries = byCategory.get(key);
     if (!entries.length) {
       continue;
@@ -247,7 +285,7 @@ function buildChangelogEntry(version, commits, previousTag) {
     lines.push("");
   }
 
-  return lines.join("\n");
+  return lines.join("\n").trim();
 }
 
 function writeChangelog(version, entry) {
@@ -255,7 +293,7 @@ function writeChangelog(version, entry) {
   const current = existsSync(changelogPath) ? readFileSync(changelogPath, "utf8") : "";
   const title = "# 更新日志\n\n";
   const intro =
-    "本文件由 `npm run release:prepare` 根据 Git 提交生成中文发布摘要。技术名词、文件名和产品名保留原文。\n\n";
+    "本文件用于在应用内展示客户可见的更新内容。技术名词、文件名和产品名保留原文。\n\n";
   const existingBody = current
     .replace(/^# 更新日志\s*/u, "")
     .replace(/^本文件由 `npm run release:prepare`[^\n]*\n+/u, "")
@@ -270,7 +308,7 @@ function writeChangelog(version, entry) {
   writeFileSync(changelogPath, next);
 }
 
-function writeReleaseNotes(version, entry, metadata) {
+function writeReleaseNotes(version, entry, metadata, internalDetails) {
   const lines = [
     `# TSN Agent v${version}`,
     "",
@@ -280,6 +318,15 @@ function writeReleaseNotes(version, entry, metadata) {
     entry.trim(),
     "",
   ];
+
+  if (metadata.previousTag) {
+    lines.push(`基准版本：\`${metadata.previousTag}\``, "");
+  }
+
+  if (internalDetails) {
+    lines.push("## 内部变更", "", internalDetails, "");
+  }
+
   writeFileSync(join(rootDir, "release-notes.md"), lines.join("\n"));
 }
 
@@ -351,6 +398,7 @@ const commits = collectCommits(tag);
 const bump = decideBump(commits);
 const nextVersion = formatVersion(bumpVersion(baseVersion, bump));
 const changelogEntry = buildChangelogEntry(nextVersion, commits, tag);
+const internalDetails = buildInternalReleaseDetails(commits);
 const metadata = {
   version: nextVersion,
   previousVersion: formatVersion(baseVersion),
@@ -379,7 +427,7 @@ if (!dryRun) {
   updateCargoLockVersion(nextVersion);
   writeChangelog(nextVersion, changelogEntry);
   writeJson("release-metadata.json", metadata);
-  writeReleaseNotes(nextVersion, changelogEntry, metadata);
+  writeReleaseNotes(nextVersion, changelogEntry, metadata, internalDetails);
   writeGitHubOutput(metadata);
 }
 
