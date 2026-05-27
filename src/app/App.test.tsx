@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createProjectFromIntent } from "../domain/topology-factory";
 import { createInitialWorkflowState } from "../project/project-state";
+import { appVersion, releaseNotes } from "../release/release-info";
 import { App } from "./App";
 
 type PlannerStartResponse = {
@@ -156,6 +157,16 @@ function createDefaultTestWorkflow() {
   return createInitialWorkflowState();
 }
 
+function firstReleaseNoteItem(): string {
+  const item = releaseNotes[0]?.categories[0]?.items[0];
+
+  if (!item) {
+    throw new Error("Expected at least one customer-visible release note item.");
+  }
+
+  return item;
+}
+
 function createPlannerStartResponse(state = "running", planId = "plan-1"): PlannerStartResponse {
   return {
     err_code: 0,
@@ -264,7 +275,7 @@ describe("App", () => {
   it("shows a product empty state before the first interaction", () => {
     render(<App />);
 
-    expect(screen.getByText("VER 0.2.1")).toBeInTheDocument();
+    expect(screen.getByText(`VER ${appVersion}`)).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "工作台工具" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "会话" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "执行日志" })).toBeInTheDocument();
@@ -286,9 +297,8 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "设置" }));
 
     expect(screen.getByRole("region", { name: "更新日志" })).toBeInTheDocument();
-    expect(screen.getAllByText("v0.2.1").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("接入外部 TSN 规划服务，支持提交拓扑、流量和规划参数后等待真实规划结果。")).toBeInTheDocument();
-    expect(screen.getByText("优化规划任务轮询逻辑，临时网络错误后会继续等待结果。")).toBeInTheDocument();
+    expect(screen.getAllByText(`v${appVersion}`).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(firstReleaseNoteItem())).toBeInTheDocument();
     expect(screen.queryByText(/restrict desktop builds/)).not.toBeInTheDocument();
     expect(screen.queryByText(/dfa4d68/)).not.toBeInTheDocument();
   });
@@ -949,6 +959,6 @@ describe("App", () => {
     expect(screen.getAllByText("当前版本").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("默认规划服务")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "更新日志" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /v0.2.1/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: new RegExp(`v${appVersion}`) })).toBeInTheDocument();
   });
 });
