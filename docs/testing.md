@@ -11,10 +11,11 @@ npm run e2e
 npm run cargo:test
 ```
 
-- `npm test`：运行 Vitest，覆盖 canonical 拓扑、NED/`omnetpp.ini`/`traffic.ini`/React Flow/规划器导出、规划服务 mock 流程、项目快照、安全写盘、会话持久化、诊断日志、fake agent 和关键 React 行为。
+- `npm test`：运行 Vitest，覆盖 canonical 拓扑、NED/`omnetpp.ini`/`traffic.ini`/React Flow/规划器导出、规划服务 mock 流程、项目快照、安全写盘、会话持久化、诊断日志、Agent 适配器三态结果、Worker `agent_step` 事件契约和关键 React 行为。
 - `npm run build`：执行 TypeScript 类型检查和 Vite 生产构建。
-- `npm run e2e`：运行 Web smoke E2E，使用 fake agent 验证一句话拓扑输入、拓扑展示、导出文件列表、保存入口和诊断日志。
-- `npm run cargo:test`：运行 Tauri/Rust 单元测试，覆盖会话数据库 schema、诊断日志、Agent bridge、规划服务 URL/响应边界和写盘安全校验。
+- `npm run e2e` / `npm run e2e:ui-smoke`：运行 Playwright fixture / UI smoke，用命名 fixture mock `runTsnAgent` 验证拓扑展示、导出文件列表、保存入口和日志。**不再使用 fake agent**；UI smoke 仅断言渲染契约，不是完整产品 E2E。
+- `npm run e2e:real-agent`：调用 `cargo test --test real_agent_e2e -- --ignored` 触发 Tauri 原生真实 Agent E2E（需本地 `ANTHROPIC_API_KEY` + sidecar）；默认 PR CI skip，nightly 运行作为 ship gate。
+- `npm run cargo:test`：运行 Tauri/Rust 单元测试，覆盖会话数据库 schema、诊断日志、Agent bridge、规划服务 URL/响应边界、写盘安全校验，以及 audit ID 输入校验和 `export_run_audit` allowlist 行为。
 
 ## Topology MCP 测试
 

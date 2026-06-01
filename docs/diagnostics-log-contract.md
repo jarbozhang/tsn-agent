@@ -1,10 +1,10 @@
 # 诊断日志契约
 
-TSN Agent 的诊断日志用于排查本机会话中的 Claude 交互、会话状态写入和导出文件生成问题。它是应用工作台数据，不是项目交付产物。
+TSN Agent 的"日志"是程序运行日志，定位为开发/支持排障，不是用户理解业务步骤的主入口。日志保存 runtime 连接、MCP 调用、session、artifact、耗时、计数和错误等开发排障摘要；步骤详情和 worker audit 同样使用 allowlist sanitizer（详见 src/agent/agent-sanitizer.ts）。
 
 ## 写入范围
 
-- `agent`：Claude/fake agent 请求开始、resume 状态、流式输出摘要、完成、失败和 fallback。
+- `agent`：智能助手请求开始、resume 状态、流式输出摘要、完成、失败保留状态、运行时不可用和 watchdog 停滞中止；不再保留 fallback 文案。
 - `session`：会话创建、切换、复制、删除、pending save、final save 和保存失败。
 - `artifact`：artifact bundle 生成或刷新，包含文件路径、用途和内容长度。
 - `planner` / `session`：规划任务提交、轮询、停止、读取结果和失败摘要。当前实现复用 `session` 类别记录 plannerRun 摘要。
