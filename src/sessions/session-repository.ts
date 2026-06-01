@@ -1,4 +1,5 @@
-import type { AgentEvent } from "../agent/fake-agent";
+import type { AgentEvent } from "../agent/agent-types";
+import { CURRENT_SESSION_RUNTIME_VERSION, type SessionMetadata } from "../agent/agent-types";
 import type { CanonicalTsnProjectV0 } from "../domain/canonical";
 import type { ArtifactBundle } from "../export/artifact-bundle";
 import { normalizePlannerRunState, type PlannerRunState } from "../planner/planner-contract";
@@ -29,6 +30,7 @@ export interface TsnSession {
   plannerRun?: PlannerRunState;
   project?: CanonicalTsnProjectV0;
   bundle?: ArtifactBundle;
+  metadata?: SessionMetadata;
 }
 
 export interface SessionRepository {
@@ -243,6 +245,7 @@ export function createEmptySession(): TsnSession {
     agentEvents: [],
     workflow: normalizeWorkflowState(),
     plannerRun: normalizePlannerRunState(),
+    metadata: { runtimeVersion: CURRENT_SESSION_RUNTIME_VERSION },
   };
 }
 
@@ -296,12 +299,32 @@ function storedSessionToSession(session: StoredSession | undefined): TsnSession 
 }
 
 function normalizeSession(session: TsnSession): TsnSession {
+  const normalizedEvents = (session.agentEvents ?? []).map(migrateOrphanPendingStep);
+  const incomingMetadata = session.metadata ?? {};
+  const hadRuntimeVersion = typeof incomingMetadata.runtimeVersion === "number";
+  const hasHistoricalContent = normalizedEvents.length > 0 || (session.messages ?? []).length > 1;
+  const isLegacyOrigin =
+    !hadRuntimeVersion && hasHistoricalContent ? true : incomingMetadata.legacyFakeOrigin;
+  const metadata: SessionMetadata = {
+    ...incomingMetadata,
+    runtimeVersion: CURRENT_SESSION_RUNTIME_VERSION,
+    ...(isLegacyOrigin ? { legacyFakeOrigin: true } : {}),
+  };
+
   return repairSessionTopologyFromMessages({
     ...session,
-    agentEvents: session.agentEvents ?? [],
+    agentEvents: normalizedEvents,
     workflow: normalizeWorkflowState(session.workflow),
     plannerRun: normalizePlannerRunState(session.plannerRun),
+    metadata,
   });
+}
+
+function migrateOrphanPendingStep(event: AgentEvent): AgentEvent {
+  if (event.status === "pending" || event.status === "streaming") {
+    return { ...event, status: "unknown" };
+  }
+  return event;
 }
 
 function isSession(session: TsnSession | undefined): session is TsnSession {
@@ -334,6 +357,9 @@ function sessionToStoredSession(session: TsnSession): StoredSession {
     payload: JSON.stringify(session),
   };
 }
+
+export { CURRENT_SESSION_RUNTIME_VERSION };
+export type { SessionMetadata } from "../agent/agent-types";
 
 function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;

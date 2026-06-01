@@ -18,27 +18,8 @@ import {
   type WorkflowStep,
 } from "../project/project-state";
 
-export type AgentEventKind =
-  | "thought"
-  | "skill-start"
-  | "skill-result"
-  | "artifact"
-  | "stage-start"
-  | "stage-result"
-  | "confirmation-required"
-  | "tool-availability"
-  | "error";
-
-export interface AgentEvent {
-  id: string;
-  kind: AgentEventKind;
-  stage?: WorkflowStep;
-  skillName?: string;
-  title: string;
-  content: string;
-  status?: "info" | "success" | "warning" | "error";
-  createdAt?: string;
-}
+export type { AgentEvent, AgentEventKind } from "./agent-types";
+import type { AgentEvent } from "./agent-types";
 
 export interface FakeAgentResult {
   events: AgentEvent[];

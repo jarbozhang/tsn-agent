@@ -520,3 +520,133 @@ describe("createSessionRepository", () => {
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });
+
+describe("session normalize (U1: metadata, legacyFakeOrigin, pending migration)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("createEmptySession stamps runtimeVersion on metadata", () => {
+    const session = createEmptySession();
+    expect(session.metadata?.runtimeVersion).toBeGreaterThanOrEqual(1);
+    expect(session.metadata?.legacyFakeOrigin).toBeUndefined();
+  });
+
+  it("normalizes a fresh empty session without marking legacyFakeOrigin", async () => {
+    const repository = new BrowserSessionRepository(window.localStorage);
+    const session = createEmptySession();
+    await repository.save(session);
+
+    const list = await repository.list();
+    expect(list).toHaveLength(1);
+    expect(list[0].metadata?.legacyFakeOrigin).toBeUndefined();
+    expect(list[0].metadata?.runtimeVersion).toBeGreaterThanOrEqual(1);
+  });
+
+  it("marks legacyFakeOrigin when restoring session lacking runtimeVersion but containing agentEvents", async () => {
+    const legacySession: TsnSession = {
+      id: "legacy-1",
+      title: "legacy",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-02T00:00:00.000Z",
+      messages: [
+        { id: "m1", role: "assistant", content: "hi", createdAt: "2025-01-01T00:00:00.000Z" },
+        { id: "m2", role: "user", content: "scale 4", createdAt: "2025-01-01T00:01:00.000Z" },
+      ],
+      agentEvents: [
+        {
+          id: "ev1",
+          kind: "stage-result",
+          title: "拓扑生成",
+          content: "fake summary",
+          status: "success",
+        },
+      ],
+      workflow: createInitialWorkflowState(),
+    };
+    window.localStorage.setItem("tsn-agent.sessions.v0", JSON.stringify([legacySession]));
+
+    const repository = new BrowserSessionRepository(window.localStorage);
+    const list = await repository.list();
+    expect(list).toHaveLength(1);
+    expect(list[0].metadata?.legacyFakeOrigin).toBe(true);
+    expect(list[0].metadata?.runtimeVersion).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not mark legacyFakeOrigin when legacy session has no historical content", async () => {
+    const newishSession: TsnSession = {
+      id: "fresh-1",
+      title: "fresh",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+      messages: [
+        { id: "m1", role: "assistant", content: "welcome", createdAt: "2025-01-01T00:00:00.000Z" },
+      ],
+      agentEvents: [],
+      workflow: createInitialWorkflowState(),
+    };
+    window.localStorage.setItem("tsn-agent.sessions.v0", JSON.stringify([newishSession]));
+
+    const repository = new BrowserSessionRepository(window.localStorage);
+    const list = await repository.list();
+    expect(list[0].metadata?.legacyFakeOrigin).toBeUndefined();
+  });
+
+  it("migrates pending/streaming agent events to status 'unknown' during normalize", async () => {
+    const sessionWithOrphans: TsnSession = {
+      id: "orphan-1",
+      title: "orphan",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-02T00:00:00.000Z",
+      messages: [
+        { id: "m1", role: "user", content: "hi", createdAt: "2025-01-01T00:00:00.000Z" },
+      ],
+      agentEvents: [
+        {
+          id: "ev-pending",
+          kind: "skill-start",
+          title: "topology.initialize",
+          content: "running",
+          status: "pending",
+        },
+        {
+          id: "ev-streaming",
+          kind: "skill-result",
+          title: "topology.operations",
+          content: "in progress",
+          status: "streaming",
+        },
+        {
+          id: "ev-success",
+          kind: "skill-result",
+          title: "topology.inspect",
+          content: "done",
+          status: "success",
+        },
+      ],
+      workflow: createInitialWorkflowState(),
+      metadata: { runtimeVersion: 1 },
+    };
+    window.localStorage.setItem("tsn-agent.sessions.v0", JSON.stringify([sessionWithOrphans]));
+
+    const repository = new BrowserSessionRepository(window.localStorage);
+    const list = await repository.list();
+    const restored = list[0];
+    expect(restored.agentEvents.find((e) => e.id === "ev-pending")?.status).toBe("unknown");
+    expect(restored.agentEvents.find((e) => e.id === "ev-streaming")?.status).toBe("unknown");
+    expect(restored.agentEvents.find((e) => e.id === "ev-success")?.status).toBe("success");
+  });
+
+  it("preserves existing legacyOriginAck when reloading the same session", async () => {
+    const session: TsnSession = {
+      ...createEmptySession(),
+      metadata: { runtimeVersion: 1, legacyFakeOrigin: true, legacyOriginAck: true },
+    };
+    window.localStorage.setItem("tsn-agent.sessions.v0", JSON.stringify([session]));
+
+    const repository = new BrowserSessionRepository(window.localStorage);
+    const list = await repository.list();
+    expect(list[0].metadata?.legacyOriginAck).toBe(true);
+    expect(list[0].metadata?.legacyFakeOrigin).toBe(true);
+  });
+});
