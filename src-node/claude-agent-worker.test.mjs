@@ -3,11 +3,15 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import {
+  AGENT_RUN_MAX_STEPS,
+  AGENT_RUN_MAX_UNPAIRED_STEPS,
+  AGENT_STEP_MAX_BYTES,
   buildPrompt,
   TOPOLOGY_MCP_ALLOWED_TOOLS,
   extractTopologyWorkflowStageResults,
   extractOperationTraceEvents,
   extractStreamEventText,
+  ingestAgentStepDraft,
   normalizeError,
   parseAssistantText,
   redactSecrets,
@@ -209,9 +213,9 @@ describe("claude-agent-worker", () => {
       validation: { ok: true, errors: [] },
     });
     expect(result.stageResults[0].payload.project.topology.nodes).toHaveLength(24);
-    expect(events.map((event) => event.text ?? "").join("")).toContain(
-      "[Skill] tsn-topology 结果已返回：4 个交换机，20 个端系统，23 条链路",
-    );
+    const skillStep = result.agentSteps.find((step) => step.toolName === "Skill" || step.kind === "tool_result");
+    expect(skillStep).toBeDefined();
+    expect(events.map((event) => event.text ?? "").join("")).not.toContain("[Skill]");
   });
 
   it("fails closed by omitting MCP server config when topology host cannot be resolved", async () => {
@@ -261,10 +265,13 @@ describe("claude-agent-worker", () => {
     );
 
     const streamed = events.map((event) => event.text ?? "").join("");
+    const agentStepEvents = events.filter((event) => event.event === "agent_step");
     const audit = JSON.parse(await readFile(result.auditPath, "utf8"));
     expect(callCount).toBe(1);
     expect(streamed).not.toContain("tsn-stage-runner --stage topology");
+    expect(streamed).not.toContain("[工具]");
     expect(result.assistantText).toContain("拓扑已生成");
+    expect(result.assistantText).not.toContain("[工具]");
     expect(result.stageResults).toEqual([]);
     expect(audit.stageRunnerInputPath).toContain("stage-runner-input.json");
     expect(audit.promptRuns).toEqual([
@@ -308,7 +315,7 @@ describe("claude-agent-worker", () => {
     expect(result.stageResults[0].status).toBe("failed");
   });
 
-  it("surfaces SDK tool use and tool result events in the final assistant text", async () => {
+  it("surfaces SDK tool use and tool result events as agent_step events without polluting assistantText (U2)", async () => {
     const events = [];
     const query = async function* () {
       yield { type: "system", session_id: "session-tool-trace" };
@@ -345,14 +352,29 @@ describe("claude-agent-worker", () => {
       yield { type: "result", session_id: "session-tool-trace", result: "已更新流量规划" };
     };
 
-    const result = await runClaude("加三条视频流", { onEvent: (event) => events.push(event) }, query);
+    const result = await runClaude("加三条视频流", { onEvent: (event) => events.push(event), runId: "run-trace-1" }, query);
 
-    const streamed = events.map((event) => event.text ?? "").join("");
-    expect(streamed).toContain("[工具] Bash: node tsn-stage-runner --stage flow-template");
-    expect(streamed).toContain("[工具结果] Bash 已返回");
-    expect(result.assistantText).toContain("[工具] Bash: node tsn-stage-runner --stage flow-template");
-    expect(result.assistantText).toContain("[工具结果] Bash 已返回");
+    const agentStepEvents = events.filter((event) => event.event === "agent_step");
+    expect(agentStepEvents.length).toBeGreaterThanOrEqual(1);
+    expect(agentStepEvents.some((event) => event.step?.kind === "tool_use" && event.step?.toolName === "Bash")).toBe(true);
+    expect(agentStepEvents.some((event) => event.step?.kind === "tool_result" && event.step?.status === "success")).toBe(true);
+
+    expect(result.assistantText).not.toContain("[工具]");
+    expect(result.assistantText).not.toContain("[工具结果]");
     expect(result.assistantText).toContain("已更新流量规划");
+
+    expect(result.agentSteps).toBeDefined();
+    expect(result.agentSteps.length).toBeGreaterThanOrEqual(1);
+    expect(result.agentSteps[0].runId).toBe("run-trace-1");
+    const merged = result.agentSteps.find((step) => step.toolUseId === "toolu-1");
+    expect(merged).toBeDefined();
+    expect(merged?.status).toBe("success");
+    expect(merged?.kind).toBe("tool_result");
+
+    const chunkEvents = events.filter((event) => event.event === "chunk");
+    const chunkText = chunkEvents.map((event) => event.text ?? "").join("");
+    expect(chunkText).not.toContain("[工具]");
+    expect(chunkText).not.toContain("[工具结果]");
   });
 
   it("writes a per-session audit log with prompt, result, and tool traces", async () => {
@@ -581,7 +603,9 @@ describe("claude-agent-worker", () => {
       yield { type: "result", session_id: "session-2", result: '{"assistantText":"JSON 字符串回复"}' };
     };
 
-    await expect(runClaude("需求", undefined, query)).resolves.toEqual({
+    await expect(runClaude("需求", { runId: "run-json-fallback" }, query)).resolves.toEqual({
+      runId: "run-json-fallback",
+      agentSteps: [],
       assistantText: "JSON 字符串回复",
       sessionId: "session-2",
       stageResults: [],
@@ -767,5 +791,132 @@ describe("claude-agent-worker", () => {
 
     expect(traces.map((trace) => trace.text)).toEqual([]);
     expect(traces.map((trace) => trace.text).join("\n")).not.toContain("{}");
+  });
+});
+
+describe("U2 agent_step ingestion (caps + pairing + size)", () => {
+  function makeIngestContext(runId = "run-u2-test") {
+    return {
+      runId,
+      agentSteps: [],
+      stepsByTraceId: new Map(),
+      stepsByToolUseId: new Map(),
+      sequenceRef: { value: 0 },
+      counters: { unpaired: 0, totalLimitReached: false, unpairedLimitReached: false },
+    };
+  }
+
+  function ingest(ctx, trace) {
+    const result = ingestAgentStepDraft({
+      runId: ctx.runId,
+      trace,
+      agentSteps: ctx.agentSteps,
+      stepsByTraceId: ctx.stepsByTraceId,
+      stepsByToolUseId: ctx.stepsByToolUseId,
+      sequenceRef: ctx.sequenceRef,
+      counters: ctx.counters,
+    });
+    ctx.sequenceRef.value = result.sequenceAfter;
+    ctx.counters.unpaired = result.unpairedAfter;
+    ctx.counters.totalLimitReached = result.totalLimitReached;
+    ctx.counters.unpairedLimitReached = result.unpairedLimitReached;
+    return result.emitted;
+  }
+
+  it("merges tool_use and tool_result with the same toolUseId into one logical step", () => {
+    const ctx = makeIngestContext();
+    const pending = ingest(ctx, {
+      key: "k1",
+      step: { kind: "tool_use", toolUseId: "toolu-merge", toolName: "Bash", inputSummary: "node ...", status: "pending" },
+    });
+    expect(pending.status).toBe("pending");
+    expect(ctx.agentSteps).toHaveLength(1);
+
+    const updated = ingest(ctx, {
+      key: "k2",
+      step: { kind: "tool_result", toolUseId: "toolu-merge", toolName: "Bash", outputSummary: "ok", status: "success" },
+    });
+    expect(updated.traceId).toBe(pending.traceId);
+    expect(updated.status).toBe("success");
+    expect(updated.outputSummary).toBe("ok");
+    expect(ctx.agentSteps).toHaveLength(1);
+  });
+
+  it("assigns increasing sequence numbers to new steps", () => {
+    const ctx = makeIngestContext();
+    const a = ingest(ctx, { key: "a", step: { kind: "tool_use", toolUseId: "id-a", toolName: "Read", status: "pending" } });
+    const b = ingest(ctx, { key: "b", step: { kind: "tool_use", toolUseId: "id-b", toolName: "Write", status: "pending" } });
+    expect(a.sequence).toBe(1);
+    expect(b.sequence).toBe(2);
+  });
+
+  it("caps unpaired steps at AGENT_RUN_MAX_UNPAIRED_STEPS and aggregates overflow", () => {
+    const ctx = makeIngestContext();
+    for (let i = 0; i < AGENT_RUN_MAX_UNPAIRED_STEPS; i += 1) {
+      ingest(ctx, {
+        key: `unpaired-${i}`,
+        step: { kind: "tool_result", toolName: "OrphanTool", outputSummary: `r${i}`, status: "success" },
+      });
+    }
+    expect(ctx.agentSteps).toHaveLength(AGENT_RUN_MAX_UNPAIRED_STEPS);
+
+    const overflow = ingest(ctx, {
+      key: "unpaired-overflow",
+      step: { kind: "tool_result", toolName: "OrphanTool", outputSummary: "extra", status: "success" },
+    });
+    expect(overflow.kind).toBe("aggregate");
+    expect(overflow.status).toBe("truncated");
+    expect(ctx.agentSteps).toHaveLength(AGENT_RUN_MAX_UNPAIRED_STEPS + 1);
+
+    const secondOverflow = ingest(ctx, {
+      key: "unpaired-overflow-2",
+      step: { kind: "tool_result", toolName: "OrphanTool", outputSummary: "more", status: "success" },
+    });
+    expect(secondOverflow).toBeNull();
+    expect(ctx.agentSteps).toHaveLength(AGENT_RUN_MAX_UNPAIRED_STEPS + 1);
+  });
+
+  it("caps total run steps at AGENT_RUN_MAX_STEPS - 1 and emits aggregate at the boundary", () => {
+    const ctx = makeIngestContext();
+    for (let i = 0; i < AGENT_RUN_MAX_STEPS - 1; i += 1) {
+      ingest(ctx, {
+        key: `paired-${i}`,
+        step: { kind: "tool_use", toolUseId: `pair-${i}`, toolName: "Bash", status: "pending" },
+      });
+    }
+    expect(ctx.agentSteps).toHaveLength(AGENT_RUN_MAX_STEPS - 1);
+
+    const aggregate = ingest(ctx, {
+      key: "limit-trigger",
+      step: { kind: "tool_use", toolUseId: "limit-trigger", toolName: "Bash", status: "pending" },
+    });
+    expect(aggregate.kind).toBe("aggregate");
+    expect(ctx.agentSteps).toHaveLength(AGENT_RUN_MAX_STEPS);
+
+    const skipped = ingest(ctx, {
+      key: "after-limit",
+      step: { kind: "tool_use", toolUseId: "after-limit", toolName: "Bash", status: "pending" },
+    });
+    expect(skipped).toBeNull();
+    expect(ctx.agentSteps).toHaveLength(AGENT_RUN_MAX_STEPS);
+  });
+
+  it("truncates oversized step payload and marks status truncated", () => {
+    const ctx = makeIngestContext();
+    const huge = "x".repeat(AGENT_STEP_MAX_BYTES + 4096);
+    const step = ingest(ctx, {
+      key: "huge",
+      step: { kind: "tool_use", toolUseId: "huge", toolName: "Bash", inputSummary: huge, status: "pending" },
+    });
+    expect(step.status).toBe("truncated");
+    expect(step.inputSummary.length).toBeLessThan(huge.length);
+    expect(Buffer.byteLength(JSON.stringify(step), "utf8")).toBeLessThanOrEqual(AGENT_STEP_MAX_BYTES);
+  });
+
+  it("ignores traces without a step draft (synthetic text-only)", () => {
+    const ctx = makeIngestContext();
+    const result = ingest(ctx, { key: "text-only", text: "[文件] read foo" });
+    expect(result).toBeNull();
+    expect(ctx.agentSteps).toHaveLength(0);
   });
 });

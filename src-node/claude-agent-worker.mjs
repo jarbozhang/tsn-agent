@@ -3,7 +3,12 @@ import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { createTopologyWorkflowStageResult } from "../src/agent/topology-workflow-stage-result";
+
+export const AGENT_STEP_MAX_BYTES = 16 * 1024;
+export const AGENT_RUN_MAX_STEPS = 200;
+export const AGENT_RUN_MAX_UNPAIRED_STEPS = 30;
 
 const TOPOLOGY_MCP_SERVER_NAME = "tsn_topology";
 export const TOPOLOGY_MCP_ALLOWED_TOOLS = [
@@ -41,6 +46,16 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
   const toolUseNamesById = new Map();
   const capturedStageResultKeys = new Set();
   const capturedStageResults = [];
+  const runId = typeof resolvedOptions.runId === "string" && resolvedOptions.runId.length > 0
+    ? resolvedOptions.runId
+    : `agent-run-${Date.now()}`;
+  const agentSteps = [];
+  const stepsByTraceId = new Map();
+  const stepsByToolUseId = new Map();
+  let stepSequence = 0;
+  let unpairedStepCount = 0;
+  let totalLimitReached = false;
+  let unpairedLimitReached = false;
   const stageResultPath = resolvedOptions.stageResultPath ?? await createStageResultPath();
   const skillOutputDir = resolvedOptions.skillOutputDir ?? await createSkillOutputDir(stageResultPath);
   const stageRunnerPath = resolvedOptions.stageRunnerPath ?? resolveStageRunnerPath(cwd);
@@ -192,14 +207,37 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     resolvedOptions.onEvent?.({ event: "chunk", text });
   };
   const emitOperationTrace = (trace) => {
-    if (!trace?.text || !trace.key || operationTraceKeys.has(trace.key)) {
+    if (!trace?.key || operationTraceKeys.has(trace.key)) {
       return;
     }
 
     operationTraceKeys.add(trace.key);
-    operationTraceLines.push(trace.text);
+    if (trace.text) {
+      operationTraceLines.push(trace.text);
+    }
     recordAuditToolTrace(auditLog, trace);
-    resolvedOptions.onEvent?.({ event: "chunk", text: `${trace.text}\n` });
+
+    const step = ingestAgentStepDraft({
+      runId,
+      trace,
+      agentSteps,
+      stepsByTraceId,
+      stepsByToolUseId,
+      sequenceRef: { value: stepSequence },
+      counters: {
+        unpaired: unpairedStepCount,
+        totalLimitReached,
+        unpairedLimitReached,
+      },
+    });
+    stepSequence = step.sequenceAfter;
+    unpairedStepCount = step.unpairedAfter;
+    totalLimitReached = step.totalLimitReached;
+    unpairedLimitReached = step.unpairedLimitReached;
+
+    if (step.emitted) {
+      resolvedOptions.onEvent?.({ event: "agent_step", step: step.emitted });
+    }
   };
 
   try {
@@ -229,6 +267,8 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
         assistantText: recoveredText,
         sessionId,
         stageResults,
+        agentSteps,
+        runId,
         ...(auditPath ? { auditPath } : {}),
       };
     }
@@ -300,6 +340,8 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
           assistantText: recoveredText,
           sessionId,
           stageResults: recoveredStageResults,
+          agentSteps,
+          runId,
           ...(auditPath ? { auditPath } : {}),
         };
       }
@@ -342,6 +384,8 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     assistantText: finalAssistantText,
     sessionId,
     stageResults: finalStageResults,
+    agentSteps,
+    runId,
     ...(auditPath ? { auditPath } : {}),
   };
 }
@@ -910,6 +954,13 @@ async function readStageResults(stageResultPath, onTrace) {
       onTrace?.({
         key: `file:read:${stageResultPath}`,
         text: `[文件] 读取阶段结果 ${formatPathForDisplay(stageResultPath)}`,
+        step: {
+          kind: "tool_result",
+          toolName: "Read",
+          inputSummary: formatPathForDisplay(stageResultPath),
+          outputSummary: "已读取阶段结果",
+          status: "success",
+        },
       });
       for (const result of stageResults) {
         const producer = isRecord(result) && isRecord(result.producer) ? result.producer : undefined;
@@ -930,9 +981,17 @@ async function readStageResults(stageResultPath, onTrace) {
           : skillNameForStage(isRecord(result) && typeof result.stage === "string" ? result.stage : undefined);
         if (skillName) {
           const resultSummary = summarizeStageResultForTrace(result);
+          const stageOk = !isRecord(result) || (result.status !== "failed" && (!isRecord(result.validation) || result.validation.ok !== false));
           onTrace?.({
             key: `skill:result:${isRecord(result) ? result.stage ?? "unknown" : "unknown"}:${skillName}`,
             text: `[Skill] ${skillName} 结果已返回${resultSummary ? `：${resultSummary}` : ""}`,
+            step: {
+              kind: "tool_result",
+              toolName: `Skill:${skillName}`,
+              outputSummary: resultSummary || "结果已返回",
+              status: stageOk ? "success" : "error",
+              errorSummary: stageOk ? undefined : resultSummary,
+            },
           });
         }
       }
@@ -1094,9 +1153,17 @@ export function extractOperationTraceEvents(message, toolUseNamesById = new Map(
       if (typeof block.id === "string") {
         toolUseNamesById.set(block.id, name);
       }
+      const toolUseId = typeof block.id === "string" ? block.id : undefined;
       traces.push({
         key: `tool_use:${block.id ?? `${name}:${stableStringify(block.input)}`}:${traceDetailKey(block.input)}`,
         text: formatToolUseTrace(name, block.input),
+        step: {
+          kind: "tool_use",
+          toolUseId,
+          toolName: formatToolName(name),
+          inputSummary: summarizeInput(block.input),
+          status: "pending",
+        },
       });
     }
 
@@ -1104,9 +1171,18 @@ export function extractOperationTraceEvents(message, toolUseNamesById = new Map(
       const toolUseId = typeof block.tool_use_id === "string" ? block.tool_use_id : undefined;
       const name = toolUseId ? toolUseNamesById.get(toolUseId) : undefined;
       const failed = isFailedToolResult(block);
+      const summary = summarizeToolResult(block);
       traces.push({
         key: `tool_result:${toolUseId ?? stableStringify(block)}:${failed ? "error" : "ok"}:${traceDetailKey(block.content ?? block.toolUseResult)}`,
         text: formatToolResultTrace(name ?? "工具", block, failed),
+        step: {
+          kind: "tool_result",
+          toolUseId,
+          toolName: formatToolName(name ?? "工具"),
+          outputSummary: failed ? undefined : summary,
+          errorSummary: failed ? summary || "失败" : undefined,
+          status: failed ? "error" : "success",
+        },
       });
     }
   }
@@ -1479,11 +1555,187 @@ function skillNameForStage(stage) {
   return undefined;
 }
 
-function prependOperationTrace(assistantText, operationTraceLines) {
-  const body = assistantText.trim();
-  const trace = operationTraceLines.join("\n").trim();
+function prependOperationTrace(assistantText, _operationTraceLines) {
+  return assistantText.trim();
+}
 
-  return trace ? `${trace}\n\n${body}` : body;
+export function ingestAgentStepDraft(input) {
+  const { runId, trace, agentSteps, stepsByTraceId, stepsByToolUseId, sequenceRef, counters } = input;
+  let { unpaired, totalLimitReached, unpairedLimitReached } = counters;
+  const draft = trace?.step;
+
+  if (!draft) {
+    return { emitted: null, sequenceAfter: sequenceRef.value, unpairedAfter: unpaired, totalLimitReached, unpairedLimitReached };
+  }
+
+  const toolUseId = typeof draft.toolUseId === "string" && draft.toolUseId.length > 0 ? draft.toolUseId : undefined;
+
+  if (toolUseId && stepsByToolUseId.has(toolUseId)) {
+    const traceId = stepsByToolUseId.get(toolUseId);
+    const existing = stepsByTraceId.get(traceId);
+    if (existing) {
+      const merged = mergeAgentStep(existing, draft);
+      stepsByTraceId.set(traceId, merged);
+      const idx = agentSteps.findIndex((entry) => entry.traceId === traceId);
+      if (idx !== -1) {
+        agentSteps[idx] = merged;
+      }
+      return {
+        emitted: cloneStepForEmit(merged),
+        sequenceAfter: sequenceRef.value,
+        unpairedAfter: unpaired,
+        totalLimitReached,
+        unpairedLimitReached,
+      };
+    }
+  }
+
+  if (totalLimitReached) {
+    return { emitted: null, sequenceAfter: sequenceRef.value, unpairedAfter: unpaired, totalLimitReached, unpairedLimitReached };
+  }
+
+  if (!toolUseId) {
+    if (unpaired >= AGENT_RUN_MAX_UNPAIRED_STEPS) {
+      if (!unpairedLimitReached) {
+        unpairedLimitReached = true;
+        const aggregate = buildAggregateOverflowStep({
+          runId,
+          sequence: sequenceRef.value + 1,
+          reason: "unpaired_overflow",
+          excessLabel: "其余未配对调用",
+        });
+        agentSteps.push(aggregate);
+        stepsByTraceId.set(aggregate.traceId, aggregate);
+        sequenceRef.value += 1;
+        return {
+          emitted: cloneStepForEmit(aggregate),
+          sequenceAfter: sequenceRef.value,
+          unpairedAfter: unpaired,
+          totalLimitReached,
+          unpairedLimitReached,
+        };
+      }
+      return { emitted: null, sequenceAfter: sequenceRef.value, unpairedAfter: unpaired, totalLimitReached, unpairedLimitReached };
+    }
+    unpaired += 1;
+  }
+
+  if (agentSteps.length >= AGENT_RUN_MAX_STEPS - 1 && !totalLimitReached) {
+    totalLimitReached = true;
+    const aggregate = buildAggregateOverflowStep({
+      runId,
+      sequence: sequenceRef.value + 1,
+      reason: "run_step_overflow",
+      excessLabel: "其余步骤",
+    });
+    agentSteps.push(aggregate);
+    stepsByTraceId.set(aggregate.traceId, aggregate);
+    sequenceRef.value += 1;
+    return {
+      emitted: cloneStepForEmit(aggregate),
+      sequenceAfter: sequenceRef.value,
+      unpairedAfter: unpaired,
+      totalLimitReached,
+      unpairedLimitReached,
+    };
+  }
+
+  sequenceRef.value += 1;
+  const traceId = randomUUID();
+  const step = {
+    runId,
+    traceId,
+    sequence: sequenceRef.value,
+    toolUseId,
+    toolName: draft.toolName,
+    inputSummary: draft.inputSummary,
+    outputSummary: draft.outputSummary,
+    errorSummary: draft.errorSummary,
+    status: draft.status,
+    kind: draft.kind,
+    createdAt: new Date().toISOString(),
+  };
+  const sized = applyStepPayloadCap(step);
+  agentSteps.push(sized);
+  stepsByTraceId.set(traceId, sized);
+  if (toolUseId) {
+    stepsByToolUseId.set(toolUseId, traceId);
+  }
+
+  return {
+    emitted: cloneStepForEmit(sized),
+    sequenceAfter: sequenceRef.value,
+    unpairedAfter: unpaired,
+    totalLimitReached,
+    unpairedLimitReached,
+  };
+}
+
+function mergeAgentStep(existing, draft) {
+  const merged = {
+    ...existing,
+    toolName: existing.toolName ?? draft.toolName,
+    inputSummary: existing.inputSummary ?? draft.inputSummary,
+    outputSummary:
+      draft.kind === "tool_result" ? draft.outputSummary : existing.outputSummary,
+    errorSummary:
+      draft.kind === "tool_result" ? draft.errorSummary : existing.errorSummary,
+    status: draft.status === "pending" ? existing.status : draft.status,
+    kind: draft.kind === "tool_result" ? "tool_result" : existing.kind,
+    updatedAt: new Date().toISOString(),
+  };
+  return applyStepPayloadCap(merged);
+}
+
+function cloneStepForEmit(step) {
+  return { ...step };
+}
+
+function applyStepPayloadCap(step) {
+  if (Buffer.byteLength(JSON.stringify(step), "utf8") <= AGENT_STEP_MAX_BYTES) {
+    return step;
+  }
+  const shrunk = {
+    ...step,
+    inputSummary: truncateForCap(step.inputSummary, 256),
+    outputSummary: truncateForCap(step.outputSummary, 256),
+    errorSummary: truncateForCap(step.errorSummary, 256),
+    status: "truncated",
+  };
+  if (Buffer.byteLength(JSON.stringify(shrunk), "utf8") <= AGENT_STEP_MAX_BYTES) {
+    return shrunk;
+  }
+  return {
+    ...shrunk,
+    inputSummary: shrunk.inputSummary ? "[truncated]" : undefined,
+    outputSummary: shrunk.outputSummary ? "[truncated]" : undefined,
+    errorSummary: shrunk.errorSummary ? "[truncated]" : undefined,
+  };
+}
+
+function truncateForCap(text, maxChars = 2048) {
+  if (typeof text !== "string") {
+    return text;
+  }
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, maxChars - 3)}...`;
+}
+
+function buildAggregateOverflowStep({ runId, sequence, reason, excessLabel }) {
+  return {
+    runId,
+    traceId: randomUUID(),
+    sequence,
+    toolName: excessLabel,
+    inputSummary: undefined,
+    outputSummary: `已聚合（${reason}）`,
+    errorSummary: undefined,
+    status: "truncated",
+    kind: "aggregate",
+    createdAt: new Date().toISOString(),
+  };
 }
 
 export function parseAssistantText(value) {

@@ -30,6 +30,8 @@ pub struct ClaudeAgentResponse {
     session_id: Option<String>,
     stage_results: Vec<serde_json::Value>,
     audit_path: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    agent_steps: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +42,8 @@ struct ClaudeWorkerResponse {
     #[serde(default)]
     stage_results: Vec<serde_json::Value>,
     audit_path: Option<String>,
+    #[serde(default)]
+    agent_steps: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,6 +57,9 @@ struct ClaudeWorkerEvent {
     #[serde(default)]
     stage_results: Vec<serde_json::Value>,
     audit_path: Option<String>,
+    step: Option<serde_json::Value>,
+    #[serde(default)]
+    agent_steps: Vec<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -62,6 +69,8 @@ struct ClaudeAgentEventPayload {
     kind: String,
     text: Option<String>,
     session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    step: Option<serde_json::Value>,
 }
 
 #[tauri::command]
@@ -297,6 +306,7 @@ fn parse_worker_output(stdout: &str) -> Result<ClaudeAgentResponse, String> {
         session_id: parsed.session_id,
         stage_results: parsed.stage_results,
         audit_path: parsed.audit_path,
+        agent_steps: parsed.agent_steps,
     })
 }
 
@@ -402,8 +412,11 @@ fn handle_worker_line(
         "chunk" => {
             let text = parsed.text.unwrap_or_default();
             if !text.is_empty() {
-                emit_claude_event(app, &run_id, "chunk", Some(text), None);
+                emit_claude_event(app, &run_id, "chunk", Some(text), None, None);
             }
+        }
+        "agent_step" => {
+            emit_claude_event(app, &run_id, "agent_step", None, None, parsed.step);
         }
         "session" => {
             log_worker_event(
@@ -415,7 +428,7 @@ fn handle_worker_line(
                 None,
                 serde_json::json!({ "claudeSessionId": parsed.session_id }),
             );
-            emit_claude_event(app, &run_id, "session", None, parsed.session_id);
+            emit_claude_event(app, &run_id, "session", None, parsed.session_id, None);
         }
         "done" => {
             let assistant_text = parsed.assistant_text.unwrap_or_default().trim().to_string();
@@ -429,6 +442,7 @@ fn handle_worker_line(
                 session_id: parsed.session_id,
                 stage_results: parsed.stage_results,
                 audit_path: parsed.audit_path,
+                agent_steps: parsed.agent_steps,
             });
         }
         _ => {}
@@ -505,6 +519,7 @@ fn emit_claude_event(
     kind: &str,
     text: Option<String>,
     session_id: Option<String>,
+    step: Option<serde_json::Value>,
 ) {
     let _ = app.emit(
         "claude-agent-event",
@@ -513,6 +528,7 @@ fn emit_claude_event(
             kind: kind.to_string(),
             text,
             session_id,
+            step,
         },
     );
 }
