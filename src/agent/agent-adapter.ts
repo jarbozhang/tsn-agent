@@ -902,8 +902,7 @@ function inferTopologyIntentFromProject(project: CanonicalTsnProjectV0): Topolog
       switchCount: 4,
       endSystemsPerSwitch: 0,
       switchInterconnect: "line",
-      topologyTemplate: "aerospace-redundant",
-      endSystemCount: countEndSystems(project),
+      topologyTemplate: "dual-plane-redundant",
     };
   }
 
