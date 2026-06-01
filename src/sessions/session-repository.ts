@@ -1,4 +1,4 @@
-import type { AgentEvent } from "../agent/agent-types";
+import type { AgentEvent, AgentStepDetail } from "../agent/agent-types";
 import { CURRENT_SESSION_RUNTIME_VERSION, type SessionMetadata } from "../agent/agent-types";
 import type { CanonicalTsnProjectV0 } from "../domain/canonical";
 import type { ArtifactBundle } from "../export/artifact-bundle";
@@ -26,6 +26,7 @@ export interface TsnSession {
   messages: ChatMessage[];
   claudeSessionId?: string;
   agentEvents: AgentEvent[];
+  agentStepDetails?: Record<string, AgentStepDetail>;
   workflow: WorkflowState;
   plannerRun?: PlannerRunState;
   project?: CanonicalTsnProjectV0;
@@ -269,6 +270,7 @@ export function redactSessionForStorage(session: TsnSession): TsnSession {
       ...event,
       content: redactSecrets(event.content),
     })),
+    agentStepDetails: session.agentStepDetails,
     workflow: normalizeWorkflowState(session.workflow),
     plannerRun: normalizePlannerRunState(session.plannerRun),
   };
@@ -311,13 +313,17 @@ function normalizeSession(session: TsnSession): TsnSession {
     ...(isLegacyOrigin ? { legacyFakeOrigin: true } : {}),
   };
 
-  return repairSessionTopologyFromMessages({
+  const base: TsnSession = {
     ...session,
     agentEvents: normalizedEvents,
     workflow: normalizeWorkflowState(session.workflow),
     plannerRun: normalizePlannerRunState(session.plannerRun),
     metadata,
-  });
+  };
+  if (session.agentStepDetails) {
+    base.agentStepDetails = session.agentStepDetails;
+  }
+  return repairSessionTopologyFromMessages(base);
 }
 
 function migrateOrphanPendingStep(event: AgentEvent): AgentEvent {

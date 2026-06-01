@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { runTsnAgent } from "../agent/agent-adapter";
+import type { AgentStepDetail } from "../agent/agent-types";
 import {
   artifactBundleSummary,
   logDiagnostic,
@@ -474,9 +475,14 @@ export function App() {
       });
       setSessions(await repository.list());
 
+      const runId = typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? `agent-run-${crypto.randomUUID()}`
+        : `agent-run-${Math.random().toString(36).slice(2)}`;
+      const inFlightStepBuffer: Record<string, AgentStepDetail> = {};
       const result = await runTsnAgent({
         userIntent: trimmedInput,
         session: contextSession,
+        runId,
         diagnostics: diagnosticsRepository,
         onChunk: (chunk) => {
           streamedText += chunk;
@@ -484,6 +490,11 @@ export function App() {
           setLastAgentChunkAt(Date.now());
           setPendingAssistantMessageId(undefined);
           updateAssistantMessage(pendingSession.id, assistantMessage.id, redactProviderNamesForDisplay(streamedText));
+        },
+        onAgentStep: (step) => {
+          if (typeof step?.traceId === "string" && step.traceId.length > 0) {
+            inFlightStepBuffer[step.traceId] = { ...inFlightStepBuffer[step.traceId], ...(step as AgentStepDetail) };
+          }
         },
       });
       const completedAt = new Date().toISOString();
@@ -497,6 +508,15 @@ export function App() {
       const nextPlannerRun: PlannerRunState = appliedProject
         ? plannerRunForAgentResult(previousPlannerRun, appliedProject)
         : previousPlannerRun;
+      const mergedStepDetails: Record<string, AgentStepDetail> = {
+        ...(latestSession.agentStepDetails ?? {}),
+        ...inFlightStepBuffer,
+      };
+      for (const step of result.agentSteps ?? []) {
+        if (step?.traceId) {
+          mergedStepDetails[step.traceId] = step;
+        }
+      }
       const nextSession: TsnSession = {
         ...latestSession,
         title: appliedProject ? appliedProject.name : pendingSession.title,
@@ -508,6 +528,7 @@ export function App() {
         ),
         claudeSessionId: result.claudeSessionId ?? latestSession.claudeSessionId,
         agentEvents: [...latestSession.agentEvents, ...stampAgentEvents(result.events, completedAt)],
+        agentStepDetails: mergedStepDetails,
         workflow: shouldApplyProject ? result.workflow : pendingSession.workflow,
         project: appliedProject ?? pendingSession.project,
         bundle: appliedProject

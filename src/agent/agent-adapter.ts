@@ -11,7 +11,11 @@ import {
   type AgentStepDetail,
   type AgentSuccessResult,
 } from "./agent-types";
-import { AGENT_STALL_TIMEOUT_MS_DEFAULT, redactVendorNames } from "./agent-sanitizer";
+import {
+  AGENT_STALL_TIMEOUT_MS_DEFAULT,
+  redactVendorNames,
+  sanitizeAgentStepDetail,
+} from "./agent-sanitizer";
 import type { ChatMessage, TsnSession } from "../sessions/session-repository";
 import { getScenarioConfig } from "../domain/scenario-config";
 import type { CanonicalTsnProjectV0, TopologyIntent } from "../domain/canonical";
@@ -43,7 +47,10 @@ export interface TsnAgentResult {
   bundle?: ArtifactBundle;
   failureReason?: AgentFailureReason;
   ctaUrl?: string;
-  /** @deprecated kept for App.tsx diagnostics until U3c rewires App to `kind`. */
+  /** Sanitized per-run agent step details, ready to persist alongside the session. */
+  agentSteps: AgentStepDetail[];
+  runId: string;
+  /** @deprecated kept for App.tsx diagnostics until App switches to `kind`. */
   mode?: "claude";
   claudeSessionId?: string;
 }
@@ -190,6 +197,8 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
       },
     });
 
+    const sanitizedAgentSteps = sanitizeAgentStepsForPersistence(claude.agentSteps ?? [], runId);
+
     if (stageResultApplication.kind === "success") {
       const cleanedAssistantText = sanitizeClaudeAssistantText(claude.assistantText, stageResultApplication.workflow);
       return {
@@ -200,6 +209,8 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
         assistantText: cleanedAssistantText,
         project: stageResultApplication.project,
         bundle: undefined,
+        agentSteps: sanitizedAgentSteps,
+        runId,
         mode: "claude",
         claudeSessionId: claude.sessionId,
       };
@@ -214,6 +225,8 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
       project: stageResultApplication.project,
       bundle: stageResultApplication.bundle,
       failureReason: "no_stage_result",
+      agentSteps: sanitizedAgentSteps,
+      runId,
       mode: "claude",
       claudeSessionId: claude.sessionId,
     };
@@ -230,11 +243,36 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
       },
     });
 
-    return buildAgentErrorResult(error, normalizedSession, baseWorkflow);
+    return buildAgentErrorResult(error, normalizedSession, baseWorkflow, runId);
   } finally {
     watchdog.cancel();
     unlisten?.();
   }
+}
+
+function sanitizeAgentStepsForPersistence(rawSteps: unknown[], runId: string): AgentStepDetail[] {
+  const sanitized: AgentStepDetail[] = [];
+  for (const raw of rawSteps) {
+    if (!raw || typeof raw !== "object") {
+      continue;
+    }
+    try {
+      const enforcedRunId = (raw as { runId?: unknown }).runId ?? runId;
+      const { detail } = sanitizeAgentStepDetail({
+        ...(raw as Record<string, unknown>),
+        runId: enforcedRunId,
+      });
+      sanitized.push({
+        ...detail,
+        inputSummary: detail.inputSummary === undefined ? undefined : redactVendorNames(detail.inputSummary),
+        outputSummary: detail.outputSummary === undefined ? undefined : redactVendorNames(detail.outputSummary),
+        errorSummary: detail.errorSummary === undefined ? undefined : redactVendorNames(detail.errorSummary),
+      });
+    } catch {
+      // drop malformed step
+    }
+  }
+  return sanitized;
 }
 
 interface StallWatchdog {
@@ -310,11 +348,13 @@ function buildStallTimeoutResult(
     project: previousSession?.project,
     bundle: previousSession?.bundle,
     failureReason: "stall_timeout",
+    agentSteps: [],
+    runId,
     mode: "claude",
   };
 }
 
-function buildRuntimeUnavailableResult(workflow: WorkflowState): AgentRuntimeUnavailableResult & { mode?: "claude" } {
+function buildRuntimeUnavailableResult(workflow: WorkflowState): TsnAgentResult {
   const desktopUrl = readDesktopDownloadUrl();
   const assistantText = redactVendorNames(
     [
@@ -330,6 +370,8 @@ function buildRuntimeUnavailableResult(workflow: WorkflowState): AgentRuntimeUna
     workflow,
     assistantText,
     ctaUrl: desktopUrl,
+    agentSteps: [],
+    runId: createRunId(),
   };
 }
 
@@ -337,6 +379,7 @@ function buildAgentErrorResult(
   error: unknown,
   previousSession: TsnSession | undefined,
   fallbackWorkflow: WorkflowState,
+  runId: string,
 ): TsnAgentResult {
   const message = redactVendorNames(buildAgentFailureText(error));
   const baseEvent: AgentEvent = {
@@ -346,6 +389,7 @@ function buildAgentErrorResult(
     content: message,
     status: "error",
     stage: previousSession?.workflow?.currentStep ?? fallbackWorkflow.currentStep,
+    runId,
   };
 
   return {
@@ -357,6 +401,8 @@ function buildAgentErrorResult(
     project: previousSession?.project,
     bundle: previousSession?.bundle,
     failureReason: "agent_error",
+    agentSteps: [],
+    runId,
     mode: "claude",
   };
 }

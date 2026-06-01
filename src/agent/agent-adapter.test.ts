@@ -268,6 +268,88 @@ describe("runTsnAgent — sanitize claude assistant text", () => {
   });
 });
 
+describe("runTsnAgent — agentSteps trust boundary sanitization", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    listenMock.mockReset();
+    listenMock.mockResolvedValue(() => undefined);
+    mockTauriRuntime();
+  });
+
+  it("drops raw-bearing keys and runs vendor redactor on worker-returned agentSteps", async () => {
+    invokeMock.mockResolvedValue({
+      assistantText: "ok",
+      stageResults: [topologyStageResult(PROMPT)],
+      agentSteps: [
+        {
+          traceId: "trace-1",
+          runId: "run-x",
+          toolUseId: "tu-1",
+          toolName: "Bash",
+          inputSummary: "anthropic call",
+          outputSummary: "ok from Claude",
+          errorSummary: undefined,
+          status: "success",
+          prompt: "[SECRET prompt]",
+          stdout: "raw stdout",
+          headers: { authorization: "Bearer sk-ant-x" },
+          full: { topology: { nodes: [] } },
+        },
+      ],
+    });
+    const result = await runTsnAgent({ userIntent: PROMPT, runId: "run-tx" });
+    expect(result.agentSteps).toHaveLength(1);
+    const step = result.agentSteps[0];
+    expect(step.traceId).toBe("trace-1");
+    expect(step).not.toHaveProperty("prompt");
+    expect(step).not.toHaveProperty("stdout");
+    expect(step).not.toHaveProperty("headers");
+    expect(step).not.toHaveProperty("full");
+    expect(step.inputSummary).not.toMatch(/anthropic/i);
+    expect(step.outputSummary).not.toMatch(/Claude/);
+  });
+
+  it("propagates supplied runId into result.runId", async () => {
+    invokeMock.mockResolvedValue({
+      assistantText: "ok",
+      stageResults: [topologyStageResult(PROMPT)],
+      agentSteps: [],
+    });
+    const result = await runTsnAgent({ userIntent: PROMPT, runId: "run-propagate" });
+    expect(result.runId).toBe("run-propagate");
+  });
+
+  it("generates a runId when one is not supplied", async () => {
+    invokeMock.mockResolvedValue({
+      assistantText: "ok",
+      stageResults: [topologyStageResult(PROMPT)],
+      agentSteps: [],
+    });
+    const result = await runTsnAgent({ userIntent: PROMPT });
+    expect(result.runId).toMatch(/^agent-run-/);
+  });
+
+  it("forwards onAgentStep callback when worker emits an agent_step event", async () => {
+    const received: unknown[] = [];
+    invokeMock.mockImplementation(async () => {
+      const listener = listenMock.mock.calls[0]?.[1] as ((event: { payload: unknown }) => void) | undefined;
+      listener?.({ payload: { runId: "run-onstep", kind: "agent_step", step: { traceId: "t-1", runId: "run-onstep", status: "pending" } } });
+      return {
+        assistantText: "ok",
+        stageResults: [topologyStageResult(PROMPT)],
+        agentSteps: [],
+      };
+    });
+    await runTsnAgent({
+      userIntent: PROMPT,
+      runId: "run-onstep",
+      onAgentStep: (step) => received.push(step),
+    });
+    expect(received).toHaveLength(1);
+    expect((received[0] as { traceId?: string }).traceId).toBe("t-1");
+  });
+});
+
 describe("runTsnAgent — stall-timer watchdog", () => {
   beforeEach(() => {
     invokeMock.mockReset();
