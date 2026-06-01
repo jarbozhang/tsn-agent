@@ -278,7 +278,7 @@ describe("App", () => {
     expect(screen.getByText(`VER ${appVersion}`)).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "工作台工具" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "会话" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "执行日志" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "日志" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Skill" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
     expect(screen.getByText("描述你的 TSN 需求后生成拓扑图")).toBeInTheDocument();
@@ -325,7 +325,7 @@ describe("App", () => {
     // U6: "执行步骤" 独立 tab 已下线，步骤数据通过 session.agentEvents 持久化
     expect(screen.queryByRole("tab", { name: "执行步骤" })).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "执行日志" }));
+    await user.click(screen.getByRole("button", { name: "日志" }));
     expect(await screen.findByText("用户提交需求")).toBeInTheDocument();
   });
 
@@ -535,7 +535,7 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "保存" }));
 
     expect(await screen.findByText(/已导出 6 个文件：browser-preview/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "执行日志" }));
+    await user.click(screen.getByRole("button", { name: "日志" }));
     expect((await screen.findAllByText("项目文件已导出")).length).toBeGreaterThanOrEqual(1);
   });
 

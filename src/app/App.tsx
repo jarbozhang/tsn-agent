@@ -1462,7 +1462,7 @@ function WorkspaceToolRail({
 }) {
   const tools: Array<{ id: WorkspaceToolPanel; label: string; icon: typeof FolderOpen }> = [
     { id: "sessions", label: "会话", icon: FolderOpen },
-    { id: "diagnostics", label: "执行日志", icon: ScrollText },
+    { id: "diagnostics", label: "日志", icon: ScrollText },
     { id: "skills", label: "Skill", icon: Wrench },
     { id: "settings", label: "设置", icon: Settings },
   ];
@@ -1516,6 +1516,11 @@ function WorkspaceToolDrawer({
         <div>
           <p className="drawer-kicker">{workspacePanelKicker(activePanel)}</p>
           <h2>{workspacePanelLabel(activePanel)}</h2>
+          {workspacePanelSubtitle(activePanel) && (
+            <p className="drawer-subtitle" style={{ marginTop: 4, color: "#666", fontSize: "12px" }}>
+              {workspacePanelSubtitle(activePanel)}
+            </p>
+          )}
         </div>
         <button className="icon-button" type="button" aria-label={`关闭${workspacePanelLabel(activePanel)}`} onClick={onClose}>
           <X size={18} aria-hidden="true" />
@@ -1721,7 +1726,7 @@ function SettingsToolPanel({ version, releases }: { version: string; releases: R
 function workspacePanelLabel(panel: WorkspaceToolPanel): string {
   const labels: Record<WorkspaceToolPanel, string> = {
     sessions: "会话管理",
-    diagnostics: "执行日志",
+    diagnostics: "日志",
     skills: "Skill 能力",
     settings: "工作台设置",
   };
@@ -1735,6 +1740,17 @@ function workspacePanelKicker(panel: WorkspaceToolPanel): string {
     diagnostics: "Diagnostics",
     skills: "Skills",
     settings: "Settings",
+  };
+
+  return labels[panel];
+}
+
+function workspacePanelSubtitle(panel: WorkspaceToolPanel): string {
+  const labels: Record<WorkspaceToolPanel, string> = {
+    sessions: "",
+    diagnostics: "程序运行日志",
+    skills: "",
+    settings: "",
   };
 
   return labels[panel];
