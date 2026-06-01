@@ -313,8 +313,11 @@ function normalizeSession(session: TsnSession): TsnSession {
     ...(isLegacyOrigin ? { legacyFakeOrigin: true } : {}),
   };
 
+  const cleanedMessages = (session.messages ?? []).map(stripLegacyTraceLinesFromMessage);
+
   const base: TsnSession = {
     ...session,
+    messages: cleanedMessages,
     agentEvents: normalizedEvents,
     workflow: normalizeWorkflowState(session.workflow),
     plannerRun: normalizePlannerRunState(session.plannerRun),
@@ -324,6 +327,28 @@ function normalizeSession(session: TsnSession): TsnSession {
     base.agentStepDetails = session.agentStepDetails;
   }
   return repairSessionTopologyFromMessages(base);
+}
+
+const LEGACY_TRACE_LINE_PATTERN = /^\s*\[(?:工具|工具结果|文件|Skill)\][^\n]*$/;
+
+function stripLegacyTraceLinesFromMessage(message: ChatMessage): ChatMessage {
+  if (message.role !== "assistant") {
+    return message;
+  }
+  const original = message.content ?? "";
+  if (!LEGACY_TRACE_LINE_PATTERN.test(original) && !original.includes("[工具]") && !original.includes("[工具结果]") && !original.includes("[文件]") && !original.includes("[Skill]")) {
+    return message;
+  }
+  const cleaned = original
+    .split("\n")
+    .filter((line) => !LEGACY_TRACE_LINE_PATTERN.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (cleaned === original.trim()) {
+    return message;
+  }
+  return { ...message, content: cleaned };
 }
 
 function migrateOrphanPendingStep(event: AgentEvent): AgentEvent {

@@ -321,8 +321,9 @@ describe("App", () => {
     await user.click(screen.getByRole("tab", { name: "导出文件" }));
     expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
     expect(screen.getByText("完成“模拟仿真”阶段后显示项目导出文件")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "执行步骤" }));
-    expect(screen.getAllByText("tsn-topology")).toHaveLength(1);
+
+    // U6: "执行步骤" 独立 tab 已下线，步骤数据通过 session.agentEvents 持久化
+    expect(screen.queryByRole("tab", { name: "执行步骤" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "执行日志" }));
     expect(await screen.findByText("用户提交需求")).toBeInTheDocument();

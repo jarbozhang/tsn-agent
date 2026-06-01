@@ -637,6 +637,40 @@ describe("session normalize (U1: metadata, legacyFakeOrigin, pending migration)"
     expect(restored.agentEvents.find((e) => e.id === "ev-success")?.status).toBe("success");
   });
 
+  it("cleans legacy [工具]/[工具结果]/[文件]/[Skill] trace lines from assistant messages on normalize (U6)", async () => {
+    const session: TsnSession = {
+      id: "trace-1",
+      title: "trace",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+      messages: [
+        {
+          id: "m1",
+          role: "user",
+          content: "我需要4个交换机",
+          createdAt: "2025-01-01T00:00:00.000Z",
+        },
+        {
+          id: "m2",
+          role: "assistant",
+          content: "[工具] Bash: node tsn-stage-runner --stage topology\n[工具结果] Bash 已返回\n拓扑已生成，请确认。",
+          createdAt: "2025-01-01T00:00:01.000Z",
+        },
+      ],
+      agentEvents: [],
+      workflow: createInitialWorkflowState(),
+      metadata: { runtimeVersion: 1 },
+    };
+    window.localStorage.setItem("tsn-agent.sessions.v0", JSON.stringify([session]));
+
+    const repository = new BrowserSessionRepository(window.localStorage);
+    const list = await repository.list();
+    const assistant = list[0].messages.find((m) => m.id === "m2");
+    expect(assistant?.content).not.toContain("[工具]");
+    expect(assistant?.content).not.toContain("[工具结果]");
+    expect(assistant?.content).toContain("拓扑已生成");
+  });
+
   it("preserves existing legacyOriginAck when reloading the same session", async () => {
     const session: TsnSession = {
       ...createEmptySession(),

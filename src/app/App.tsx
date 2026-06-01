@@ -97,7 +97,7 @@ const nodeTypes = {
   tsnNode: TsnTopologyNode,
 };
 
-type ConfigTabId = "flows" | "node-detail" | "link-detail" | "artifacts" | "steps";
+type ConfigTabId = "flows" | "node-detail" | "link-detail" | "artifacts";
 type WorkspaceToolPanel = "sessions" | "diagnostics" | "skills" | "settings";
 
 type SelectedTopologyItem =
@@ -111,7 +111,6 @@ const CONFIG_TABS: Array<{ id: ConfigTabId; label: string }> = [
   { id: "node-detail", label: "节点详情" },
   { id: "link-detail", label: "链路详情" },
   { id: "artifacts", label: "导出文件" },
-  { id: "steps", label: "执行步骤" },
 ];
 
 const ARTIFACT_GROUP_ORDER: ArtifactGroupId[] = ["workspace", "planner", "simulation-inet", "manifest", "legacy"];
@@ -1091,6 +1090,19 @@ export function App() {
           </div>
 
           <div className="messages" aria-live="polite" ref={messagesContainerRef}>
+            {currentSession.metadata?.legacyFakeOrigin && !currentSession.metadata?.legacyOriginAck && (
+              <LegacyOriginBanner
+                onAcknowledge={async () => {
+                  const updated: TsnSession = {
+                    ...currentSession,
+                    metadata: { ...currentSession.metadata, legacyOriginAck: true },
+                  };
+                  await repository.save(updated);
+                  setCurrentSession(updated);
+                  setSessions(await repository.list());
+                }}
+              />
+            )}
             {currentSession.messages.map((message) => (
               <article
                 className={[
@@ -1433,27 +1445,6 @@ export function App() {
               </section>
               )}
 
-              {activeConfigTab === "steps" && (
-                <section
-                  className="steps-panel"
-                  id="config-panel-steps"
-                  role="tabpanel"
-                  aria-label="执行步骤"
-                >
-                <div className="panel-heading">
-                  <h2>执行步骤</h2>
-                </div>
-                <ol className="event-list">
-                  {currentSession.agentEvents.map((event, index) => (
-                    <li className={event.kind} key={`${event.id}-${index}`}>
-                      <span>{redactProviderNamesForDisplay(event.skillName ?? event.title)}</span>
-                      <p>{redactProviderNamesForDisplay(event.content)}</p>
-                    </li>
-                  ))}
-                  {currentSession.agentEvents.length === 0 && <li className="empty-step">等待 Agent 输出</li>}
-                </ol>
-              </section>
-              )}
             </div>
           </div>
         </section>
@@ -2207,4 +2198,34 @@ function stampAgentEvents<T extends { id: string; createdAt?: string }>(events: 
     id: `${event.id}-${createdAt.replace(/[^0-9A-Za-z]/g, "")}-${index}`,
     createdAt,
   }));
+}
+
+function LegacyOriginBanner({ onAcknowledge }: { onAcknowledge: () => void | Promise<void> }) {
+  return (
+    <aside
+      className="legacy-origin-banner"
+      role="note"
+      aria-label="历史会话提示"
+      style={{
+        margin: "8px 0",
+        padding: "12px",
+        border: "1px solid #d6a200",
+        borderRadius: "6px",
+        background: "#fffbea",
+        color: "#5a4500",
+      }}
+    >
+      <strong>本会话由旧本地模式生成</strong>
+      <p style={{ margin: "6px 0" }}>建议新开会话验证，以使用真实智能助手运行时校验拓扑与流量规划。</p>
+      <button
+        type="button"
+        className="btn-secondary"
+        onClick={() => {
+          void onAcknowledge();
+        }}
+      >
+        我知道了
+      </button>
+    </aside>
+  );
 }
