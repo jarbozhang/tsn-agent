@@ -658,6 +658,114 @@ fn validate_context(context: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportRunAuditRequest {
+    session_id: String,
+    run_id: String,
+    destination: PathBuf,
+}
+
+#[tauri::command]
+pub fn export_run_audit(
+    app: tauri::AppHandle,
+    request: ExportRunAuditRequest,
+) -> Result<String, String> {
+    let session_id = sanitize_audit_id(&request.session_id, "sessionId")?;
+    let run_id = sanitize_audit_id(&request.run_id, "runId")?;
+    let audit_dir =
+        agent_audit_dir(&app).ok_or_else(|| "audit 目录未配置。".to_string())?;
+    std::fs::create_dir_all(&audit_dir)
+        .map_err(|error| format!("无法准备 audit 目录：{error}"))?;
+    let session_dir = audit_dir.join(&session_id);
+    if !session_dir.exists() {
+        return Err(format!("未找到 session {session_id} 的 audit 目录。"));
+    }
+    let canonical_root = audit_dir
+        .canonicalize()
+        .map_err(|error| format!("无法解析 audit 根目录：{error}"))?;
+    let canonical_session = session_dir
+        .canonicalize()
+        .map_err(|error| format!("无法解析 session 目录：{error}"))?;
+    if !canonical_session.starts_with(&canonical_root) {
+        return Err("路径越界，已拒绝导出 audit。".to_string());
+    }
+    let source_file = canonical_session.join(format!("{run_id}.json"));
+    if !source_file.exists() {
+        return Err(format!("未找到 run {run_id} 的 audit 文件。"));
+    }
+    let raw = std::fs::read_to_string(&source_file)
+        .map_err(|error| format!("读取 audit 失败：{error}"))?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|error| format!("audit JSON 解析失败：{error}"))?;
+    let sanitized = sanitize_audit_export(parsed);
+    let payload = serde_json::to_string_pretty(&sanitized)
+        .map_err(|error| format!("audit 序列化失败：{error}"))?;
+    if let Some(parent) = request.destination.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("无法准备目标目录：{error}"))?;
+    }
+    std::fs::write(&request.destination, payload)
+        .map_err(|error| format!("写入失败：{error}"))?;
+    Ok(request.destination.display().to_string())
+}
+
+fn sanitize_audit_id(value: &str, field: &str) -> Result<String, String> {
+    if value.is_empty() {
+        return Err(format!("{field} 不能为空。"));
+    }
+    if value.len() > 128 {
+        return Err(format!("{field} 长度超限。"));
+    }
+    if value.contains("..") || value.contains('/') || value.contains('\\') || value.contains('\0') {
+        return Err(format!("{field} 含非法字符。"));
+    }
+    if !value
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_' || character == '.')
+    {
+        return Err(format!("{field} 含非法字符。"));
+    }
+    Ok(value.to_string())
+}
+
+fn sanitize_audit_export(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => serde_json::Value::Object(
+            map.into_iter()
+                .filter_map(|(key, value)| {
+                    let lower = key.to_lowercase();
+                    if matches!(
+                        lower.as_str(),
+                        "prompt"
+                            | "conversationcontext"
+                            | "stdout"
+                            | "stderr"
+                            | "env"
+                            | "headers"
+                            | "cookie"
+                            | "authorization"
+                            | "full"
+                            | "topology"
+                            | "changeset"
+                            | "artifact"
+                            | "messages"
+                            | "content"
+                    ) {
+                        None
+                    } else {
+                        Some((key, sanitize_audit_export(value)))
+                    }
+                })
+                .collect(),
+        ),
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(sanitize_audit_export).collect())
+        }
+        other => other,
+    }
+}
+
 fn create_run_id() -> String {
     format!(
         "agent-run-{}",
@@ -752,6 +860,52 @@ mod tests {
         );
         assert!(tauri_config.contains("../.claude/skills/tsn-flow-planning/SKILL.md"));
         assert!(!tauri_config.contains("../src-node/dist/tsn-topology-server.mjs"));
+    }
+
+    #[test]
+    fn sanitize_audit_id_accepts_uuid_like_ids() {
+        assert!(sanitize_audit_id("agent-run-12345", "runId").is_ok());
+        assert!(sanitize_audit_id("session_abc.123", "sessionId").is_ok());
+        assert!(sanitize_audit_id("AbCd-XYZ-0", "runId").is_ok());
+    }
+
+    #[test]
+    fn sanitize_audit_id_rejects_path_traversal_attempts() {
+        assert!(sanitize_audit_id("../../etc/passwd", "sessionId").is_err());
+        assert!(sanitize_audit_id("foo/bar", "sessionId").is_err());
+        assert!(sanitize_audit_id("foo\\bar", "sessionId").is_err());
+        assert!(sanitize_audit_id("", "sessionId").is_err());
+        assert!(sanitize_audit_id("with space", "sessionId").is_err());
+        assert!(sanitize_audit_id("with\0null", "sessionId").is_err());
+        assert!(sanitize_audit_id(&"x".repeat(129), "sessionId").is_err());
+    }
+
+    #[test]
+    fn sanitize_audit_export_drops_raw_bearing_keys_recursively() {
+        let input = serde_json::json!({
+            "runId": "r1",
+            "prompt": "secret prompt",
+            "conversationContext": [{"role": "user", "content": "hi"}],
+            "summary": {
+                "status": "success",
+                "stdout": "should be dropped",
+                "headers": {"authorization": "Bearer sk-ant-x"},
+                "counts": {"nodes": 4}
+            },
+            "toolCalls": [
+                {"toolName": "Bash", "stdout": "drop me", "outputSummary": "ok"}
+            ]
+        });
+        let sanitized = sanitize_audit_export(input);
+        let as_str = serde_json::to_string(&sanitized).unwrap();
+        assert!(!as_str.contains("secret prompt"));
+        assert!(!as_str.contains("conversationContext"));
+        assert!(!as_str.contains("stdout"));
+        assert!(!as_str.contains("authorization"));
+        assert!(!as_str.contains("Bearer"));
+        assert!(as_str.contains("counts"));
+        assert!(as_str.contains("outputSummary"));
+        assert!(as_str.contains("toolName"));
     }
 
     #[test]

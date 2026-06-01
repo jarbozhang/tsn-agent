@@ -29,6 +29,7 @@ pub fn run() {
             diagnostic_store::clear_session_diagnostic_logs,
             diagnostic_store::list_diagnostic_logs,
             commands::run_claude_agent,
+            commands::export_run_audit,
             planner_client::planner_get_plan_result,
             planner_client::planner_query_plan_status,
             planner_client::planner_start_plan,

@@ -268,6 +268,34 @@ describe("runTsnAgent — sanitize claude assistant text", () => {
   });
 });
 
+describe("runTsnAgent — stall-timer watchdog", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    listenMock.mockReset();
+    listenMock.mockResolvedValue(() => undefined);
+    mockTauriRuntime();
+  });
+
+  it("triggers stall_timeout when worker stops responding within stall timer window", async () => {
+    invokeMock.mockImplementation(() => new Promise(() => undefined));
+    const result = await runTsnAgent({ userIntent: PROMPT, stallTimeoutMs: 30 });
+    expect(isAgentFailurePreservedState(asUnion(result))).toBe(true);
+    expect(result.failureReason).toBe("stall_timeout");
+    expect(result.events[0]?.kind).toBe("agent_run_aborted");
+    expect(result.events[0]?.status).toBe("aborted");
+  });
+
+  it("does not trigger stall_timeout when invoke completes before stall timer fires", async () => {
+    invokeMock.mockResolvedValue({
+      assistantText: "ok",
+      stageResults: [topologyStageResult(PROMPT)],
+      agentSteps: [],
+    });
+    const result = await runTsnAgent({ userIntent: PROMPT, stallTimeoutMs: 5_000 });
+    expect(isAgentSuccess(asUnion(result))).toBe(true);
+  });
+});
+
 describe("runTsnAgent — invoke args", () => {
   beforeEach(() => {
     invokeMock.mockReset();

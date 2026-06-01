@@ -8,9 +8,10 @@ import {
   type AgentFailureReason,
   type AgentFailurePreservedStateResult,
   type AgentRuntimeUnavailableResult,
+  type AgentStepDetail,
   type AgentSuccessResult,
 } from "./agent-types";
-import { redactVendorNames } from "./agent-sanitizer";
+import { AGENT_STALL_TIMEOUT_MS_DEFAULT, redactVendorNames } from "./agent-sanitizer";
 import type { ChatMessage, TsnSession } from "../sessions/session-repository";
 import { getScenarioConfig } from "../domain/scenario-config";
 import type { CanonicalTsnProjectV0, TopologyIntent } from "../domain/canonical";
@@ -52,8 +53,14 @@ export interface TsnAgentRequest {
   session?: TsnSession;
   runId?: string;
   onChunk?: (chunk: string) => void;
+  onAgentStep?: (step: AgentStepLike) => void;
   diagnostics?: DiagnosticLogRepository;
+  /** Override default stall-timer (90s) — primarily for tests. */
+  stallTimeoutMs?: number;
 }
+
+/** Loose shape of an agent_step payload emitted by worker (kept narrow to avoid runtime drift). */
+export type AgentStepLike = Partial<AgentStepDetail> & { kind?: string };
 
 interface ClaudeAgentResponse {
   assistantText: string;
@@ -112,16 +119,25 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
     return buildRuntimeUnavailableResult(baseWorkflow);
   }
 
-  const unlisten = await listenToClaudeChunks(runId, (chunk) => {
-    streamStats.chunkCount += 1;
-    streamStats.totalChars += chunk.length;
-    streamStats.firstChunkAtMs ??= Date.now() - startedAt;
-    streamStats.lastPreview = chunk.slice(-120);
-    request.onChunk?.(chunk);
+  const stallTimeoutMs = request.stallTimeoutMs ?? AGENT_STALL_TIMEOUT_MS_DEFAULT;
+  const watchdog = createStallWatchdog(stallTimeoutMs);
+  const unlisten = await listenToRunEvents(runId, {
+    onChunk: (chunk) => {
+      streamStats.chunkCount += 1;
+      streamStats.totalChars += chunk.length;
+      streamStats.firstChunkAtMs ??= Date.now() - startedAt;
+      streamStats.lastPreview = chunk.slice(-120);
+      watchdog.reset();
+      request.onChunk?.(chunk);
+    },
+    onAgentStep: (step) => {
+      watchdog.reset();
+      request.onAgentStep?.(step as AgentStepLike);
+    },
   });
 
   try {
-    const claude = await invoke<ClaudeAgentResponse>("run_claude_agent", {
+    const invokePromise = invoke<ClaudeAgentResponse>("run_claude_agent", {
       request: {
         prompt: userIntent,
         runId,
@@ -133,6 +149,24 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
         stageRunnerInput: buildStageRunnerInput(userIntent, baseWorkflow, normalizedSession?.project),
       },
     });
+    watchdog.start();
+    const raceOutcome = await Promise.race([
+      invokePromise.then((value) => ({ kind: "completed" as const, value })),
+      watchdog.expired.then(() => ({ kind: "stalled" as const })),
+    ]);
+    if (raceOutcome.kind === "stalled") {
+      invokePromise.catch(() => undefined);
+      logAgent(request.diagnostics, {
+        sessionId,
+        runId,
+        level: "warn",
+        message: "请求长时间未推进，已中止",
+        durationMs: Date.now() - startedAt,
+        details: { streamStats, stallTimeoutMs },
+      });
+      return buildStallTimeoutResult(normalizedSession, baseWorkflow, runId);
+    }
+    const claude = raceOutcome.value;
     const stageResultApplication = applyStageResults({
       stageResults: claude.stageResults ?? [],
       workflow: baseWorkflow,
@@ -198,8 +232,86 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
 
     return buildAgentErrorResult(error, normalizedSession, baseWorkflow);
   } finally {
+    watchdog.cancel();
     unlisten?.();
   }
+}
+
+interface StallWatchdog {
+  start(): void;
+  reset(): void;
+  cancel(): void;
+  expired: Promise<void>;
+}
+
+function createStallWatchdog(timeoutMs: number): StallWatchdog {
+  let resolveExpired: () => void = () => undefined;
+  const expired = new Promise<void>((resolve) => {
+    resolveExpired = resolve;
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancelled = false;
+
+  const arm = () => {
+    if (cancelled) {
+      return;
+    }
+    timer = setTimeout(() => {
+      if (!cancelled) {
+        resolveExpired();
+      }
+    }, timeoutMs);
+  };
+  const clear = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+  };
+
+  return {
+    start: () => {
+      clear();
+      arm();
+    },
+    reset: () => {
+      clear();
+      arm();
+    },
+    cancel: () => {
+      cancelled = true;
+      clear();
+    },
+    expired,
+  };
+}
+
+function buildStallTimeoutResult(
+  previousSession: TsnSession | undefined,
+  fallbackWorkflow: WorkflowState,
+  runId: string,
+): TsnAgentResult {
+  const message = redactVendorNames("运行长时间未推进，已中止；可以重试或简化请求。");
+  const abortedStep: AgentEvent = {
+    id: `event-agent-run-aborted-${runId}`,
+    kind: "agent_run_aborted",
+    title: "智能助手中止",
+    content: message,
+    status: "aborted",
+    runId,
+  };
+
+  return {
+    kind: "failure-preserved",
+    shouldApplyProject: false,
+    events: [abortedStep],
+    workflow: previousSession?.workflow ?? fallbackWorkflow,
+    assistantText: message,
+    project: previousSession?.project,
+    bundle: previousSession?.bundle,
+    failureReason: "stall_timeout",
+    mode: "claude",
+  };
 }
 
 function buildRuntimeUnavailableResult(workflow: WorkflowState): AgentRuntimeUnavailableResult & { mode?: "claude" } {
@@ -299,18 +411,32 @@ function normalizeError(error: unknown): string {
   return "未知错误";
 }
 
-async function listenToClaudeChunks(runId: string, onChunk?: (chunk: string) => void): Promise<UnlistenFn | undefined> {
-  if (!onChunk) {
+interface RunEventListeners {
+  onChunk?: (chunk: string) => void;
+  onAgentStep?: (step: unknown) => void;
+}
+
+export async function listenToRunEvents(
+  runId: string,
+  listeners: RunEventListeners,
+): Promise<UnlistenFn | undefined> {
+  if (!listeners.onChunk && !listeners.onAgentStep) {
     return undefined;
   }
 
   try {
     return await listen<ClaudeAgentEvent>("claude-agent-event", (event) => {
-      if (event.payload.runId !== runId || event.payload.kind !== "chunk" || !event.payload.text) {
+      const payload = event.payload;
+      if (payload.runId !== runId) {
         return;
       }
-
-      onChunk(event.payload.text);
+      if (payload.kind === "chunk" && payload.text) {
+        listeners.onChunk?.(payload.text);
+        return;
+      }
+      if (payload.kind === "agent_step" && payload.step !== undefined) {
+        listeners.onAgentStep?.(payload.step);
+      }
     });
   } catch {
     return undefined;
