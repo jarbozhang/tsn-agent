@@ -487,18 +487,19 @@ export function App() {
         },
       });
       const completedAt = new Date().toISOString();
-      const shouldApplyProject = result.shouldApplyProject !== false;
+      const shouldApplyProject = result.shouldApplyProject !== false && Boolean(result.project);
+      const appliedProject = shouldApplyProject ? result.project! : undefined;
       const latestSession = (await repository.list()).find((session) => session.id === pendingSession.id) ?? pendingSession;
       const baseMessages = latestSession.messages.some((message) => message.id === assistantMessage.id)
         ? latestSession.messages
         : pendingSession.messages;
       const previousPlannerRun = normalizePlannerRunState(latestSession.plannerRun);
-      const nextPlannerRun: PlannerRunState = shouldApplyProject
-        ? plannerRunForAgentResult(previousPlannerRun, result.project)
+      const nextPlannerRun: PlannerRunState = appliedProject
+        ? plannerRunForAgentResult(previousPlannerRun, appliedProject)
         : previousPlannerRun;
       const nextSession: TsnSession = {
         ...latestSession,
-        title: shouldApplyProject ? result.project.name : pendingSession.title,
+        title: appliedProject ? appliedProject.name : pendingSession.title,
         updatedAt: completedAt,
         messages: baseMessages.map((message) =>
           message.id === assistantMessage.id
@@ -508,9 +509,9 @@ export function App() {
         claudeSessionId: result.claudeSessionId ?? latestSession.claudeSessionId,
         agentEvents: [...latestSession.agentEvents, ...stampAgentEvents(result.events, completedAt)],
         workflow: shouldApplyProject ? result.workflow : pendingSession.workflow,
-        project: shouldApplyProject ? result.project : pendingSession.project,
-        bundle: shouldApplyProject
-          ? bundleForAgentResult(result.project, result.bundle, nextPlannerRun)
+        project: appliedProject ?? pendingSession.project,
+        bundle: appliedProject
+          ? bundleForAgentResult(appliedProject, result.bundle, nextPlannerRun)
           : pendingSession.bundle,
         plannerRun: nextPlannerRun,
       };
