@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 import type { DiagnosticLogEntry } from "../../diagnostics/diagnostic-log";
 import type { DiagnosticLogRepository } from "../../diagnostics/diagnostic-log-repository";
+import { exportRunAudit } from "../../diagnostics/audit-exporter";
 import { redactProviderNamesForDisplay, redactProviderNamesInValue } from "../display-redaction";
 
 interface DiagnosticsLogViewProps {
@@ -126,8 +127,34 @@ export function DiagnosticsLogView({ sessionId, repository }: DiagnosticsLogView
 }
 
 function DiagnosticLogDetail({ log }: { log?: DiagnosticLogEntry }) {
+  const [exportStatus, setExportStatus] = useState<"idle" | "exporting" | "exported" | "cancelled" | "error">("idle");
+  const [exportMessage, setExportMessage] = useState<string>();
+
   if (!log) {
     return <div className="empty-panel mono">请选择一条日志查看详情</div>;
+  }
+
+  const canExportAudit = log.category === "agent" && Boolean(log.runId) && Boolean(log.sessionId);
+
+  async function handleExport() {
+    if (!log?.runId || !log?.sessionId) {
+      return;
+    }
+    setExportStatus("exporting");
+    setExportMessage(undefined);
+    try {
+      const result = await exportRunAudit({ sessionId: log.sessionId, runId: log.runId });
+      if (result.kind === "cancelled") {
+        setExportStatus("cancelled");
+        setExportMessage("已取消");
+        return;
+      }
+      setExportStatus("exported");
+      setExportMessage(`已导出到 ${result.destination ?? "目标路径"}`);
+    } catch (error) {
+      setExportStatus("error");
+      setExportMessage(redactProviderNamesForDisplay(normalizeError(error)));
+    }
   }
 
   return (
@@ -137,7 +164,22 @@ function DiagnosticLogDetail({ log }: { log?: DiagnosticLogEntry }) {
           <p className="drawer-kicker">Log Detail</p>
           <h3>{redactProviderNamesForDisplay(log.message)}</h3>
         </div>
-        <span className={`diag-level ${log.level}`}>{log.level.toUpperCase()}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {canExportAudit && (
+            <button
+              type="button"
+              className="btn"
+              onClick={handleExport}
+              disabled={exportStatus === "exporting"}
+              aria-label="导出运行 audit"
+              title="导出运行 audit（脱敏后）"
+            >
+              <Download size={14} aria-hidden="true" />
+              {exportStatus === "exporting" ? "导出中…" : "导出 audit"}
+            </button>
+          )}
+          <span className={`diag-level ${log.level}`}>{log.level.toUpperCase()}</span>
+        </div>
       </div>
       <div className="detail-grid">
         <DetailField label="类别" value={categoryLabel(log.category)} />
@@ -145,6 +187,20 @@ function DiagnosticLogDetail({ log }: { log?: DiagnosticLogEntry }) {
         <DetailField label="Run" value={log.runId ? redactProviderNamesForDisplay(log.runId) : "无"} />
         <DetailField label="耗时" value={typeof log.durationMs === "number" ? `${log.durationMs}ms` : "无"} />
       </div>
+      {exportMessage && (
+        <p
+          role="status"
+          style={{
+            margin: "8px 0",
+            padding: "6px 10px",
+            background: exportStatus === "error" ? "#fff5f5" : "#f0f9ff",
+            color: exportStatus === "error" ? "#a00" : "#0050a0",
+            borderRadius: 4,
+          }}
+        >
+          {exportMessage}
+        </p>
+      )}
       {log.details ? (
         <pre className="diagnostics-detail-json">
           {JSON.stringify(redactProviderNamesInValue(log.details), null, 2)}
