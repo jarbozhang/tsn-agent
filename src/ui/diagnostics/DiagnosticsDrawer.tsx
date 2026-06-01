@@ -164,7 +164,7 @@ function DiagnosticLogDetail({ log }: { log?: DiagnosticLogEntry }) {
           <p className="drawer-kicker">Log Detail</p>
           <h3>{redactProviderNamesForDisplay(log.message)}</h3>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="diagnostics-detail-actions">
           {canExportAudit && (
             <button
               type="button"
@@ -190,13 +190,7 @@ function DiagnosticLogDetail({ log }: { log?: DiagnosticLogEntry }) {
       {exportMessage && (
         <p
           role="status"
-          style={{
-            margin: "8px 0",
-            padding: "6px 10px",
-            background: exportStatus === "error" ? "#fff5f5" : "#f0f9ff",
-            color: exportStatus === "error" ? "#a00" : "#0050a0",
-            borderRadius: 4,
-          }}
+          className={`export-audit-status${exportStatus === "error" ? " export-audit-status--error" : ""}`}
         >
           {exportMessage}
         </p>

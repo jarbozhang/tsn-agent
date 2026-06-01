@@ -1134,7 +1134,6 @@ export function App() {
                       href={message.cta.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      style={{ display: "inline-block", marginTop: 8 }}
                     >
                       {message.cta.label}
                     </a>
@@ -1551,9 +1550,7 @@ function WorkspaceToolDrawer({
           <p className="drawer-kicker">{workspacePanelKicker(activePanel)}</p>
           <h2>{workspacePanelLabel(activePanel)}</h2>
           {workspacePanelSubtitle(activePanel) && (
-            <p className="drawer-subtitle" style={{ marginTop: 4, color: "#666", fontSize: "12px" }}>
-              {workspacePanelSubtitle(activePanel)}
-            </p>
+            <p className="drawer-subtitle">{workspacePanelSubtitle(activePanel)}</p>
           )}
         </div>
         <button className="icon-button" type="button" aria-label={`关闭${workspacePanelLabel(activePanel)}`} onClick={onClose}>
@@ -2268,19 +2265,7 @@ function AgentStepSummaryGroup({
     return null;
   }
   return (
-    <ol
-      className="agent-step-summary-group"
-      aria-label="本轮步骤摘要"
-      role="list"
-      style={{
-        listStyle: "none",
-        padding: "8px 0",
-        margin: "4px 0",
-        display: "flex",
-        flexDirection: "column",
-        gap: "6px",
-      }}
-    >
+    <ol className="agent-step-summary-group" aria-label="本轮步骤摘要" role="list">
       {runEvents.map((event, idx) => {
         const traceId = event.traceId ?? event.detailRef ?? event.id;
         const isExpanded = expandedTraceId === traceId;
@@ -2295,44 +2280,17 @@ function AgentStepSummaryGroup({
               aria-expanded={isExpanded}
               aria-controls={`agent-step-detail-${traceId}`}
               onClick={() => onToggleExpanded(traceId)}
-              style={{
-                width: "100%",
-                textAlign: "left",
-                padding: "8px 12px",
-                border: "1px solid #ccc",
-                borderRadius: "6px",
-                background: stepCardBackground(stepState),
-                color: stepCardForeground(stepState),
-                cursor: "pointer",
-                minHeight: 36,
-              }}
             >
-              <strong style={{ marginRight: 8 }}>{stepNumber}.</strong>
-              <span style={{ marginRight: 8, fontSize: 12, opacity: 0.7 }}>
-                {stepCardStateLabel(stepState)}
-              </span>
+              <strong className="agent-step-card__index">{stepNumber}.</strong>
+              <span className="agent-step-card__state">{stepCardStateLabel(stepState)}</span>
               <span>{redactProviderNamesForDisplay(event.title)}</span>
             </button>
             {isExpanded && (
-              <div
-                id={`agent-step-detail-${traceId}`}
-                role="region"
-                className="agent-step-detail"
-                style={{
-                  padding: "8px 12px",
-                  margin: "4px 0 0 12px",
-                  border: "1px dashed #bbb",
-                  borderRadius: "4px",
-                  fontSize: 12,
-                  background: "#fafafa",
-                  maxHeight: 240,
-                  overflowY: "auto",
-                }}
-              >
+              <div id={`agent-step-detail-${traceId}`} role="region" className="agent-step-detail">
                 {detail ? (
                   <AgentStepDetailView detail={detail} />
                 ) : (
-                  <p style={{ margin: 0, color: "#666" }}>该步骤没有保存更多详情</p>
+                  <p className="agent-step-detail__empty">该步骤没有保存更多详情</p>
                 )}
               </div>
             )}
@@ -2380,90 +2338,54 @@ function stepCardStateLabel(state: StepCardState): string {
   return labels[state];
 }
 
-function stepCardBackground(state: StepCardState): string {
-  const colors: Record<StepCardState, string> = {
-    pending: "#f5f5f5",
-    streaming: "#f5f5f5",
-    success: "#fff",
-    error: "#fff5f5",
-    "no-detail": "#fafafa",
-    orphan: "#fff8e1",
-    aborted: "#f5f5f5",
-  };
-  return colors[state];
-}
-
-function stepCardForeground(state: StepCardState): string {
-  const colors: Record<StepCardState, string> = {
-    pending: "#666",
-    streaming: "#666",
-    success: "#333",
-    error: "#a00",
-    "no-detail": "#666",
-    orphan: "#a06400",
-    aborted: "#666",
-  };
-  return colors[state];
-}
-
 function AgentStepDetailView({ detail }: { detail: AgentStepDetail }) {
   return (
-    <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px" }}>
+    <dl className="agent-step-detail__grid">
       {detail.toolName && (
         <>
-          <dt style={{ color: "#666" }}>工具</dt>
-          <dd style={{ margin: 0 }}>{redactProviderNamesForDisplay(detail.toolName)}</dd>
+          <dt className="agent-step-detail__label">工具</dt>
+          <dd className="agent-step-detail__value">{redactProviderNamesForDisplay(detail.toolName)}</dd>
         </>
       )}
       {detail.inputSummary && (
         <>
-          <dt style={{ color: "#666" }}>输入</dt>
-          <dd style={{ margin: 0 }}>{redactProviderNamesForDisplay(detail.inputSummary)}</dd>
+          <dt className="agent-step-detail__label">输入</dt>
+          <dd className="agent-step-detail__value">{redactProviderNamesForDisplay(detail.inputSummary)}</dd>
         </>
       )}
       {detail.outputSummary && (
         <>
-          <dt style={{ color: "#666" }}>输出</dt>
-          <dd style={{ margin: 0 }}>{redactProviderNamesForDisplay(detail.outputSummary)}</dd>
+          <dt className="agent-step-detail__label">输出</dt>
+          <dd className="agent-step-detail__value">{redactProviderNamesForDisplay(detail.outputSummary)}</dd>
         </>
       )}
       {detail.errorSummary && (
         <>
-          <dt style={{ color: "#a00" }}>错误</dt>
-          <dd style={{ margin: 0, color: "#a00" }}>{redactProviderNamesForDisplay(detail.errorSummary)}</dd>
+          <dt className="agent-step-detail__label agent-step-detail__label--error">错误</dt>
+          <dd className="agent-step-detail__value agent-step-detail__value--error">
+            {redactProviderNamesForDisplay(detail.errorSummary)}
+          </dd>
         </>
       )}
       {typeof detail.durationMs === "number" && (
         <>
-          <dt style={{ color: "#666" }}>耗时</dt>
-          <dd style={{ margin: 0 }}>{detail.durationMs}ms</dd>
+          <dt className="agent-step-detail__label">耗时</dt>
+          <dd className="agent-step-detail__value">{detail.durationMs}ms</dd>
         </>
       )}
-      <dt style={{ color: "#666" }}>traceId</dt>
-      <dd style={{ margin: 0, fontFamily: "monospace" }}>{detail.traceId}</dd>
-      <dt style={{ color: "#666" }}>runId</dt>
-      <dd style={{ margin: 0, fontFamily: "monospace" }}>{detail.runId}</dd>
+      <dt className="agent-step-detail__label">traceId</dt>
+      <dd className="agent-step-detail__value agent-step-detail__value--mono">{detail.traceId}</dd>
+      <dt className="agent-step-detail__label">runId</dt>
+      <dd className="agent-step-detail__value agent-step-detail__value--mono">{detail.runId}</dd>
     </dl>
   );
 }
 
 function LegacyOriginBanner({ onAcknowledge }: { onAcknowledge: () => void | Promise<void> }) {
   return (
-    <aside
-      className="legacy-origin-banner"
-      role="note"
-      aria-label="历史会话提示"
-      style={{
-        margin: "8px 0",
-        padding: "12px",
-        border: "1px solid #d6a200",
-        borderRadius: "6px",
-        background: "#fffbea",
-        color: "#5a4500",
-      }}
-    >
-      <strong>本会话由旧本地模式生成</strong>
-      <p style={{ margin: "6px 0" }}>建议新开会话验证，以使用真实智能助手运行时校验拓扑与流量规划。</p>
+    <aside className="legacy-origin-banner" role="note" aria-label="历史会话提示">
+      <strong className="legacy-origin-banner__title">本会话由旧本地模式生成</strong>
+      <p className="legacy-origin-banner__body">建议新开会话验证，以使用真实智能助手运行时校验拓扑与流量规划。</p>
       <button
         type="button"
         className="btn-secondary"
