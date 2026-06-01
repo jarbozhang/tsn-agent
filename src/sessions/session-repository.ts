@@ -11,11 +11,18 @@ const STORAGE_KEY = "tsn-agent.sessions.v0";
 const CURRENT_SESSION_KEY = "tsn-agent.current-session.v0";
 const MAX_RECENT_SESSIONS = 12;
 
+export interface ChatMessageCta {
+  label: string;
+  url: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  runId?: string;
+  cta?: ChatMessageCta;
 }
 
 export interface TsnSession {

@@ -17,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { runTsnAgent } from "../agent/agent-adapter";
-import type { AgentStepDetail } from "../agent/agent-types";
+import type { AgentEvent, AgentStepDetail } from "../agent/agent-types";
 import {
   artifactBundleSummary,
   logDiagnostic,
@@ -129,6 +129,7 @@ export function App() {
   const [plannerBaseUrl, setPlannerBaseUrl] = useState(resolvePlannerBaseUrl());
   const [isPlannerActionRunning, setIsPlannerActionRunning] = useState(false);
   const [pendingAssistantMessageId, setPendingAssistantMessageId] = useState<string | undefined>();
+  const [expandedStepTraceId, setExpandedStepTraceId] = useState<string | undefined>();
   const [exportResult, setExportResult] = useState<ProjectExportResult | undefined>();
   const [exportError, setExportError] = useState<string | undefined>();
   const [exportDirectory, setExportDirectory] = useState("");
@@ -427,17 +428,22 @@ export function App() {
     }
 
     const now = new Date().toISOString();
+    const pendingRunId = typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? `agent-run-${crypto.randomUUID()}`
+      : `agent-run-${Math.random().toString(36).slice(2)}`;
     const userMessage: ChatMessage = {
       id: createId("message"),
       role: "user",
       createdAt: now,
       content: trimmedInput,
+      runId: pendingRunId,
     };
     const assistantMessage: ChatMessage = {
       id: createId("message"),
       role: "assistant",
       createdAt: now,
       content: ASSISTANT_CONNECTING_MESSAGE,
+      runId: pendingRunId,
     };
     const contextSession = currentSession;
     const pendingSession: TsnSession = {
@@ -474,9 +480,7 @@ export function App() {
       });
       setSessions(await repository.list());
 
-      const runId = typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? `agent-run-${crypto.randomUUID()}`
-        : `agent-run-${Math.random().toString(36).slice(2)}`;
+      const runId = pendingRunId;
       const inFlightStepBuffer: Record<string, AgentStepDetail> = {};
       const result = await runTsnAgent({
         userIntent: trimmedInput,
@@ -522,7 +526,14 @@ export function App() {
         updatedAt: completedAt,
         messages: baseMessages.map((message) =>
           message.id === assistantMessage.id
-            ? { ...message, content: redactProviderNamesForDisplay(result.assistantText) }
+            ? {
+                ...message,
+                content: redactProviderNamesForDisplay(result.assistantText),
+                cta:
+                  result.kind === "runtime-unavailable" && result.ctaUrl
+                    ? { label: "下载桌面版", url: result.ctaUrl }
+                    : undefined,
+              }
             : message,
         ),
         claudeSessionId: result.claudeSessionId ?? latestSession.claudeSessionId,
@@ -1104,20 +1115,43 @@ export function App() {
               />
             )}
             {currentSession.messages.map((message) => (
-              <article
-                className={[
-                  message.role === "user" ? "msg-user" : "msg-agent",
-                  message.id === pendingAssistantMessageId ? "pending" : "",
-                ].filter(Boolean).join(" ")}
-                key={message.id}
-              >
-                <span className="message-role">{message.role === "user" ? "USER" : "AGENT"}</span>
-                {message.id === pendingAssistantMessageId ? (
-                  <AgentWaitingIndicator />
-                ) : (
-                  <p>{message.role === "assistant" ? redactProviderNamesForDisplay(message.content) : message.content}</p>
+              <Fragment key={message.id}>
+                <article
+                  className={[
+                    message.role === "user" ? "msg-user" : "msg-agent",
+                    message.id === pendingAssistantMessageId ? "pending" : "",
+                  ].filter(Boolean).join(" ")}
+                >
+                  <span className="message-role">{message.role === "user" ? "USER" : "AGENT"}</span>
+                  {message.id === pendingAssistantMessageId ? (
+                    <AgentWaitingIndicator />
+                  ) : (
+                    <p>{message.role === "assistant" ? redactProviderNamesForDisplay(message.content) : message.content}</p>
+                  )}
+                  {message.cta && (
+                    <a
+                      className="btn-primary message-cta"
+                      href={message.cta.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ display: "inline-block", marginTop: 8 }}
+                    >
+                      {message.cta.label}
+                    </a>
+                  )}
+                </article>
+                {message.role === "user" && message.runId && (
+                  <AgentStepSummaryGroup
+                    runId={message.runId}
+                    events={currentSession.agentEvents}
+                    stepDetails={currentSession.agentStepDetails}
+                    expandedTraceId={expandedStepTraceId}
+                    onToggleExpanded={(traceId) =>
+                      setExpandedStepTraceId((current) => (current === traceId ? undefined : traceId))
+                    }
+                  />
                 )}
-              </article>
+              </Fragment>
             ))}
           </div>
 
@@ -2214,6 +2248,203 @@ function stampAgentEvents<T extends { id: string; createdAt?: string }>(events: 
     id: `${event.id}-${createdAt.replace(/[^0-9A-Za-z]/g, "")}-${index}`,
     createdAt,
   }));
+}
+
+function AgentStepSummaryGroup({
+  runId,
+  events,
+  stepDetails,
+  expandedTraceId,
+  onToggleExpanded,
+}: {
+  runId: string;
+  events: AgentEvent[];
+  stepDetails?: Record<string, AgentStepDetail>;
+  expandedTraceId?: string;
+  onToggleExpanded: (traceId: string) => void;
+}) {
+  const runEvents = events.filter((event) => event.runId === runId);
+  if (runEvents.length === 0) {
+    return null;
+  }
+  return (
+    <ol
+      className="agent-step-summary-group"
+      aria-label="本轮步骤摘要"
+      role="list"
+      style={{
+        listStyle: "none",
+        padding: "8px 0",
+        margin: "4px 0",
+        display: "flex",
+        flexDirection: "column",
+        gap: "6px",
+      }}
+    >
+      {runEvents.map((event, idx) => {
+        const traceId = event.traceId ?? event.detailRef ?? event.id;
+        const isExpanded = expandedTraceId === traceId;
+        const detail = stepDetails?.[traceId];
+        const stepNumber = idx + 1;
+        const stepState = deriveStepCardState(event, detail);
+        return (
+          <li key={`${runId}-${traceId}`}>
+            <button
+              type="button"
+              className={`agent-step-card agent-step-card--${stepState}`}
+              aria-expanded={isExpanded}
+              aria-controls={`agent-step-detail-${traceId}`}
+              onClick={() => onToggleExpanded(traceId)}
+              style={{
+                width: "100%",
+                textAlign: "left",
+                padding: "8px 12px",
+                border: "1px solid #ccc",
+                borderRadius: "6px",
+                background: stepCardBackground(stepState),
+                color: stepCardForeground(stepState),
+                cursor: "pointer",
+                minHeight: 36,
+              }}
+            >
+              <strong style={{ marginRight: 8 }}>{stepNumber}.</strong>
+              <span style={{ marginRight: 8, fontSize: 12, opacity: 0.7 }}>
+                {stepCardStateLabel(stepState)}
+              </span>
+              <span>{redactProviderNamesForDisplay(event.title)}</span>
+            </button>
+            {isExpanded && (
+              <div
+                id={`agent-step-detail-${traceId}`}
+                role="region"
+                className="agent-step-detail"
+                style={{
+                  padding: "8px 12px",
+                  margin: "4px 0 0 12px",
+                  border: "1px dashed #bbb",
+                  borderRadius: "4px",
+                  fontSize: 12,
+                  background: "#fafafa",
+                  maxHeight: 240,
+                  overflowY: "auto",
+                }}
+              >
+                {detail ? (
+                  <AgentStepDetailView detail={detail} />
+                ) : (
+                  <p style={{ margin: 0, color: "#666" }}>该步骤没有保存更多详情</p>
+                )}
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+type StepCardState = "pending" | "streaming" | "success" | "error" | "no-detail" | "orphan" | "aborted";
+
+function deriveStepCardState(event: AgentEvent, detail?: AgentStepDetail): StepCardState {
+  if (event.kind === "agent_run_aborted" || event.status === "aborted") {
+    return "aborted";
+  }
+  if (event.status === "error") {
+    return "error";
+  }
+  if (event.status === "pending") {
+    return "pending";
+  }
+  if (event.status === "streaming") {
+    return "streaming";
+  }
+  if (event.status === "success") {
+    return detail ? "success" : "no-detail";
+  }
+  if (event.toolUseId && !detail) {
+    return "orphan";
+  }
+  return detail ? "success" : "no-detail";
+}
+
+function stepCardStateLabel(state: StepCardState): string {
+  const labels: Record<StepCardState, string> = {
+    pending: "进行中",
+    streaming: "流式",
+    success: "成功",
+    error: "失败",
+    "no-detail": "已记录",
+    orphan: "未配对",
+    aborted: "已中止",
+  };
+  return labels[state];
+}
+
+function stepCardBackground(state: StepCardState): string {
+  const colors: Record<StepCardState, string> = {
+    pending: "#f5f5f5",
+    streaming: "#f5f5f5",
+    success: "#fff",
+    error: "#fff5f5",
+    "no-detail": "#fafafa",
+    orphan: "#fff8e1",
+    aborted: "#f5f5f5",
+  };
+  return colors[state];
+}
+
+function stepCardForeground(state: StepCardState): string {
+  const colors: Record<StepCardState, string> = {
+    pending: "#666",
+    streaming: "#666",
+    success: "#333",
+    error: "#a00",
+    "no-detail": "#666",
+    orphan: "#a06400",
+    aborted: "#666",
+  };
+  return colors[state];
+}
+
+function AgentStepDetailView({ detail }: { detail: AgentStepDetail }) {
+  return (
+    <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px" }}>
+      {detail.toolName && (
+        <>
+          <dt style={{ color: "#666" }}>工具</dt>
+          <dd style={{ margin: 0 }}>{redactProviderNamesForDisplay(detail.toolName)}</dd>
+        </>
+      )}
+      {detail.inputSummary && (
+        <>
+          <dt style={{ color: "#666" }}>输入</dt>
+          <dd style={{ margin: 0 }}>{redactProviderNamesForDisplay(detail.inputSummary)}</dd>
+        </>
+      )}
+      {detail.outputSummary && (
+        <>
+          <dt style={{ color: "#666" }}>输出</dt>
+          <dd style={{ margin: 0 }}>{redactProviderNamesForDisplay(detail.outputSummary)}</dd>
+        </>
+      )}
+      {detail.errorSummary && (
+        <>
+          <dt style={{ color: "#a00" }}>错误</dt>
+          <dd style={{ margin: 0, color: "#a00" }}>{redactProviderNamesForDisplay(detail.errorSummary)}</dd>
+        </>
+      )}
+      {typeof detail.durationMs === "number" && (
+        <>
+          <dt style={{ color: "#666" }}>耗时</dt>
+          <dd style={{ margin: 0 }}>{detail.durationMs}ms</dd>
+        </>
+      )}
+      <dt style={{ color: "#666" }}>traceId</dt>
+      <dd style={{ margin: 0, fontFamily: "monospace" }}>{detail.traceId}</dd>
+      <dt style={{ color: "#666" }}>runId</dt>
+      <dd style={{ margin: 0, fontFamily: "monospace" }}>{detail.runId}</dd>
+    </dl>
+  );
 }
 
 function LegacyOriginBanner({ onAcknowledge }: { onAcknowledge: () => void | Promise<void> }) {
