@@ -1,3 +1,13 @@
+/**
+ * @deprecated Test fixture runtime only — DO NOT import from production code.
+ *
+ * The production agent runtime path no longer uses this module after U3a
+ * (`src/agent/agent-adapter.ts` is fail-closed via `TsnAgentResult` three-state
+ * union). This file is preserved to drive `src/app/App.test.tsx` multi-stage
+ * natural-language progression scenarios; replacing those tests with explicit
+ * fixture builders is tracked as a follow-up (U4 part 2: "下沉自然语言推进
+ * 测试到 prompt/skill 层或 real-agent E2E").
+ */
 import type { CanonicalTsnProjectV0, TopologyIntent } from "../domain/canonical";
 import { getScenarioConfig } from "../domain/scenario-config";
 import { getTopologyRuntimeSummary } from "../topology/topology-service";

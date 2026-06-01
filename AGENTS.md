@@ -31,8 +31,10 @@
 
 - `src/app/App.tsx`：主界面、聊天输入、阶段确认、步骤导航、artifact 显示和导出按钮门禁。
 - `src/app/App.css`：主界面样式。
-- `src/agent/agent-adapter.ts`：真实 Claude agent 与 fake agent 的适配层，负责 session/workflow 透传和诊断日志。
-- `src/agent/fake-agent.ts`：Web/E2E 环境的确定性 agent，实现分阶段推进、确认、快速路径和 agent event。
+- `src/agent/agent-adapter.ts`：真实智能助手适配层，三态 fail-closed 结果（success / failure-preserved / runtime-unavailable），不再走任何本地 fallback；负责 session/workflow 透传、vendor 词表脱敏（参见 `src/agent/agent-sanitizer.ts`）和诊断日志。
+- `src/agent/agent-types.ts`：TsnAgentResult union + AgentEvent / AgentStepDetail + SessionMetadata 类型契约。
+- `src/agent/agent-sanitizer.ts`：allowlist fail-closed sanitizer + vendor 词表 redactor + step payload 上限常量（16KB / 200 / 30 / 90s）。
+- `src/agent/fake-agent.ts`：**测试 fixture 专用**，自然语言→workflow 推进的确定性 runtime；production 路径已不再 import 它（参见 `src/test/agent-result-fixtures.ts` 是 production 用的命名 fixture builder）。
 - `src/domain/scenario-config.ts`：轻量场景配置。新增应用场景时优先扩展这里，不要复制核心 workflow。
 - `src/domain/topology-factory.ts`：从自然语言和场景默认值生成 canonical TSN project。
 - `src/project/project-state.ts`：workflow state、阶段状态、确认、请求修改、旧 session 归一化。

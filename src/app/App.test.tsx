@@ -261,6 +261,9 @@ describe("App", () => {
     invokeMock.mockReset();
     openDialogMock.mockReset();
     Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    // fake-agent kept as a test-only intent runtime (the production runtime path was removed
+    // in U3a). Tests that need natural-language stage advancement keep using it here; tests
+    // that need explicit fixture shapes use createTopologyWaitingConfirmationResult instead.
     const { runFakeTsnAgent } = await import("../agent/fake-agent");
     runTsnAgentMock.mockImplementation(
       async ({ userIntent, session }: { userIntent: string; session?: { project?: unknown; workflow?: unknown } }) =>
@@ -371,8 +374,8 @@ describe("App", () => {
 
   it("shows a waiting animation before the first streaming chunk arrives", async () => {
     const user = userEvent.setup();
-    const { runFakeTsnAgent } = await import("../agent/fake-agent");
-    const deferred = createDeferred<ReturnType<typeof runFakeTsnAgent>>();
+    const { createTopologyWaitingConfirmationResult } = await import("../test/agent-result-fixtures");
+    const deferred = createDeferred<ReturnType<typeof createTopologyWaitingConfirmationResult>>();
     let streamChunk: ((chunk: string) => void) | undefined;
     runTsnAgentMock.mockImplementation(
       ({ onChunk }: { onChunk?: (chunk: string) => void }) => {
@@ -402,10 +405,12 @@ describe("App", () => {
     expect(screen.getByTestId("agent-run-status")).toHaveTextContent("智能助手正在持续推理，结果会继续更新");
 
     act(() => {
-      deferred.resolve(runFakeTsnAgent("我需要4个交换机，每个交换机连接5个端系统"));
+      deferred.resolve(
+        createTopologyWaitingConfirmationResult({ intent: "我需要4个交换机，每个交换机连接5个端系统" }),
+      );
     });
     await waitFor(() => {
-      expect(screen.getAllByText(/识别到 4 个交换机/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/拓扑已生成/).length).toBeGreaterThan(0);
     });
     expect(screen.queryByTestId("agent-run-status")).not.toBeInTheDocument();
   });
@@ -458,8 +463,8 @@ describe("App", () => {
 
   it("keeps a global running indicator visible while streamed replies wait for long tasks", async () => {
     const user = userEvent.setup();
-    const { runFakeTsnAgent } = await import("../agent/fake-agent");
-    const deferred = createDeferred<ReturnType<typeof runFakeTsnAgent>>();
+    const { createTopologyWaitingConfirmationResult } = await import("../test/agent-result-fixtures");
+    const deferred = createDeferred<ReturnType<typeof createTopologyWaitingConfirmationResult>>();
     let streamChunk: ((chunk: string) => void) | undefined;
     runTsnAgentMock.mockImplementation(
       ({ onChunk }: { onChunk?: (chunk: string) => void }) => {
@@ -496,7 +501,9 @@ describe("App", () => {
     expect(screen.getByTestId("agent-run-status")).toHaveTextContent("智能助手正在持续推理，结果会继续更新");
 
     await act(async () => {
-      deferred.resolve(runFakeTsnAgent("我需要4个交换机，每个交换机连接5个端系统"));
+      deferred.resolve(
+        createTopologyWaitingConfirmationResult({ intent: "我需要4个交换机，每个交换机连接5个端系统" }),
+      );
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
@@ -924,8 +931,8 @@ describe("App", () => {
 
   it("does not restore a session deleted while the agent is running", async () => {
     const user = userEvent.setup();
-    const { runFakeTsnAgent } = await import("../agent/fake-agent");
-    const deferred = createDeferred<ReturnType<typeof runFakeTsnAgent>>();
+    const { createTopologyWaitingConfirmationResult } = await import("../test/agent-result-fixtures");
+    const deferred = createDeferred<ReturnType<typeof createTopologyWaitingConfirmationResult>>();
     runTsnAgentMock.mockReturnValue(deferred.promise);
 
     render(<App />);
@@ -935,7 +942,9 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "会话" }));
     await user.click(screen.getByRole("button", { name: /删除当前/ }));
 
-    deferred.resolve(runFakeTsnAgent("我需要4个交换机，每个交换机连接5个端系统"));
+    deferred.resolve(
+      createTopologyWaitingConfirmationResult({ intent: "我需要4个交换机，每个交换机连接5个端系统" }),
+    );
 
     await user.click(screen.getByRole("tab", { name: "导出文件" }));
     expect(await screen.findByText("完成“模拟仿真”阶段后显示项目导出文件")).toBeInTheDocument();
