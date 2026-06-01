@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="zh-CN" xml:lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <meta name="dcterms.date" content="2026-05-28" />
+  <title>feat: 增加确定性拓扑 MCP 服务</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <style>
+  :root{color-scheme:light;--bg:#f7f8fb;--paper:#ffffff;--ink:#1b2533;--muted:#607089;--line:#d9e0ea;--accent:#2563eb;--accent-soft:#e8f0ff;--code:#f3f5f8;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;}
+  body{max-width:none;width:100%;min-width:1180px;padding:0;margin:0;background:linear-gradient(90deg,#eef2f7 0,#eef2f7 312px,var(--bg) 312px,var(--bg) 100%);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+  #title-block-header{position:fixed;top:0;left:0;z-index:5;width:312px;max-width:none;height:118px;margin:0;padding:22px 22px 14px;background:#eef2f7;border-right:1px solid var(--line);border-bottom:1px solid var(--line);text-align:left;}
+  #title-block-header .title{margin:0;color:#122033;font-size:20px;line-height:1.25;letter-spacing:0;}
+  #title-block-header .date{margin:10px 0 0;padding:0;color:var(--muted);font-size:13px;}
+  #TOC{position:fixed;top:118px;bottom:0;left:0;z-index:4;width:312px;max-width:none;margin:0;padding:18px 18px 28px 22px;overflow:auto;background:#eef2f7;border:0;border-right:1px solid var(--line);border-radius:0;box-shadow:none;}
+  #TOC ul{padding-left:14px;margin:6px 0 0;} #TOC>ul{padding-left:0;} #TOC li{list-style:none;margin:3px 0;line-height:1.35;} #TOC a{display:block;padding:4px 6px;border-radius:5px;color:#334155;font-size:13px;text-decoration:none;} #TOC a:hover{background:#dde7f5;color:var(--accent);text-decoration:none;}
+  body>h1[id]{display:none;}
+  body>h2,body>h3,body>p,body>ul,body>ol,body>blockquote,body>pre,body>table,body>hr,body>div:not(#TOC){max-width:calc(100vw - 392px);margin-left:352px;margin-right:40px;}
+  body>h2{margin-top:34px;margin-bottom:16px;padding:28px 0 0;font-size:26px;line-height:1.25;border-top:1px solid var(--line);} body>h2:first-of-type{margin-top:34px;border-top:0;padding-top:0;} body>h3{margin-top:26px;margin-bottom:10px;padding:0;font-size:20px;line-height:1.35;} body>p,body>ul,body>ol,body>blockquote{padding-left:0;padding-right:0;font-size:15.5px;} body>ul,body>ol{padding-left:24px;} li{max-width:1320px;margin:4px 0;} strong{font-weight:700;}
+  code{background:var(--code);border:1px solid #e6eaf0;border-radius:5px;padding:1px 5px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;hyphens:manual;}
+  pre,body>pre{max-width:calc(100vw - 392px);margin-top:14px;margin-bottom:20px;background:#0f172a;color:#e5e7eb;border-radius:8px;padding:16px 18px;overflow:auto;border:1px solid #111827;} pre code{background:transparent;border:0;color:inherit;padding:0;font-size:13px;white-space:pre;}
+  table,body>table{display:table;width:calc(100vw - 392px);max-width:calc(100vw - 392px);margin-left:352px;margin-right:40px;border-collapse:collapse;background:var(--paper);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:12px;margin-bottom:18px;font-size:14px;} th,td{border:1px solid var(--line);padding:9px 11px;vertical-align:top;} th{background:var(--accent-soft);text-align:left;}
+  blockquote{border-left:4px solid var(--accent);background:var(--paper);padding-top:8px;padding-bottom:8px;color:var(--muted);} hr{max-width:calc(100vw - 392px);border:0;border-top:1px solid var(--line);margin:30px 40px 30px 352px;} .mermaid{max-width:calc(100vw - 392px);margin:14px 40px 22px 352px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:18px;overflow:auto;}
+  @media (min-width:1600px){body>h2,body>h3,body>p,body>ul,body>ol,body>blockquote,body>pre,body>table,body>hr,body>div:not(#TOC),.mermaid{max-width:1240px;margin-left:390px;margin-right:auto;} table,body>table{width:1240px;}}
+  @media (max-width:980px){body{min-width:0;background:var(--bg);} #title-block-header{position:static;width:auto;height:auto;border-right:0;text-align:left;} #TOC{position:static;width:auto;max-width:none;margin:0 18px 24px;border:1px solid var(--line);border-radius:8px;background:var(--paper);} body>h2,body>h3,body>p,body>ul,body>ol,body>blockquote,body>pre,body>table,body>hr,body>div:not(#TOC),.mermaid{max-width:none;margin-left:18px;margin-right:18px;} table,body>table{display:block;width:calc(100% - 36px);max-width:none;}}
+  </style>
+  <script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  window.addEventListener("DOMContentLoaded", async () => {
+    document.querySelectorAll("pre > code.language-mermaid").forEach((code) => {
+      const div = document.createElement("div");
+      div.className = "mermaid";
+      div.textContent = code.textContent;
+      code.parentElement.replaceWith(div);
+    });
+    mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "strict" });
+    await mermaid.run({ querySelector: ".mermaid" });
+  });
+  </script>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">feat: 增加确定性拓扑 MCP 服务</h1>
+<p class="date">2026-05-28</p>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#feat-增加确定性拓扑-mcp-服务"
+id="toc-feat-增加确定性拓扑-mcp-服务">feat: 增加确定性拓扑 MCP 服务</a>
+<ul>
+<li><a href="#摘要" id="toc-摘要">摘要</a></li>
+<li><a href="#问题框架" id="toc-问题框架">问题框架</a></li>
+<li><a href="#需求" id="toc-需求">需求</a></li>
+<li><a href="#范围边界" id="toc-范围边界">范围边界</a>
+<ul>
+<li><a href="#p0-范围内" id="toc-p0-范围内">P0 范围内</a></li>
+<li><a href="#后续工作" id="toc-后续工作">后续工作</a></li>
+<li><a href="#范围外" id="toc-范围外">范围外</a></li>
+</ul></li>
+<li><a href="#上下文与调研" id="toc-上下文与调研">上下文与调研</a>
+<ul>
+<li><a href="#本地代码" id="toc-本地代码">本地代码</a></li>
+<li><a href="#外部参考" id="toc-外部参考">外部参考</a></li>
+<li><a href="#项目约束" id="toc-项目约束">项目约束</a></li>
+</ul></li>
+<li><a href="#关键技术决策" id="toc-关键技术决策">关键技术决策</a></li>
+<li><a href="#高层技术设计" id="toc-高层技术设计">高层技术设计</a>
+<ul>
+<li><a href="#组件边界" id="toc-组件边界">组件边界</a></li>
+<li><a href="#从-0-初始化" id="toc-从-0-初始化">从 0 初始化</a></li>
+<li><a href="#现有拓扑编辑" id="toc-现有拓扑编辑">现有拓扑编辑</a></li>
+<li><a href="#数据边界" id="toc-数据边界">数据边界</a></li>
+<li><a href="#mcp-工具命名映射" id="toc-mcp-工具命名映射">MCP
+工具命名映射</a></li>
+</ul></li>
+<li><a href="#输出结构" id="toc-输出结构">输出结构</a></li>
+<li><a href="#实施单元" id="toc-实施单元">实施单元</a>
+<ul>
+<li><a href="#u1-定义拓扑契约" id="toc-u1-定义拓扑契约">U1.
+定义拓扑契约</a></li>
+<li><a href="#u2-迁移模板初始化和-artifact-规则"
+id="toc-u2-迁移模板初始化和-artifact-规则">U2. 迁移模板初始化和 artifact
+规则</a></li>
+<li><a href="#u3-实现-inspect-和-operations"
+id="toc-u3-实现-inspect-和-operations">U3. 实现 inspect 和
+operations</a></li>
+<li><a href="#u4-增加-project-bridge-并重构-topology-factory"
+id="toc-u4-增加-project-bridge-并重构-topology-factory">U4. 增加 project
+bridge 并重构 topology factory</a></li>
+<li><a href="#u5-增加-mcp-adapter-和-dev-host"
+id="toc-u5-增加-mcp-adapter-和-dev-host">U5. 增加 MCP adapter 和 dev
+host</a></li>
+<li><a href="#u6-集成-agent-runtime-和-skill-shim"
+id="toc-u6-集成-agent-runtime-和-skill-shim">U6. 集成 Agent runtime 和
+skill shim</a></li>
+<li><a href="#u7-增加客户端-runtime-摘要和本地包装层"
+id="toc-u7-增加客户端-runtime-摘要和本地包装层">U7. 增加客户端 runtime
+摘要和本地包装层</a></li>
+<li><a href="#u8-补齐确定性测试矩阵和文档"
+id="toc-u8-补齐确定性测试矩阵和文档">U8.
+补齐确定性测试矩阵和文档</a></li>
+</ul></li>
+<li><a href="#系统影响" id="toc-系统影响">系统影响</a></li>
+<li><a href="#验收场景" id="toc-验收场景">验收场景</a></li>
+<li><a href="#风险与依赖" id="toc-风险与依赖">风险与依赖</a></li>
+<li><a href="#文档和运维说明"
+id="toc-文档和运维说明">文档和运维说明</a></li>
+<li><a href="#验证策略" id="toc-验证策略">验证策略</a></li>
+<li><a href="#来源" id="toc-来源">来源</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="feat-增加确定性拓扑-mcp-服务">feat: 增加确定性拓扑 MCP 服务</h1>
+<h2 id="摘要">摘要</h2>
+<p>把拓扑初始化、校验、artifact 构建、只读查询和结构化节点/链路
+operations 收敛到一个确定性的 topology domain，并通过 MCP adapter/dev
+host 暴露给 Agent 运行时。P0 不做自然语言理解、不调用大模型、不生成完整
+TSN project、不导出 HTML；project
+composition、场景默认值、flow/time-sync/simulation 仍留在应用层。</p>
+<p>该计划覆盖 P0 可落地路径：先建立版本化
+<code>IntermediateTopology</code> 契约和确定性工具实现，再桥接现有
+staged workflow；生产级 Tauri sidecar、Node-free、多 MCP server
+进程治理和完整拓扑编辑 UI 作为后续决策门推进。</p>
+<hr />
+<h2 id="问题框架">问题框架</h2>
+<p>当前拓扑能力分散在 <code>tsn-topology/</code> 参考
+skill、<code>.claude/skills/tsn-topology</code>、<code>src-node/stage-skills/tsn-stage-runner.ts</code>
+和 <code>src/domain/topology-factory.ts</code> 中。几个位置都带有
+builder、validator、默认模板、端口分配或 artifact
+规则，导致同一个拓扑问题很难判断是 Agent 语义解析、拓扑领域规则、project
+composition，还是导出层出错。</p>
+<p>MCP
+服务化的目标不是让拓扑阶段更“智能”，而是把固定规则变成可复用、可快照测试、可被客户端和
+Agent 共同调用的稳定服务边界。这样从 0
+初始化拓扑、对已有拓扑插入交换机、构建 legacy JSON
+artifact、验证端口冲突等行为都能用确定 fixture 复现，不依赖
+prompt、模型、临时目录写盘或工具权限。</p>
+<hr />
+<h2 id="需求">需求</h2>
+<p><strong>领域边界</strong></p>
+<ul>
+<li>R1. Topology MCP P0 只提供 <code>topology.*</code> 能力；不得包含
+project、workflow、export、time sync、flow planning、simulation 或
+<code>generate_project</code>。</li>
+<li>R2. P0
+工具只接受结构化输入：<code>IntermediateTopology</code>、<code>TopologyInitIntent</code>、artifact
+JSON 或结构化 topology operations；不得直接接受自然语言 prompt。</li>
+<li>R3. P0 工具不得调用大模型、Agent
+SDK、外部语义解析服务或网络服务。</li>
+<li>R4. <code>IntermediateTopology</code> 是 topology domain
+的权威事实契约，必须版本化、可快照、可 round-trip；P0 不要求
+<code>topologyId</code>、<code>revision</code>
+或服务端持久状态句柄。</li>
+<li>R5. <code>topology.render_mac_table_html</code> 和 MAC 表 HTML
+artifact 不进入 MCP，也不再由拓扑迁移路径生成。</li>
+</ul>
+<p><strong>工具行为</strong></p>
+<ul>
+<li>R6. P0 必须提供
+<code>topology.describe_templates</code>、<code>topology.initialize</code>、<code>topology.inspect</code>、<code>topology.describe_artifacts</code>、<code>topology.validate_intermediate</code>、<code>topology.build_artifacts</code>、<code>topology.validate_artifacts</code>。</li>
+<li>R7. <code>topology.apply_operations</code> P0 覆盖插入交换机 tracer
+subset：<code>link.delete</code>、<code>node.add</code>、<code>link.add</code>、<code>dryRun</code>、原子校验、确定性
+changeSet；完整 node/link CRUD 延后到 P1。</li>
+<li>R8. 初始化路径和编辑路径必须分离：无当前拓扑时走模板发现和
+<code>topology.initialize</code>；已有拓扑时才走
+<code>topology.inspect</code> 与结构化 operations。</li>
+<li>R9. 所有工具必须返回结构化成功结果或结构化错误
+envelope，错误至少包含
+code、message、path、severity、details、retryable、requiresUserClarification。</li>
+<li>R10. 工具响应必须有 summary/full 数据边界：Agent-facing 默认
+summary；完整拓扑、端口表、MAC 表、full artifact 和 full changeSet
+只在本地 project/client 层或显式 full 模式使用。</li>
+</ul>
+<p><strong>确定性和安全边界</strong></p>
+<ul>
+<li>R11. 相同输入必须得到相同输出；MCP 响应不得包含随机
+ID、当前时间、进程 ID、绝对路径或耗时等会破坏快照的字段。</li>
+<li>R12. <code>apply_operations</code>
+必须先完整校验再原子应用；失败时不得返回半应用后的拓扑。</li>
+<li>R13.
+新增节点、链路、端口和布局必须由调用方显式提供，或由明确的确定性
+allocation/layout strategy 推导。</li>
+<li>R14. P0 必须定义资源上限，覆盖节点数、链路数、端口数、operation
+数、artifact 大小、JSON 深度和执行超时；超限返回结构化
+<code>LIMIT_EXCEEDED</code>。</li>
+<li>R15. 诊断日志只能记录 allowlist 摘要，不能记录完整
+prompt、端口映射、MAC 表、完整 artifact、完整 changeSet
+或敏感工程数据。</li>
+</ul>
+<p><strong>集成边界</strong></p>
+<ul>
+<li>R16. <code>src/domain/topology-factory.ts</code>
+迁移后只保留自然语言意图解析、场景默认值读取和 canonical project
+composition 映射，不再承载 builder、validator、template 或 edit
+规则。</li>
+<li>R17. <code>.claude/skills/tsn-topology</code> 保留为迁移期薄指引或
+shim，只说明何时调用 MCP、如何传递结构化
+intent/selector、如何整理阶段摘要；不得继续维护独立拓扑规则。</li>
+<li>R18. Project/Agent 层负责自然语言 selector
+resolution、歧义澄清、<code>topologyId</code> 管理、dryRun snapshot
+保存和确认重放；Topology MCP 保持无状态。</li>
+<li>R19. Project composition bridge 必须在 MCP 之外，把
+<code>IntermediateTopology</code> 和场景默认值合成
+<code>CanonicalTsnProjectV0</code> 或 topology stage payload。</li>
+<li>R20. Agent runtime 必须能通过固定 MCP server name/tool name
+发现并调用 topology 工具；客户端若直接调用，也必须经过同一 domain
+契约或薄包装层，不能复制 builder 逻辑。</li>
+</ul>
+<p><strong>测试和打包</strong></p>
+<ul>
+<li>R21. P0 测试必须能在无网络、无模型、无 Agent
+会话环境中运行，覆盖每个 topology 工具的确定性 fixture。</li>
+<li>R22. P0 兼容 fixture 必须覆盖当前 <code>tsn-topology/</code>
+参考样例、<code>.claude/skills/tsn-topology</code> 迁移样例和 TSN Agent
+canonical topology 样例。</li>
+<li>R23. P0 必须提供 dev/test 可运行的 MCP adapter 或 dev host；生产
+Tauri sidecar、Node-free 和多 MCP server 生命周期治理进入 P1/production
+decision gate。</li>
+</ul>
+<hr />
+<h2 id="范围边界">范围边界</h2>
+<h3 id="p0-范围内">P0 范围内</h3>
+<ul>
+<li>版本化 <code>IntermediateTopology</code>、初始化
+intent、selector、operation、error envelope、summary/full response
+和资源上限契约。</li>
+<li>确定性 topology domain package，包含模板目录、初始化、校验、artifact
+构建、artifact 校验、inspect、插入交换机 tracer subset。</li>
+<li>MCP adapter/dev host，让 Agent runtime 和集成测试能以 MCP
+工具方式调用同一套 topology domain。</li>
+<li>Project composition bridge 和现有 staged workflow
+的最小接入，确保拓扑阶段仍输出合法
+<code>CanonicalTsnProjectV0</code>。</li>
+<li>迁移期 skill 瘦身：保留指引，移除 HTML 导出路径，停止把 skill
+builder/validator 当作事实来源。</li>
+<li>确定性 fixture 和快照测试矩阵。</li>
+</ul>
+<h3 id="后续工作">后续工作</h3>
+<ul>
+<li>P1 完整 node/link CRUD，包括
+<code>node.update</code>、<code>node.delete</code>、<code>link.update</code>
+及完整 flow impact 语义。</li>
+<li>更多行业模板，例如 industrial line/ring、automotive zonal、aerospace
+dual-plane、rail ladder ring、substation station/process bus、proAV
+tree。</li>
+<li>完整拓扑编辑 UI、dryRun/confirm 图形化状态机和客户端 runtime
+状态矩阵。</li>
+<li>生产级 Tauri sidecar 打包、Node-free runtime、sidecar 签名/hash
+校验、私有 IPC 或 loopback capability token。</li>
+<li>生产 packaging security gate：若选择共享 host，必须绑定 private IPC
+或 localhost-only、使用每会话随机 capability
+token、做来源校验并拒绝外部网络访问；sidecar
+必须从固定随包路径启动，禁止从 <code>PATH</code>、全局 Node
+或用户可写路径解析，签名或 hash 校验失败时 fail closed。</li>
+<li><code>time_sync.*</code>、<code>flow.*</code>、<code>simulation.*</code>
+等其他 MCP domain。</li>
+</ul>
+<h3 id="范围外">范围外</h3>
+<ul>
+<li>在 topology MCP 中做自然语言理解、模板推荐、用户澄清、project
+generation、阶段推进、会话保存、文件导出或仿真运行。</li>
+<li>让 MCP 服务端保存长期 topology handle、artifact handle、dryRun
+状态或 project state。</li>
+<li>把
+<code>flow_plan_1.json</code>、<code>network.ned</code>、<code>omnetpp.ini</code>
+生成逻辑迁入 topology MCP。</li>
+<li>继续生成或导出 MAC 表 HTML。</li>
+</ul>
+<hr />
+<h2 id="上下文与调研">上下文与调研</h2>
+<h3 id="本地代码">本地代码</h3>
+<ul>
+<li><code>src/domain/canonical.ts</code> 已定义当前
+<code>CanonicalTsnProjectV0</code>、<code>TsnNode</code>、<code>TsnLink</code>
+和 <code>TopologyIntent</code>；它是 project 层契约，不应直接成为 MCP
+编辑输入。</li>
+<li><code>src/domain/topology-factory.ts</code>
+当前同时承担自然语言解析、模板构建、端口/布局、时间戳和 project
+composition，需要拆出确定性 topology domain 后保留 project 层职责。</li>
+<li><code>src-node/stage-skills/tsn-stage-runner.ts</code> 当前
+<code>runTopologyStage</code> 直接调用
+<code>createProjectFromIntent</code>，<code>runTopologyStageFromSkillOutput</code>
+导入 legacy skill output；迁移后应改为通过 topology domain/bridge
+生成阶段 payload。</li>
+<li><code>src-node/claude-agent-worker.mjs</code> 当前只启用 skill
+和通用工具，没有 MCP server 配置；需要把 topology MCP tools 加入 Agent
+runtime 的稳定工具面。</li>
+<li><code>.claude/skills/tsn-topology/SKILL.md</code> 当前仍描述独立
+builder、validator、HTML renderer 和五份
+artifact；迁移后应变成薄指引。</li>
+<li><code>tsn-topology/tools/topology-builder.js</code>、<code>validate-topology.js</code>、<code>validate-mac-forwarding-table.js</code>
+是现有规则来源，可作为迁移语义和 fixture 来源，但不宜直接作为长期
+CommonJS 黑盒依赖。</li>
+<li><code>src-tauri/tauri.conf.json</code> 当前 bundle 仍包含 topology
+skill builder、validator 和 HTML renderer 资源；迁移完成后需要移除 HTML
+renderer，并为未来 MCP host 打包留出清晰边界。</li>
+<li><code>package.json</code> 已有 <code>build:worker</code> 用 esbuild
+打包 Node worker 与 stage runner；P0 可以沿用这个模式构建 MCP dev
+host，但若直接导入 MCP SDK，需要显式加入项目依赖。</li>
+</ul>
+<h3 id="外部参考">外部参考</h3>
+<ul>
+<li>Context7 查询的 MCP TypeScript SDK 文档显示，当前推荐模式是使用
+<code>McpServer</code> 注册 tool，并通过
+<code>StdioServerTransport</code> 连接；stdio server 启动日志应写
+stderr，避免污染协议流。</li>
+<li>Context7 查询的 Tauri v2 文档显示，生产 sidecar 通常需要配置
+<code>bundle.externalBin</code>、shell capability
+和随包二进制路径；当前项目尚未接入 shell plugin，因此 P0 不把生产
+sidecar 作为第一版验收条件。</li>
+</ul>
+<h3 id="项目约束">项目约束</h3>
+<ul>
+<li><code>AGENTS.md</code> 明确 <code>tsn-topology/</code> 是独立 skill
+仓库/参考目录，不要默认把它纳入根项目修改范围；本计划把它当作迁移参考和
+fixture 来源，而不是主要改造对象。</li>
+<li>当前仓库未发现 <code>docs/solutions/</code>，没有可复用的内部
+solution 记录。</li>
+</ul>
+<hr />
+<h2 id="关键技术决策">关键技术决策</h2>
+<ul>
+<li>KTD1. <strong>Shared topology domain first, MCP adapter
+second:</strong> P0 先实现可被普通单元测试直接调用的 topology
+domain，再用 MCP adapter/dev host 暴露同一能力。这样客户端本地包装层和
+Agent MCP 工具不会各自复制规则。</li>
+<li>KTD2. <strong>Port semantics into TypeScript instead of importing
+legacy CJS as the core:</strong> <code>tsn-topology/tools</code>
+可以提供规则和 fixtures，但长期事实来源应迁到 TypeScript domain，避免
+ESM/CJS、stdio CLI、临时文件和 stdout 契约继续定义产品行为。</li>
+<li>KTD3. <strong><code>IntermediateTopology</code> stays smaller than
+project:</strong> MCP 只关心 nodes、links、ports、template
+metadata、diagnostics 和 topology artifact；project
+id、createdAt/updatedAt、flows、simulationHints、stage status 由 project
+composition bridge 管理。</li>
+<li>KTD4. <strong>No server-side topology state in P0:</strong>
+dryRun/confirm 通过调用方保存 current topology snapshot 和 operations
+来重放，MCP 工具保持纯函数式行为。这减少了 Tauri、Agent SDK
+和测试进程之间共享状态的复杂度。</li>
+<li>KTD5. <strong>Agent MCP summary 与本地 full 数据通道分离:</strong>
+Agent-facing MCP adapter 强制 summary，并拒绝 <code>full</code>
+responseMode；stage runner/project bridge 在本地进程内直接调用同一
+topology domain 获取 full <code>IntermediateTopology</code>，full
+artifact/changeSet 只进入本地 project/client storage，不进入 Agent
+上下文。</li>
+<li>KTD6. <strong>Stage workflow remains project-owned:</strong> 拓扑
+MCP 只返回 topology
+result；<code>recordStageResult()</code>、阶段确认、flow-template 和
+planning-export 门禁不迁入 MCP。</li>
+<li>KTD7. <strong>Production packaging is a decision gate:</strong> P0
+交付 dev/test MCP host 和共享 domain；是否做 stdio
+sidecar、Tauri-managed host 或 shared package + adapter 的生产形态，等
+topology domain 稳定后再决策。</li>
+<li>KTD8. <strong>P0 不承诺 packaged desktop MCP 可用:</strong> P0
+的真实 Agent MCP 集成只在 dev/test host 路径启用；打包桌面应用若没有生产
+MCP host resolution，必须 fail closed 或回退到本地域/stage-runner
+路径，不能默认启动不可用 dev host。</li>
+</ul>
+<hr />
+<h2 id="高层技术设计">高层技术设计</h2>
+<h3 id="组件边界">组件边界</h3>
+<pre class="mermaid"><code>flowchart TB
+  User[用户自然语言] --&gt; Client[TSN Agent 客户端 / staged workflow]
+  Client --&gt; Project[Project / Agent 层&lt;br/&gt;intent 提取、selector 消歧、场景默认值]
+  Project --&gt;|结构化 init intent| MCP[MCP adapter / dev host&lt;br/&gt;topology.* tools]
+  Project --&gt;|current IntermediateTopology + operations| MCP
+  MCP --&gt; Domain[Topology domain&lt;br/&gt;templates / validate / artifacts / inspect / operations]
+  Domain --&gt; MCP
+  MCP --&gt; Project
+  Project --&gt;|IntermediateTopology + scenario defaults| Bridge[Project composition bridge]
+  Bridge --&gt; Canonical[CanonicalTsnProjectV0&lt;br/&gt;topology stage payload]
+  Canonical --&gt; Client
+  Project -.summary only.-&gt; Agent[Agent runtime]</code></pre>
+<h3 id="从-0-初始化">从 0 初始化</h3>
+<pre class="mermaid"><code>sequenceDiagram
+  participant U as User
+  participant P as Project/Agent Layer
+  participant T as Topology MCP
+  participant B as Project Bridge
+
+  U-&gt;&gt;P: 描述新拓扑场景
+  P-&gt;&gt;T: topology.describe_templates
+  T--&gt;&gt;P: template catalog + constraints
+  P-&gt;&gt;P: 选择/确认 templateId 与结构化参数
+  P-&gt;&gt;T: topology.initialize
+  T--&gt;&gt;P: IntermediateTopology summary/full local data
+  P-&gt;&gt;T: topology.validate_intermediate
+  P-&gt;&gt;T: topology.build_artifacts
+  P-&gt;&gt;B: IntermediateTopology + scenario defaults
+  B--&gt;&gt;P: Canonical topology stage payload</code></pre>
+<h3 id="现有拓扑编辑">现有拓扑编辑</h3>
+<pre class="mermaid"><code>sequenceDiagram
+  participant U as User
+  participant P as Project/Agent Layer
+  participant T as Topology MCP
+  participant B as Project Bridge
+
+  U-&gt;&gt;P: 在交换机1和2之间插入交换机3
+  P-&gt;&gt;P: 把自然语言引用解析为稳定 node/link ID
+  P-&gt;&gt;T: topology.inspect(current topology, selectors)
+  T--&gt;&gt;P: link/port adjacency summary
+  P-&gt;&gt;T: topology.apply_operations(dryRun=true)
+  T--&gt;&gt;P: dryRun changeSet + updated preview
+  U-&gt;&gt;P: 确认
+  P-&gt;&gt;T: topology.apply_operations(same snapshot + same operations)
+  T--&gt;&gt;P: updated IntermediateTopology + changeSet
+  P-&gt;&gt;B: updated topology + scenario defaults
+  B--&gt;&gt;P: updated canonical project</code></pre>
+<h3 id="数据边界">数据边界</h3>
+<table>
+<thead>
+<tr>
+<th>触达面</th>
+<th>默认载荷</th>
+<th>完整载荷归属</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agent MCP response</td>
+<td>工具状态、计数、warning/error summary、必要本地引用</td>
+<td>不默认返回</td>
+</tr>
+<tr>
+<td>Client local wrapper</td>
+<td>可选择 full topology、artifact、changeSet</td>
+<td>project/session storage</td>
+</tr>
+<tr>
+<td>Diagnostics</td>
+<td>tool name、schema version、状态、错误码、limit 类型、耗时
+bucket</td>
+<td>不记录敏感 full data</td>
+</tr>
+<tr>
+<td>Export layer</td>
+<td><code>network.ned</code>、<code>omnetpp.ini</code>、React
+Flow、planner input</td>
+<td>existing export modules</td>
+</tr>
+</tbody>
+</table>
+<p>P0 明确使用两条数据通道：Agent MCP tool response 只承载 summary；本地
+stage runner、fake agent 和 client wrapper 通过同一 topology domain
+package 获取 full <code>IntermediateTopology</code>，再交给 project
+bridge。任何 Agent-facing MCP 请求 <code>responseMode: "full"</code>
+都应返回 <code>FORBIDDEN_RESPONSE_MODE</code>，而不是把 full topology 或
+artifact 放进模型上下文。</p>
+<h3 id="mcp-工具命名映射">MCP 工具命名映射</h3>
+<table>
+<thead>
+<tr>
+<th>Registry tool name</th>
+<th>Agent allowedTools name</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>topology.describe_templates</code></td>
+<td><code>mcp__tsn_topology__topology_describe_templates</code></td>
+</tr>
+<tr>
+<td><code>topology.initialize</code></td>
+<td><code>mcp__tsn_topology__topology_initialize</code></td>
+</tr>
+<tr>
+<td><code>topology.inspect</code></td>
+<td><code>mcp__tsn_topology__topology_inspect</code></td>
+</tr>
+<tr>
+<td><code>topology.describe_artifacts</code></td>
+<td><code>mcp__tsn_topology__topology_describe_artifacts</code></td>
+</tr>
+<tr>
+<td><code>topology.validate_intermediate</code></td>
+<td><code>mcp__tsn_topology__topology_validate_intermediate</code></td>
+</tr>
+<tr>
+<td><code>topology.build_artifacts</code></td>
+<td><code>mcp__tsn_topology__topology_build_artifacts</code></td>
+</tr>
+<tr>
+<td><code>topology.validate_artifacts</code></td>
+<td><code>mcp__tsn_topology__topology_validate_artifacts</code></td>
+</tr>
+<tr>
+<td><code>topology.apply_operations</code></td>
+<td><code>mcp__tsn_topology__topology_apply_operations</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="输出结构">输出结构</h2>
+<pre class="text"><code>src/topology/
+  intermediate.ts
+  tool-result.ts
+  limits.ts
+  templates.ts
+  initialize.ts
+  validate.ts
+  artifacts.ts
+  inspect.ts
+  operations.ts
+  project-bridge.ts
+  __fixtures__/
+src-node/mcp/
+  tsn-topology-server.ts
+  topology-tools.ts
+docs/topology-mcp.md</code></pre>
+<p>这棵目录树表达预期形态。实现时如果发现更小的文件分组更贴合代码，可以调整具体文件名，但边界应保持不变：topology
+domain 位于 <code>src/topology</code>，MCP transport 位于
+<code>src-node/mcp</code>，project composition bridge 位于 MCP server
+之外。</p>
+<hr />
+<h2 id="实施单元">实施单元</h2>
+<p>下文测试场景中的 <code>AE*</code> 均指 origin requirements 文档中的
+Acceptance Examples；本计划自己的验收场景使用 <code>A*</code> 编号。</p>
+<h3 id="u1-定义拓扑契约">U1. 定义拓扑契约</h3>
+<p><strong>目标:</strong> 建立 P0 的版本化 topology domain 契约，让后续
+initializer、validator、operations、MCP adapter 和 project bridge
+都使用同一数据模型。</p>
+<p><strong>需求:</strong> R1, R2, R4, R9, R10, R11, R14, R15</p>
+<p><strong>依赖:</strong> 无</p>
+<p><strong>文件:</strong></p>
+<ul>
+<li>Create: <code>src/topology/intermediate.ts</code></li>
+<li>Create: <code>src/topology/tool-result.ts</code></li>
+<li>Create: <code>src/topology/limits.ts</code></li>
+<li>Test: <code>src/topology/intermediate.test.ts</code></li>
+<li>Test: <code>src/topology/tool-result.test.ts</code></li>
+</ul>
+<p><strong>方案:</strong></p>
+<ul>
+<li>定义 <code>IntermediateTopology</code>、node、port、link、template
+metadata、diagnostics、summary/full response、structured error envelope
+和 limit constants。</li>
+<li>limit constants 必须覆盖最大节点数、链路数、端口数、operation
+数、模板参数规模、artifact 字节数、JSON
+深度和执行超时；生产并发、队列长度和 <code>BUSY</code> 语义保留到
+P1/production host。</li>
+<li>保持 schema 与 project 层解耦：不要求
+<code>topologyId</code>、<code>revision</code>、project
+timestamps、flows 或 simulation hints。</li>
+<li>定义稳定排序规则和 deterministic diagnostics
+规则，禁止响应对象包含当前时间、进程
+ID、绝对路径、耗时原值等快照不稳定字段。</li>
+<li>明确 node type 映射：P0 canonical bridge 支持 <code>switch</code> 和
+<code>endSystem</code>；legacy <code>server</code> fixture 可进入
+artifact/compatibility 校验，但转换到 canonical project
+时必须有显式处理或结构化错误。</li>
+</ul>
+<p><strong>执行提示:</strong> 先写契约和失败用例，再实现 schema
+helpers，避免后续工具各自扩展私有字段。</p>
+<p><strong>参考模式:</strong></p>
+<ul>
+<li><code>src/domain/canonical.ts</code> 的显式 TypeScript interface
+风格。</li>
+<li><code>src/agent/stage-skill-contract.ts</code> 的 schemaVersion 和
+structured result 边界。</li>
+</ul>
+<p><strong>测试场景:</strong></p>
+<ul>
+<li>合法 P0 intermediate topology 通过 schema/helper 校验。</li>
+<li>不支持的 <code>schemaVersion</code> 返回 structured error。</li>
+<li>缺失 node ID、重复 link ID、非法端口引用能定位到稳定 path。</li>
+<li>diagnostics helper 不接受绝对路径、当前时间或未 allowlist
+的字段。</li>
+<li><code>server</code> 节点在 compatibility schema 中可被表达，但
+canonical bridge 支持范围外时可被后续单元明确拒绝。</li>
+</ul>
+<p><strong>验收方式:</strong> 契约测试能作为后续工具测试的公共 fixture
+基础。</p>
+<h3 id="u2-迁移模板初始化和-artifact-规则">U2. 迁移模板初始化和 artifact
+规则</h3>
+<p><strong>目标:</strong> 把现有拓扑初始化、模板目录、intermediate
+校验和 legacy JSON artifact 构建迁入确定性 TypeScript domain。</p>
+<p><strong>需求:</strong> R3, R5, R6, R8, R11, R14, R21, R22</p>
+<p><strong>依赖:</strong> U1</p>
+<p><strong>文件:</strong></p>
+<ul>
+<li>Create: <code>src/topology/templates.ts</code></li>
+<li>Create: <code>src/topology/initialize.ts</code></li>
+<li>Create: <code>src/topology/validate.ts</code></li>
+<li>Create: <code>src/topology/artifacts.ts</code></li>
+<li>Create:
+<code>src/topology/__fixtures__/generic-line.json</code></li>
+<li>Create:
+<code>src/topology/__fixtures__/generic-ring.json</code></li>
+<li>Create:
+<code>src/topology/__fixtures__/aerospace-redundant.json</code></li>
+<li>Test: <code>src/topology/templates.test.ts</code></li>
+<li>Test: <code>src/topology/initialize.test.ts</code></li>
+<li>Test: <code>src/topology/validate.test.ts</code></li>
+<li>Test: <code>src/topology/artifacts.test.ts</code></li>
+</ul>
+<p><strong>方案:</strong></p>
+<ul>
+<li>实现 <code>describeTemplates</code>，P0 包含
+<code>generic-line</code>、<code>generic-ring</code>、<code>aerospace-redundant</code>，返回参数
+schema、默认值、约束、适用场景标签和示例。</li>
+<li>实现 <code>initializeTopology</code>，只接受结构化
+<code>templateId</code> 和参数，不做自然语言解析或模板推荐。</li>
+<li>从 <code>tsn-topology/tools/topology-builder.js</code> 和当前
+<code>topology-factory</code> 迁移确定性布局、端口、MAC/IP、artifact
+构建语义；避免长期通过 CLI/stdout 调用 builder。</li>
+<li><code>buildArtifacts</code> 只返回 JSON data/text
+和摘要，不写文件，不生成 HTML。</li>
+<li><code>describeArtifacts</code> 返回 artifact
+类型、计数、大小摘要和确定性诊断摘要，不返回 full artifact 原文。</li>
+<li><code>validateArtifacts</code> 覆盖
+<code>topology.json</code>、<code>topo_feature.json</code>、<code>data-server.json</code>、<code>mac-forwarding-table.json</code>
+的 schema、引用和一致性。</li>
+</ul>
+<p><strong>执行提示:</strong> 对每个模板先落 golden
+fixture，再实现，确保重复运行输出完全一致。</p>
+<p><strong>参考模式:</strong></p>
+<ul>
+<li><code>tsn-topology/tools/topology-builder.js</code>
+的端口唯一性、MAC/IP 派生、layout 和 MAC forwarding table 规则。</li>
+<li><code>src/domain/topology-factory.test.ts</code> 的
+line/ring/aerospace 业务样例。</li>
+</ul>
+<p><strong>测试场景:</strong></p>
+<ul>
+<li>Covers AE3. <code>generic-ring</code> 输入 4 个交换机、每个 2
+个终端，每次输出相同节点、链路、端口和环形连接。</li>
+<li>Covers AE3a. <code>describeTemplates</code> 返回 P0
+模板目录、默认值、约束和示例，不根据自然语言推荐。</li>
+<li><code>generic-line</code> 默认交换机互联链路数为
+<code>N-1</code>，终端接入链路数为 <code>N*M</code>。</li>
+<li><code>aerospace-redundant</code> 迁移当前 7/9
+网卡样例，保持双归属和主干链路语义。</li>
+<li>非法模板 ID、交换机数越界、终端数越界、非法速率返回 structured
+error。</li>
+<li>Covers AE1 / AE7. <code>buildArtifacts</code> 返回四份 JSON
+artifact，不包含 <code>.html</code> artifact。</li>
+<li><code>describeArtifacts</code> 对四份 legacy JSON
+返回类型、计数、大小摘要和诊断摘要。</li>
+<li>Covers AE15. 超过节点、链路、端口、operation
+数、模板参数规模、artifact 字节数、JSON 深度或执行超时时返回
+<code>LIMIT_EXCEEDED</code>。</li>
+</ul>
+<p><strong>验收方式:</strong> <code>npm test</code> 中 topology domain
+fixture 可以在无网络、无模型、无 Agent 会话下运行。</p>
+<h3 id="u3-实现-inspect-和-operations">U3. 实现 inspect 和
+operations</h3>
+<p><strong>目标:</strong> 提供只读拓扑查询和 P0 插入交换机 tracer subset
+的结构化编辑能力。</p>
+<p><strong>需求:</strong> R7, R8, R9, R10, R11, R12, R13, R14, R18,
+R21</p>
+<p><strong>依赖:</strong> U1, U2</p>
+<p><strong>文件:</strong></p>
+<ul>
+<li>Create: <code>src/topology/inspect.ts</code></li>
+<li>Create: <code>src/topology/operations.ts</code></li>
+<li>Create:
+<code>src/topology/__fixtures__/insert-switch-before.json</code></li>
+<li>Create:
+<code>src/topology/__fixtures__/insert-switch-after.json</code></li>
+<li>Test: <code>src/topology/inspect.test.ts</code></li>
+<li>Test: <code>src/topology/operations.test.ts</code></li>
+</ul>
+<p><strong>方案:</strong></p>
+<ul>
+<li><code>inspectTopology</code> 支持按稳定 node/link
+ID、类型过滤和邻接/端口占用查询；非唯一 selector 返回
+<code>AMBIGUOUS_SELECTOR</code>，full 候选详情只给本地 full 模式。</li>
+<li><code>applyTopologyOperations</code> 对一批 operations
+先校验再应用，P0 支持
+<code>link.delete</code>、<code>node.add</code>、<code>link.add</code>
+和 <code>dryRun</code>。</li>
+<li>新增节点/链路顺序按 operation
+追加，未变更项保持原顺序，删除项移除，更新项在 P1 再引入。</li>
+<li><code>dryRun: true</code> 与 apply 使用同一校验和计算逻辑；区别只在
+result metadata，由调用方保存 snapshot/operations 并确认重放。</li>
+<li>changeSet 包含 added/removed/updated
+nodes、links、released/allocated ports 和 flow impact 所需 link
+摘要，但不修改 flows。</li>
+</ul>
+<p><strong>执行提示:</strong> 插入交换机成功路径和失败路径都先用 fixture
+固化，再写 operation engine。</p>
+<p><strong>参考模式:</strong></p>
+<ul>
+<li><code>src/project/project-state.ts</code>
+的确认前状态保护理念，但不要把 workflow 状态迁入 topology domain。</li>
+<li><code>tsn-topology/tools/validate-topology.js</code>
+的端口冲突和引用完整性校验。</li>
+</ul>
+<p><strong>测试场景:</strong></p>
+<ul>
+<li>Covers AE4. 在 <code>sw1</code> 和 <code>sw2</code> 之间执行
+<code>[link.delete, node.add, link.add, link.add]</code>，dryRun
+返回预期 updated preview、changeSet 和端口释放/占用。</li>
+<li>Covers AE4. 用户确认后用同一 current topology snapshot 和同一
+operations apply，得到与 dryRun preview 一致的 updated topology。</li>
+<li>Covers AE5. 缺少目标端口、引用不存在节点、重复 ID 时返回 structured
+error，且不返回半应用结果。</li>
+<li>非 P0 operation，例如
+<code>node.delete</code>、<code>node.update</code>、<code>link.update</code>，返回结构化
+<code>UNSUPPORTED_OPERATION</code>；“删除仍被链路引用的节点”语义放入 P1
+完整 CRUD 范围。</li>
+<li>Covers AE6. 同一输入重复运行，updated topology、changeSet、warnings
+和响应 diagnostics 保持一致。</li>
+<li>Covers AE11 / AE13. <code>inspect</code> 对稳定 ID
+查询成功，对显示名或非唯一 selector 返回歧义错误和 summary/full
+分层候选。</li>
+</ul>
+<p><strong>验收方式:</strong> operations 快照测试证明 P0
+编辑路径是纯函数式、确定性的。</p>
+<h3 id="u4-增加-project-bridge-并重构-topology-factory">U4. 增加 project
+bridge 并重构 topology factory</h3>
+<p><strong>目标:</strong> 在 topology MCP 外部建立
+<code>IntermediateTopology</code> 与当前 project/stage payload
+的转换边界，并把 <code>topology-factory</code> 降级为 project
+composition 层。</p>
+<p><strong>需求:</strong> R16, R18, R19, R21, R22</p>
+<p><strong>依赖:</strong> U1, U2, U3</p>
+<p><strong>文件:</strong></p>
+<ul>
+<li>Create: <code>src/topology/project-bridge.ts</code></li>
+<li>Modify: <code>src/domain/topology-factory.ts</code></li>
+<li>Modify: <code>src-node/stage-skills/tsn-stage-runner.ts</code></li>
+<li>Modify:
+<code>src-node/stage-skills/tsn-stage-runner.test.ts</code></li>
+<li>Modify: <code>src/domain/topology-factory.test.ts</code></li>
+<li>Test: <code>src/topology/project-bridge.test.ts</code></li>
+</ul>
+<p><strong>方案:</strong></p>
+<ul>
+<li>增加
+<code>canonicalTopologyToIntermediate</code>、<code>intermediateToCanonicalTopology</code>
+和必要的 <code>legacyArtifactsToIntermediate</code>。</li>
+<li><code>createProjectFromIntent</code>
+仍可保留自然语言解析和场景默认值读取，但拓扑构建必须委托
+<code>initializeTopology</code> 和 bridge。</li>
+<li>project bridge 负责 project
+id、name、createdAt/updatedAt、simulationHints、flows 空置/保留规则和
+scenario defaults。</li>
+<li>stage runner 的 topology 阶段通过 topology domain 生成 project
+payload；legacy skill output import
+路径保留为兼容/迁移测试，但不再是主路径。</li>
+<li>处理 <code>server</code> legacy fixture：若 canonical project
+当前不支持 server，bridge 返回清晰 structured error
+或显式映射策略，不静默丢失节点。</li>
+</ul>
+<p><strong>执行提示:</strong> 先加 round-trip characterization
+tests，再改 <code>topology-factory</code>，防止现有 staged workflow
+行为漂移。</p>
+<p><strong>参考模式:</strong></p>
+<ul>
+<li><code>src/domain/scenario-config.ts</code> 的场景默认值来源。</li>
+<li><code>src/domain/validation.ts</code> 的 canonical project
+校验边界。</li>
+<li><code>src-node/stage-skills/tsn-stage-runner.ts</code> 的
+<code>StageSkillResult</code> 输出契约。</li>
+</ul>
+<p><strong>测试场景:</strong></p>
+<ul>
+<li>Covers AE12. 现有 canonical line/ring/aerospace 样例转 intermediate
+再转回 canonical，拓扑节点/链路语义保持。</li>
+<li>Covers AE16. 当前 project 没有 topology 时，project
+层通过模板目录和场景默认值形成 init intent，不用 operations
+拼初始拓扑。</li>
+<li>Covers AE17. <code>initialize</code> 或
+<code>apply_operations</code> 结果通过 bridge 合成合法
+<code>CanonicalTsnProjectV0</code>，且 staged workflow 只推进 topology
+阶段。</li>
+<li><code>topology-factory</code>
+仍能解析用户文本中的交换机数量、每交换机终端数、ring/line 和 aerospace
+edit request。</li>
+<li><code>server</code> legacy artifact 转换到 canonical
+不支持路径时返回可定位错误。</li>
+</ul>
+<p><strong>验收方式:</strong> 现有 topology factory 与 stage runner
+测试更新后仍覆盖通用和箭载场景；新增 bridge tests 覆盖 round-trip。</p>
+<h3 id="u5-增加-mcp-adapter-和-dev-host">U5. 增加 MCP adapter 和 dev
+host</h3>
+<p><strong>目标:</strong> 用 MCP TypeScript SDK 暴露 topology domain
+工具，并提供 dev/test 可运行 host。</p>
+<p><strong>需求:</strong> R1, R2, R3, R6, R9, R10, R20, R23</p>
+<p><strong>依赖:</strong> U1, U2, U3</p>
+<p><strong>文件:</strong></p>
+<ul>
+<li>Create: <code>src-node/mcp/topology-tools.ts</code></li>
+<li>Create: <code>src-node/mcp/tsn-topology-server.ts</code></li>
+<li>Test: <code>src-node/mcp/topology-tools.test.ts</code></li>
+<li>Modify: <code>package.json</code></li>
+<li>Modify: <code>package-lock.json</code></li>
+<li>Modify: <code>scripts/verify-skills.mjs</code></li>
+</ul>
+<p><strong>方案:</strong></p>
+<ul>
+<li>把 domain functions 包装成 MCP tools，tool name 固定为
+<code>topology.describe_templates</code>、<code>topology.initialize</code>、<code>topology.inspect</code>
+等；server name 固定为 <code>tsn_topology</code>。</li>
+<li>通过 zod 或 MCP SDK 兼容 schema 定义输入；所有 handler 调用共享
+error/result envelope。</li>
+<li>在 MCP adapter ingress 层增加 payload size、JSON depth、handler
+timeout/AbortSignal 和 process-level failure
+mapping；超大或超深输入不能绕过 domain limit 变成裸异常、断连或
+OOM。</li>
+<li>dev host 使用 stdio transport，启动日志写 stderr，不污染 MCP stdout
+协议。</li>
+<li><code>@modelcontextprotocol/sdk</code> 如被正式导入，必须加入
+<code>dependencies</code>，不能只依赖 transitive install。</li>
+<li><code>build:worker</code> 或新增 build script 打包 MCP dev
+host，测试不依赖真实 Agent SDK。</li>
+</ul>
+<p><strong>参考模式:</strong></p>
+<ul>
+<li><code>src-node/stage-skills/tsn-stage-runner.ts</code> 的 Node-side
+TypeScript bundling 方式。</li>
+<li>Context7 MCP TypeScript SDK 文档中的 <code>McpServer</code> +
+<code>StdioServerTransport</code> 注册模式。</li>
+</ul>
+<p><strong>测试场景:</strong></p>
+<ul>
+<li>MCP tool registry 包含 P0 工具，不包含 project/workflow/export/time
+sync/flow 或 HTML renderer。</li>
+<li>MCP tool registry 显式包含
+<code>topology.describe_artifacts</code>，并有对应 handler 测试。</li>
+<li>MCP registry tool name 与 Agent allowedTools fully-qualified name
+按“工具命名映射”表逐项断言，避免 dot/underscore 映射漂移。</li>
+<li>每个 tool handler 对合法 fixture 返回 structured result。</li>
+<li>每个 tool handler 对非法输入返回 structured errors，不抛出裸异常或
+stdout 文本契约。</li>
+<li>超大 payload、过深 JSON、handler timeout 和 process-level failure
+都映射为结构化错误或可诊断 <code>call_failed</code>，并有 dev host
+黑盒测试。</li>
+<li>Agent-facing MCP handler 对 <code>responseMode: "full"</code> 返回
+<code>FORBIDDEN_RESPONSE_MODE</code>；full result 只能由本地
+wrapper/domain 调用路径获取。</li>
+<li>summary 模式不返回 full artifact、full port table 或 full
+changeSet。</li>
+<li>dev host 可被测试进程启动并完成一次 template catalog/ping 类 fixture
+调用。</li>
+</ul>
+<p><strong>验收方式:</strong> MCP adapter tests 不需要模型、网络或
+Tauri；tool handler 与 domain tests 共用 fixture。</p>
+<h3 id="u6-集成-agent-runtime-和-skill-shim">U6. 集成 Agent runtime 和
+skill shim</h3>
+<p><strong>目标:</strong> 让真实 Agent 路径优先使用 topology MCP
+工具，并把旧 topology skill 改为薄指引。</p>
+<p><strong>需求:</strong> R5, R17, R18, R20, R23</p>
+<p><strong>依赖:</strong> U4, U5</p>
+<p><strong>文件:</strong></p>
+<ul>
+<li>Modify: <code>src-node/claude-agent-worker.mjs</code></li>
+<li>Modify: <code>src-node/claude-agent-worker.test.mjs</code></li>
+<li>Modify: <code>.claude/skills/tsn-topology/SKILL.md</code></li>
+<li>Modify:
+<code>.claude/skills/tsn-topology/tools/run-topology-skill.js</code></li>
+<li>Modify: <code>src-tauri/tauri.conf.json</code></li>
+<li>Modify: <code>scripts/verify-skills.mjs</code></li>
+</ul>
+<p><strong>方案:</strong></p>
+<ul>
+<li>Agent SDK options 增加 topology MCP server 配置和 allowed
+tools，系统提示说明拓扑规则必须通过 MCP/domain 结构化结果落地。</li>
+<li>Agent MCP 工具只用于生成可展示摘要和结构化诊断；stage result 所需
+full topology 由 stage runner/project bridge 在本地调用 topology domain
+获取，不能从 Agent tool response 中解析 full payload。</li>
+<li><code>.claude/skills/tsn-topology/SKILL.md</code> 删除独立
+builder/validator/HTML 导出说明，改成 Agent 使用 MCP
+的指引：初始化路径、已有拓扑 edit 路径、selector resolution、stage
+runner 结果边界。</li>
+<li>停止在集成路径生成 <code>mac-forwarding-table.html</code>；若保留
+<code>run-topology-skill.js</code> 作为迁移兼容入口，也只能输出四份 JSON
+artifact 或转调新 domain。</li>
+<li><code>tauri.conf.json</code> 不再 bundling HTML renderer；P0
+若运行在 packaged desktop 且没有生产 MCP host resolution，真实 Agent MCP
+路径必须 fail closed 或使用本地域/stage-runner 回退，不能尝试从
+<code>PATH</code> 或 dev path 启动 MCP host。后续生产 MCP host 资源等到
+packaging decision gate 再加入。</li>
+<li>真实 Agent 失败恢复仍走 stage result recovery，不把 MCP full payload
+写进诊断日志。</li>
+</ul>
+<p><strong>执行提示:</strong> 先调整 worker tests 验证 MCP 配置和
+allowed tools，再修改 skill 文案，避免出现文档要求和 runtime
+能力不一致。</p>
+<p><strong>参考模式:</strong></p>
+<ul>
+<li><code>src-node/claude-agent-worker.mjs</code> 当前
+<code>stageRunnerInput</code>、audit log 和 retry prompt 组织方式。</li>
+<li><code>docs/diagnostics-log-contract.md</code> 的脱敏诊断要求。</li>
+</ul>
+<p><strong>测试场景:</strong></p>
+<ul>
+<li>Worker options 包含 <code>tsn_topology</code> MCP server 和固定
+topology tool names。</li>
+<li>Worker options 同时断言 registry tool names 与
+<code>mcp__tsn_topology__...</code> allowedTools fully-qualified
+names。</li>
+<li>packaged desktop 环境缺少 production MCP host resolution 时，worker
+不尝试启动 dev host，并返回可诊断的 unavailable/fail-closed 摘要。</li>
+<li>Worker prompt 不再要求 Agent 手写 legacy intermediate 或调用 HTML
+renderer。</li>
+<li>Skill verification 通过，且 skill 文档不再出现
+<code>topology.render_mac_table_html</code> 或
+<code>mac-forwarding-table.html</code> 作为产物要求。</li>
+<li>旧 skill 兼容入口若仍存在，成功输出不包含 HTML artifact。</li>
+<li>MCP call failure 被记录为脱敏 <code>call_failed</code> 摘要，不记录
+full topology data。</li>
+</ul>
+<p><strong>验收方式:</strong> Worker/skill tests 能证明 Agent-facing
+path 已经切到 MCP contract。</p>
+<h3 id="u7-增加客户端-runtime-摘要和本地包装层">U7. 增加客户端 runtime
+摘要和本地包装层</h3>
+<p><strong>目标:</strong> 为现有客户端和测试提供 topology MCP
+可用性摘要与本地调用包装层，但不在 P0 实现完整图编辑 UI。</p>
+<p><strong>需求:</strong> R10, R15, R18, R20, R23</p>
+<p><strong>依赖:</strong> U4, U5</p>
+<p><strong>文件:</strong></p>
+<ul>
+<li>Create: <code>src/topology/topology-service.ts</code></li>
+<li>Modify: <code>src/agent/agent-adapter.ts</code></li>
+<li>Modify: <code>src/agent/fake-agent.ts</code></li>
+<li>Modify: <code>src/app/App.tsx</code></li>
+<li>Modify: <code>src/app/App.test.tsx</code></li>
+<li>Modify: <code>src/diagnostics/diagnostics-contract.ts</code></li>
+</ul>
+<p><strong>方案:</strong></p>
+<ul>
+<li>增加薄本地 wrapper，让 Web/fake agent 和 Tauri/real agent 都通过同一
+topology domain contract 获取 deterministic result。</li>
+<li>提供 P0 runtime availability
+summary：<code>available</code>、<code>unavailable</code>、<code>call_failed</code>；完整状态矩阵和重试
+UI 留到 P1。</li>
+<li>在执行步骤/诊断摘要中展示工具可用状态和调用摘要，不展示 full
+artifact、端口表或完整 changeSet。P0 状态表必须说明
+<code>available</code>、<code>unavailable</code>、<code>call_failed</code>
+和初始未探测状态在执行步骤、诊断摘要、stage gating
+和用户动作上的行为。</li>
+<li>fake agent 改用 topology domain/bridge 生成 topology stage
+result，保持 E2E 稳定。</li>
+<li>P0 不做完整图形化编辑器，但必须提供最小 dryRun/confirm
+体验：在现有聊天或阶段确认区域展示 added/removed
+links、allocated/released ports、flow impact 摘要；提供确认和取消；若
+current topology 与 dryRun snapshot 不一致，禁用确认并要求重新
+dryRun。</li>
+<li>对 <code>AMBIGUOUS_SELECTOR</code>
+提供最小候选选择体验：在现有聊天或步骤面板展示候选显示名、类型、邻接摘要和稳定
+ID 摘要；用户选择后重新 dryRun，取消时保持当前拓扑不变。</li>
+<li>full topology、artifact、端口占用和 dryRun changeSet 只保存在本地
+project/session storage；dryRun full
+数据默认会话内保存，取消确认、关闭会话或删除项目时清理，诊断日志和 Agent
+上下文不得保存 full 数据。</li>
+</ul>
+<p><strong>参考模式:</strong></p>
+<ul>
+<li><code>src/agent/fake-agent.ts</code> 当前 deterministic staged
+workflow。</li>
+<li><code>src/diagnostics/*</code> 和
+<code>src/ui/diagnostics/DiagnosticsDrawer.tsx</code>
+的脱敏摘要模式。</li>
+<li><code>src/project/project-state.ts</code> 的阶段确认与 request
+changes 状态。</li>
+</ul>
+<p><strong>测试场景:</strong></p>
+<ul>
+<li>Web/fake agent topology 阶段通过 topology domain
+生成与现有场景等价的 canonical project。</li>
+<li>real agent adapter 能汇总 MCP runtime 为
+<code>available</code>、<code>unavailable</code> 或
+<code>call_failed</code>。</li>
+<li>用户只说“帮我建一个 TSN 网络”时，Project/Agent 层基于
+<code>ScenarioConfig</code> 与 <code>topology.describe_templates</code>
+生成带默认值说明的可确认拓扑草案；缺少会改变拓扑类别的关键参数且无默认值时进入澄清状态。</li>
+<li>最小 dryRun/confirm UX 覆盖确认、取消、校验失败、歧义失败和
+stale-topology 重新预览。</li>
+<li>歧义候选选择覆盖多候选展示、选择、取消和不调用
+<code>apply_operations</code> 的失败路径。</li>
+<li>runtime availability summary 覆盖
+<code>available</code>、<code>unavailable</code>、<code>call_failed</code>
+和初始未探测状态的用户可见行为。</li>
+<li>full
+数据生命周期测试覆盖取消确认、关闭会话、删除项目后的清理，以及诊断/Agent
+上下文不含 full 数据。</li>
+<li>诊断日志不包含 full artifact、MAC 表、端口映射或完整
+changeSet。</li>
+<li>UI 执行步骤能展示 MCP 工具可用/失败摘要，不提前推进 flow-template 或
+planning-export。</li>
+</ul>
+<p><strong>验收方式:</strong> React/unit tests 覆盖 fake path
+和诊断摘要；P0 不要求完整 browser edit workflow。</p>
+<h3 id="u8-补齐确定性测试矩阵和文档">U8. 补齐确定性测试矩阵和文档</h3>
+<p><strong>目标:</strong>
+把迁移后的测试、文档和开发验证路径补齐，让后续实现者能稳定迭代和调试。</p>
+<p><strong>需求:</strong> R21, R22, R23</p>
+<p><strong>依赖:</strong> U1, U2, U3, U4, U5, U6, U7</p>
+<p><strong>文件:</strong></p>
+<ul>
+<li>Create: <code>docs/topology-mcp.md</code></li>
+<li>Modify: <code>docs/staged-agent-workflow.md</code></li>
+<li>Modify: <code>docs/testing.md</code></li>
+<li>Modify: <code>src/export/exporters.test.ts</code></li>
+<li>Modify:
+<code>src-node/stage-skills/tsn-stage-runner.test.ts</code></li>
+<li>Modify: <code>tests/e2e</code> or existing E2E topology tests if
+affected</li>
+</ul>
+<p><strong>方案:</strong></p>
+<ul>
+<li>记录 P0 topology MCP contract、工具列表、summary/full
+数据边界、初始化 vs operations 两条路径、dryRun/confirm 责任划分和生产
+packaging decision gate。</li>
+<li>把旧 <code>tsn-topology/</code>
+fixture、<code>.claude/skills/tsn-topology</code> fixture、canonical
+project fixture 收敛到新的 compatibility 测试。</li>
+<li>增加 fixture precedence/equivalence 规则：canonical project
+拓扑字段优先用于 stage payload；reference <code>tsn-topology/</code>
+用于 legacy artifact
+兼容；冲突字段必须显式记录为规范化、兼容保留或结构化失败，不能为通过快照保留多套事实。</li>
+<li>增加 P0 调试闭环验收：分别注入 selector 歧义、invalid
+intermediate、artifact 引用不一致、bridge 不支持
+<code>server</code>、MCP <code>call_failed</code> 等失败
+fixture，断言诊断摘要能标出失败层级和错误码，同时不泄露 full
+artifact、端口表或完整 changeSet。</li>
+<li>保持 exporter
+测试边界：<code>network.ned</code>、<code>omnetpp.ini</code>、React
+Flow、planner input 仍由 export/project 层生成，不迁入 topology
+MCP。</li>
+<li>更新测试文档，明确哪些测试不需要网络/模型/Agent
+会话，哪些集成测试需要 Tauri 或真实 Agent runtime。</li>
+</ul>
+<p><strong>参考模式:</strong></p>
+<ul>
+<li><code>docs/testing.md</code> 的现有命令说明方式。</li>
+<li><code>docs/staged-agent-workflow.md</code> 的 staged workflow
+约束。</li>
+</ul>
+<p><strong>测试场景:</strong></p>
+<ul>
+<li>Covers AE7. 枚举 MCP 工具和 artifact 输出时不存在 HTML。</li>
+<li>Covers AE8. dev/test host
+启动失败、不可用、调用失败都有可断言摘要。</li>
+<li>Covers AE9. topology stage 不提前完成 flow-template 或
+planning-export。</li>
+<li>Covers AE10. P0 topology tests 在无网络、无模型、无 Agent
+会话下通过。</li>
+<li>P0 调试闭环 fixture 能把失败归因到 selector-resolution、intermediate
+validation、artifact validation、project bridge 或 MCP runtime
+层级。</li>
+<li>Exporter tests 继续证明 <code>flow_plan_1.json</code> 是 planner
+input，不伪造 planner output、GCL 或 simulation result。</li>
+</ul>
+<p><strong>验收方式:</strong> 文档和测试矩阵能指导实现者运行
+<code>npm test</code>、<code>npm run build</code>、相关 E2E/Tauri
+验证；新增 docs 不把 topology MCP 描述成 project generator。</p>
+<hr />
+<h2 id="系统影响">系统影响</h2>
+<ul>
+<li><strong>Agent runtime:</strong> 从 prompt/skill 规则驱动转向 MCP
+tool contract；失败定位会更清楚，但需要维护 MCP server 配置和
+allowedTools。</li>
+<li><strong>Client workflow:</strong> topology 阶段仍由 staged workflow
+管理；P0 只引入 domain/service bridge
+和运行时摘要，不改变四阶段确认门禁。</li>
+<li><strong>Project model:</strong> canonical project 继续存在，但
+topology fact source 前移到 <code>IntermediateTopology</code>；project
+composition 负责时间戳、flows、simulation hints 和场景默认值。</li>
+<li><strong>Security and privacy:</strong> summary/full 边界和诊断
+allowlist 会减少敏感拓扑数据进入模型上下文或日志的概率。</li>
+<li><strong>Packaging:</strong> P0 不承诺生产 sidecar；但实现要避免把
+dev host 形态写死成未来唯一方案。</li>
+</ul>
+<hr />
+<h2 id="验收场景">验收场景</h2>
+<ul>
+<li>A1. 从 0 初始化：用户描述 4 个交换机、每台 2
+个端系统的环形网络，Project/Agent 层先查询模板目录，再调用
+<code>topology.initialize</code>，每次得到相同 initial
+<code>IntermediateTopology</code>，MCP 不接收自然语言、不推荐模板。</li>
+<li>A2. 已有拓扑插入交换机：当前 <code>sw1</code> 与 <code>sw2</code>
+存在直连链路，调用方经 <code>inspect</code> 得到端口占用，再用
+<code>[link.delete, node.add, link.add, link.add]</code> dryRun 和
+apply，得到一致 updated topology 和 changeSet。</li>
+<li>A3. 歧义引用：用户说“交换机
+1”但当前存在多个显示名候选时，Project/Agent 层必须先澄清；MCP 收到非唯一
+selector 时返回 <code>AMBIGUOUS_SELECTOR</code>，不猜测。</li>
+<li>A4. Artifact 构建：合法 intermediate topology 构建四份 legacy JSON
+artifact；结果不包含 HTML，不写文件系统。</li>
+<li>A5. 超限保护：节点数、链路数、端口数、operation
+数、模板参数规模、JSON 深度、artifact 大小或执行超时超限时返回
+<code>LIMIT_EXCEEDED</code>，不返回半构建结果。</li>
+<li>A6. Stage bridge：topology tool result 经 bridge 生成合法
+<code>CanonicalTsnProjectV0</code>，只推进 topology 阶段，不伪造 flow
+planning、planning export 或 simulation output。</li>
+<li>A7. 数据边界：Agent-facing summary 不包含 full artifact、MAC
+表、完整端口占用或 full changeSet；这些数据只留在本地 full 模式或
+project/client storage。</li>
+</ul>
+<hr />
+<h2 id="风险与依赖">风险与依赖</h2>
+<ul>
+<li><strong>MCP SDK packaging drift:</strong> 当前
+<code>@modelcontextprotocol/sdk</code> 可能已在
+<code>node_modules</code> 中出现但未列入
+<code>package.json</code>。实现时必须显式依赖并确认实际导入路径，避免依赖
+transitive package。</li>
+<li><strong>Legacy semantic drift:</strong> 直接重写 builder/validator
+可能引入细微差异。缓解方式是先用旧 skill 和 canonical 样例建立 golden
+fixture，再迁移实现。</li>
+<li><strong><code>server</code> node compatibility:</strong> legacy
+skill 支持 <code>server</code>，canonical project 当前只支持
+<code>switch</code> / <code>endSystem</code>。P0 必须显式决定 bridge
+行为，不能静默丢弃。</li>
+<li><strong>Agent SDK MCP configuration unknowns:</strong> 当前 worker
+使用 <code>@anthropic-ai/claude-agent-sdk</code>，实际 MCP config
+字段需要按 SDK
+当前版本验证。计划要求先测试配置对象，不把运行时字段名写死到文档之外。</li>
+<li><strong>Tauri production packaging:</strong> P0 dev host 不等于生产
+sidecar。进入发布打包前必须单独验证 sidecar 路径、签名/hash、每会话
+capability token、来源校验、拒绝外部网络访问、Node-free 和多 server
+策略。</li>
+<li><strong>UI scope creep:</strong> 拓扑 operations
+容易诱发完整图编辑器需求。P0 只做 domain、bridge 和摘要；完整编辑 UI
+作为 P1。</li>
+</ul>
+<hr />
+<h2 id="文档和运维说明">文档和运维说明</h2>
+<ul>
+<li><code>docs/topology-mcp.md</code> 应成为实现后的 topology contract
+说明，包含工具列表、输入输出模式、错误
+envelope、资源限制和数据边界。</li>
+<li><code>docs/staged-agent-workflow.md</code> 需要说明 topology stage
+现在通过 topology domain/bridge 生成 canonical project，但阶段确认和后续
+flow/export 门禁不变。</li>
+<li><code>docs/testing.md</code> 需要增加 topology MCP fixture
+测试说明，区分无模型单元测试、MCP dev host 测试、真实 Agent runtime
+集成测试和 Tauri packaging 验收。</li>
+<li>生产 packaging 决策应单独形成后续 plan 或 ADR，比较 stdio packaged
+server、Tauri-managed host、shared package + adapter 三种形态，并把
+private IPC/localhost-only、每会话 capability
+token、来源校验、固定随包路径、禁止 <code>PATH</code> 解析和 fail-closed
+校验列为验收项。</li>
+</ul>
+<hr />
+<h2 id="验证策略">验证策略</h2>
+<ul>
+<li>Domain-level: <code>src/topology/*.test.ts</code> 覆盖
+schema、templates、initialize、validate、artifacts、inspect、operations
+和 limits。</li>
+<li>Bridge-level:
+<code>src/topology/project-bridge.test.ts</code>、<code>src/domain/topology-factory.test.ts</code>、<code>src-node/stage-skills/tsn-stage-runner.test.ts</code>
+覆盖 canonical round-trip 和 staged payload。</li>
+<li>MCP-level: <code>src-node/mcp/topology-tools.test.ts</code> 覆盖
+tool registry、handler inputs、summary/full result 和 structured
+errors。</li>
+<li>Agent/client-level:
+<code>src-node/claude-agent-worker.test.mjs</code>、<code>src/agent/fake-agent.ts</code>
+相关测试、<code>src/app/App.test.tsx</code> 覆盖 MCP availability
+summary 与 staged UI 门禁。</li>
+<li>Regression: 继续运行
+<code>npm run build</code>、<code>npm test</code>；触及 Tauri command 或
+packaging 时再运行 <code>npm run cargo:test</code> 和相关 E2E。</li>
+</ul>
+<hr />
+<h2 id="来源">来源</h2>
+<ul>
+<li>Origin requirements:
+<code>docs/brainstorms/2026-05-27-tsn-topology-mcp-requirements.md</code></li>
+<li>Architecture visualization:
+<code>docs/brainstorms/2026-05-27-tsn-topology-mcp-architecture.html</code></li>
+<li>Current project contracts: <code>src/domain/canonical.ts</code>,
+<code>src/domain/topology-factory.ts</code>,
+<code>src/domain/validation.ts</code></li>
+<li>Current staged workflow integration:
+<code>src-node/stage-skills/tsn-stage-runner.ts</code>,
+<code>src/agent/agent-adapter.ts</code>,
+<code>src-node/claude-agent-worker.mjs</code></li>
+<li>Current skill rules and legacy tools:
+<code>.claude/skills/tsn-topology/SKILL.md</code>,
+<code>tsn-topology/tools/topology-builder.js</code>,
+<code>tsn-topology/tools/validate-topology.js</code></li>
+<li>Current packaging boundary: <code>src-tauri/tauri.conf.json</code>,
+<code>package.json</code></li>
+<li>External docs checked via Context7: MCP TypeScript SDK docs and
+Tauri v2 sidecar documentation</li>
+</ul>
+</body>
+</html>

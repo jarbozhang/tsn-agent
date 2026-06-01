@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TSN Topology MCP 架构摘要</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --soft: #eef3f7;
+      --text: #172033;
+      --muted: #5f6b7a;
+      --line: #d8e0ea;
+      --blue: #2563eb;
+      --teal: #0f766e;
+      --green: #15803d;
+      --amber: #b45309;
+      --red: #b91c1c;
+      --violet: #6d28d9;
+      --shadow: 0 14px 40px rgba(23, 32, 51, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      line-height: 1.55;
+    }
+
+    body {
+      margin: 0;
+      overflow-x: hidden;
+    }
+
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 38px 26px 58px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: end;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 26px;
+      margin-bottom: 28px;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+
+    h1 {
+      font-size: 34px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-bottom: 14px;
+      font-size: 22px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin-bottom: 8px;
+      font-size: 16px;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    p { color: var(--muted); }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      background: #eef2f7;
+      border: 1px solid #dbe3ed;
+      border-radius: 5px;
+      padding: 1px 4px;
+      font-size: 0.92em;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .kicker {
+      display: inline-flex;
+      margin-bottom: 10px;
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(150px, 1fr));
+      gap: 10px;
+      min-width: 330px;
+    }
+
+    .meta div, .panel, .callout, .step-card, .lane, table {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .meta div { padding: 10px 12px; }
+    .meta span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .meta strong {
+      display: block;
+      margin-top: 2px;
+      font-size: 13px;
+    }
+
+    .section { margin-top: 30px; }
+    .panel { padding: 18px; }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .summary-card {
+      min-width: 0;
+      min-height: 118px;
+      padding: 16px;
+      border-left: 5px solid var(--teal);
+    }
+
+    .summary-card.warning { border-left-color: var(--amber); }
+    .summary-card.stop { border-left-color: var(--red); }
+    .summary-card.blue { border-left-color: var(--blue); }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      color: #fff;
+      background: var(--teal);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .badge.blue { background: var(--blue); }
+    .badge.green { background: var(--green); }
+    .badge.amber { background: var(--amber); }
+    .badge.red { background: var(--red); }
+    .badge.violet { background: var(--violet); }
+    .badge.gray { background: #475569; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(136px, 1fr));
+      gap: 12px;
+      padding-bottom: 4px;
+    }
+
+    .step-card {
+      position: relative;
+      min-width: 0;
+      min-height: 136px;
+      padding: 15px;
+    }
+
+    .step-card:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -10px;
+      width: 9px;
+      height: 2px;
+      background: #9aa7b8;
+    }
+
+    .step-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      margin-bottom: 10px;
+      border-radius: 50%;
+      color: #fff;
+      background: var(--blue);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .lane {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      overflow: hidden;
+    }
+
+    .lane + .lane { margin-top: 12px; }
+
+    .lane-label {
+      padding: 14px 16px;
+      background: var(--soft);
+      border-right: 1px solid var(--line);
+      font-weight: 800;
+    }
+
+    .lane-body {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 14px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .chip.good { border-color: #98d3ad; color: var(--green); background: #f0fdf4; }
+    .chip.warn { border-color: #e8c174; color: var(--amber); background: #fffbeb; }
+    .chip.stop { border-color: #efa7a7; color: var(--red); background: #fff1f2; }
+    .chip.info { border-color: #a8bdf0; color: var(--blue); background: #eff6ff; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      box-shadow: none;
+      font-size: 14px;
+      table-layout: fixed;
+    }
+
+    th, td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--soft);
+      color: #334155;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .callout {
+      display: grid;
+      grid-template-columns: 5px 1fr;
+      gap: 12px;
+      padding: 14px 16px 14px 0;
+    }
+
+    .callout::before {
+      content: "";
+      display: block;
+      border-radius: 8px;
+      background: var(--teal);
+    }
+
+    .callout.warning::before { background: var(--amber); }
+    .callout.stop::before { background: var(--red); }
+
+    .mini-flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .mini-flow div {
+      min-width: 0;
+      min-height: 92px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    li + li { margin-top: 6px; }
+
+    footer {
+      margin-top: 34px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      .page {
+        padding: 28px 18px 44px;
+      }
+
+      header, .grid-2, .grid-3, .grid-4, .mini-flow, .flow {
+        grid-template-columns: 1fr;
+      }
+
+      .meta {
+        grid-template-columns: 1fr;
+        min-width: 0;
+      }
+
+      .lane { grid-template-columns: 1fr; }
+
+      .lane-label {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .step-card:not(:last-child)::after {
+        top: auto;
+        right: auto;
+        left: 29px;
+        bottom: -8px;
+        width: 2px;
+        height: 8px;
+      }
+    }
+
+    @media (max-width: 560px) {
+      h1 { font-size: 27px; }
+      h2 { font-size: 20px; }
+
+      .page {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+
+      .panel { padding: 14px; }
+
+      th, td {
+        padding: 9px 8px;
+        font-size: 13px;
+      }
+
+      .chip {
+        white-space: normal;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div>
+        <div class="kicker">Architecture Summary</div>
+        <h1>TSN Topology MCP 目标架构摘要</h1>
+        <p>这份 HTML 只保留当前最关键的架构判断：自然语言如何落到确定性拓扑服务、从 0 初始化和已有拓扑修改如何分工、哪些能力不属于 topology MCP、以及生产 sidecar 的架构决策门。</p>
+      </div>
+      <div class="meta" aria-label="document metadata">
+        <div>
+          <span>日期</span>
+          <strong>2026-05-27</strong>
+        </div>
+        <div>
+          <span>文档类型</span>
+          <strong>可视化摘要</strong>
+        </div>
+        <div>
+          <span>关联需求</span>
+          <strong><code>tsn-topology-mcp</code></strong>
+        </div>
+        <div>
+          <span>详细契约</span>
+          <strong>requirements markdown</strong>
+        </div>
+      </div>
+    </header>
+
+    <section class="section">
+      <h2>你关心的结论</h2>
+      <div class="grid-4">
+        <div class="panel summary-card">
+          <h3>拓扑 MCP 是确定性服务</h3>
+          <p>只接收版本化 <code>IntermediateTopology</code>、初始化参数和结构化 operations，运行固定 initializer、validator、inspect 和 artifact 逻辑。</p>
+        </div>
+        <div class="panel summary-card blue">
+          <h3>P0 先做可测闭环</h3>
+          <p>P0 覆盖模板发现、初始化、校验、artifact 和插入交换机 tracer subset；完整 CRUD 和行业模板进 P1。</p>
+        </div>
+        <div class="panel summary-card warning">
+          <h3>Project 不放进 topology MCP</h3>
+          <p><code>generate_project</code>、flow、时间同步、NED/INI 和仿真导出留在 project/simulation 层。</p>
+        </div>
+        <div class="panel summary-card stop">
+          <h3>不导出 MAC 表 HTML</h3>
+          <p><code>topology.render_mac_table_html</code> 不进入服务，也不再生成 HTML artifact。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>review 后补强的边界</h2>
+      <div class="grid-4">
+        <div class="panel summary-card blue">
+          <h3>host 与 domain 分离</h3>
+          <p>P0 先定义 <code>topology domain</code> 和 MCP adapter/dev host；<code>tsn-mcp-host</code> 是生产集成阶段候选形态。</p>
+        </div>
+        <div class="panel summary-card">
+          <h3>权威 schema</h3>
+          <p><code>IntermediateTopology</code> 必须版本化，表达节点、链路、端口和模板元数据，并覆盖现有样例 fixture。</p>
+        </div>
+        <div class="panel summary-card warning">
+          <h3>生产打包是决策门</h3>
+          <p>stdio、Tauri-managed host、共享 package + adapter 需要先比较，再进入生产 sidecar 和 Node-free 验收。</p>
+        </div>
+        <div class="panel summary-card stop">
+          <h3>安全默认收紧</h3>
+          <p>生产方案必须明确进程所有权、固定随包路径、完整性校验、资源上限、summary/full 边界和 full 数据本地清理。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>端到端链路</h2>
+      <div class="flow" aria-label="end to end flow">
+        <div class="step-card">
+          <span class="step-number">1</span>
+          <h3>用户输入</h3>
+          <p>用户用自然语言描述新拓扑或修改当前拓扑。</p>
+        </div>
+        <div class="step-card">
+          <span class="step-number">2</span>
+          <h3>Agent 解析</h3>
+          <p>Agent/project 判断是无拓扑初始化，还是已有拓扑上的增量 operations。</p>
+        </div>
+        <div class="step-card">
+          <span class="step-number">3</span>
+          <h3>初始化或消歧</h3>
+          <p>无拓扑时先发现模板并形成初始化参数；已有拓扑时解析稳定节点/链路 ID。</p>
+        </div>
+        <div class="step-card">
+          <span class="step-number">4</span>
+          <h3>Topology MCP</h3>
+          <p>执行 <code>describe_templates</code>、<code>initialize</code>、<code>inspect</code>、<code>apply_operations</code>、<code>validate</code>。</p>
+        </div>
+        <div class="step-card">
+          <span class="step-number">5</span>
+          <h3>Project composition</h3>
+          <p>通过 bridge 把 updated topology 和 changeSet 合成 canonical project，并判断 flow 是否需要重新规划。</p>
+        </div>
+        <div class="step-card">
+          <span class="step-number">6</span>
+          <h3>客户端展示</h3>
+          <p>展示拓扑变化、工具状态、确认提示和后续阶段入口。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>职责边界</h2>
+      <div class="lane">
+        <div class="lane-label">Agent / Project 层</div>
+        <div class="lane-body">
+          <span class="chip info">自然语言理解</span>
+          <span class="chip info">模板推荐</span>
+          <span class="chip info">初始化参数提取</span>
+          <span class="chip info">project 内拓扑 ID</span>
+          <span class="chip info">节点/链路 ID 消歧</span>
+          <span class="chip info">语义意图拆解</span>
+          <span class="chip info">dryRun 预览确认</span>
+          <span class="chip info">保存 dryRun snapshot</span>
+          <span class="chip info">full 数据本地清理</span>
+          <span class="chip info">flow route 影响判断</span>
+          <span class="chip info">canonical project 合成</span>
+        </div>
+      </div>
+      <div class="lane">
+        <div class="lane-label">Topology MCP</div>
+        <div class="lane-body">
+          <span class="chip good">模板目录</span>
+          <span class="chip good">拓扑初始化</span>
+          <span class="chip good">节点/链路查询</span>
+          <span class="chip good">插入交换机 subset</span>
+          <span class="chip good">结构校验</span>
+          <span class="chip good">artifact 构建</span>
+          <span class="chip good">changeSet</span>
+          <span class="chip good">summary/full 契约</span>
+          <span class="chip good">资源上限</span>
+          <span class="chip good">确定性错误</span>
+        </div>
+      </div>
+      <div class="lane">
+        <div class="lane-label">明确不在 MCP 内</div>
+        <div class="lane-body">
+          <span class="chip stop">大模型调用</span>
+          <span class="chip stop">prompt 解析</span>
+          <span class="chip stop"><code>generate_project</code></span>
+          <span class="chip stop">NED/INI 导出</span>
+          <span class="chip stop">文件覆盖/回滚</span>
+          <span class="chip stop">完整 artifact 外发</span>
+          <span class="chip stop">长期服务端 handle</span>
+          <span class="chip stop">MAC 表 HTML</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section grid-2">
+      <div class="panel">
+        <h2>Topology MCP 工具面</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>工具</th>
+              <th>用途</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>topology.describe_templates</code></td>
+              <td>返回模板 ID、参数约束、默认值和适用场景标签，供 Agent/Project 层选择模板。</td>
+            </tr>
+            <tr>
+              <td><code>topology.initialize</code></td>
+              <td>从 <code>templateId</code> 和结构化参数生成 initial intermediate topology。</td>
+            </tr>
+            <tr>
+              <td><code>topology.inspect</code></td>
+              <td>只读查询节点、链路、端口占用、邻接关系和引用摘要。</td>
+            </tr>
+            <tr>
+              <td><code>topology.apply_operations</code></td>
+              <td>P0 对当前 intermediate topology 原子应用插入交换机所需 operations，P1 扩展完整 CRUD。</td>
+            </tr>
+            <tr>
+              <td><code>topology.validate_intermediate</code></td>
+              <td>验证节点、链路、端口和引用完整性。</td>
+            </tr>
+            <tr>
+              <td><code>topology.build_artifacts</code></td>
+              <td>生成兼容 JSON artifact，不直接写用户目录。</td>
+            </tr>
+            <tr>
+              <td><code>topology.validate_artifacts</code></td>
+              <td>校验 legacy artifact 之间的一致性。</td>
+            </tr>
+            <tr>
+              <td><code>topology.describe_artifacts</code></td>
+              <td>返回 artifact 计数和诊断摘要；不返回完整 artifact 原文。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h2>节点/链路能力模型</h2>
+        <div class="grid-3">
+          <div>
+            <span class="badge gray">Read</span>
+            <h3><code>node.inspect</code></h3>
+            <p>通过 <code>topology.inspect</code> 查询节点详情、端口占用和邻接链路。</p>
+          </div>
+          <div>
+            <span class="badge gray">Read</span>
+            <h3><code>link.inspect</code></h3>
+            <p>通过 <code>topology.inspect</code> 查询链路端点、端口、介质和速率。</p>
+          </div>
+          <div>
+            <span class="badge blue">Node</span>
+            <h3><code>node.add</code></h3>
+            <p>新增节点，调用方提供稳定 ID、类型、端口和位置。</p>
+          </div>
+          <div>
+            <span class="badge blue">Node</span>
+            <h3><code>node.update</code></h3>
+            <p>P1 更新名称、位置、端口等允许变更字段。</p>
+          </div>
+          <div>
+            <span class="badge blue">Node</span>
+            <h3><code>node.delete</code></h3>
+            <p>P1 删除节点；连接链路必须显式处理。</p>
+          </div>
+          <div>
+            <span class="badge green">Link</span>
+            <h3><code>link.add</code></h3>
+            <p>新增链路，必须给出两端节点、端口、介质和速率。</p>
+          </div>
+          <div>
+            <span class="badge green">Link</span>
+            <h3><code>link.update</code></h3>
+            <p>P1 更新链路端点、端口或速率。</p>
+          </div>
+          <div>
+            <span class="badge green">Link</span>
+            <h3><code>link.delete</code></h3>
+            <p>删除链路，并释放两端端口占用。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>两条拓扑路径</h2>
+      <div class="grid-2">
+        <div class="panel">
+          <span class="badge blue">No Topology</span>
+          <h3>从 0 初始化</h3>
+          <p>project/Agent/skill 层先调用 <code>topology.describe_templates</code>，再提取或确认模板 ID、交换机数量、终端数量、链路速率和冗余策略，调用 <code>topology.initialize</code>。</p>
+        </div>
+        <div class="panel">
+          <span class="badge green">Existing Topology</span>
+          <h3>增量修改</h3>
+          <p>project/Agent 层先把当前 canonical/legacy 拓扑转成 <code>IntermediateTopology</code>，用 <code>topology.inspect</code> 完成 ID 消歧，再把已解析 operations 交给 <code>topology.apply_operations</code>。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>为什么需要 IntermediateTopology</h2>
+      <div class="grid-3">
+        <div class="panel">
+          <h3>不是语义中间态</h3>
+          <p>它不是让大模型理解用户意图的草稿，而是 topology domain 的版本化事实模型。</p>
+        </div>
+        <div class="panel">
+          <h3>不承载项目身份</h3>
+          <p><code>topologyId</code> 和 <code>revision</code> 属于 project/client 层；MCP P0 不维护服务端拓扑状态，调用方每次传入完整 topology。</p>
+        </div>
+        <div class="panel">
+          <h3>支撑可测试工具链</h3>
+          <p><code>validate</code>、<code>apply_operations</code>、<code>build_artifacts</code> 和 fixture 都以它为输入输出，避免模型上下文或 canonical project 成为第二事实来源。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>确定性验证规则</h2>
+      <div class="grid-3">
+        <div class="panel">
+          <h3>先验证，再应用</h3>
+          <p>整批 operations 作为原子事务处理；任一操作失败，都不返回半应用后的拓扑。</p>
+        </div>
+        <div class="panel">
+          <h3>字段必须齐全</h3>
+          <p>新增节点/链路必须包含 ID、类型、端口/布局策略、链路两端、介质和速率等关键项。</p>
+        </div>
+        <div class="panel">
+          <h3>不做猜测</h3>
+          <p>不得靠显示名猜节点；非稳定 selector 或命中不唯一时返回歧义错误。</p>
+        </div>
+        <div class="panel">
+          <h3>引用必须完整</h3>
+          <p>链路两端节点必须存在；更新和删除必须指向稳定 ID。</p>
+        </div>
+        <div class="panel">
+          <h3>端口必须无冲突</h3>
+          <p>同一节点端口不能被多条链路占用；删除链路会释放端口。</p>
+        </div>
+        <div class="panel">
+          <h3>输出必须稳定</h3>
+          <p>不生成随机 ID、随机坐标或时间戳；相同输入得到相同 topology 和 changeSet。</p>
+        </div>
+        <div class="panel">
+          <h3>预览必须可确认</h3>
+          <p><code>dryRun</code> 返回 changeSet；确认时客户端重放同一份 topology snapshot 和 operations，若当前拓扑已变化则重新预览。</p>
+        </div>
+        <div class="panel">
+          <h3>资源必须有上限</h3>
+          <p>节点、链路、端口、operation、JSON 深度、artifact 大小和执行时间超限时返回结构化错误。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>响应与数据边界</h2>
+      <div class="grid-3">
+        <div class="panel">
+          <h3>Agent-facing 默认 summary</h3>
+          <p>只返回摘要、计数、warning/error summary 和必要字段；歧义错误只给候选数量和可继续消歧的摘要。</p>
+        </div>
+        <div class="panel">
+          <h3>full 只留在本地</h3>
+          <p>完整 topology、端口占用、MAC 表、artifact 和 full changeSet 只进入 project/client 层或用户显式允许的本地 full 模式。</p>
+        </div>
+        <div class="panel">
+          <h3>MCP 不保存长期句柄</h3>
+          <p>服务端不维护长期 artifact handle；本地缓存由 project/client 层生成、清理，不能进入 Agent 上下文或诊断日志。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>实际案例：从 0 初始化一个环形拓扑</h2>
+      <div class="callout">
+        <div>
+          <strong>关键点</strong>
+          <p>无当前拓扑时不会调用 <code>topology.apply_operations</code>。Agent/Project 层先发现模板并形成结构化初始化参数，MCP 用 <code>topology.initialize</code> 生成 initial <code>IntermediateTopology</code>。</p>
+        </div>
+      </div>
+      <div class="mini-flow">
+        <div>
+          <span class="badge gray">用户</span>
+          <h3>自然语言</h3>
+          <p>“新建一个 4 个交换机、每个交换机 2 个终端的环形 TSN 网络。”</p>
+        </div>
+        <div>
+          <span class="badge blue">发现模板</span>
+          <h3><code>describe_templates</code></h3>
+          <p>Agent 查询可用模板，确认 <code>generic-ring</code> 支持交换机数量、终端挂载和链路速率参数。</p>
+        </div>
+        <div>
+          <span class="badge green">初始化</span>
+          <h3><code>initialize</code></h3>
+          <p>调用方提供模板 ID 和数量参数，MCP 返回 initial topology。</p>
+        </div>
+        <div>
+          <span class="badge violet">合成项目</span>
+          <h3>Project bridge</h3>
+          <p>project 层把 intermediate topology 合成 canonical project，后续时间同步和 flow 规划继续留在项目层。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>实际案例：在交换机 1 和 2 之间添加交换机 3</h2>
+      <div class="callout warning">
+        <div>
+          <strong>关键点</strong>
+          <p>这句话不会直接进入 MCP。Agent/project 层先把“交换机 1/2/3”解析成稳定 ID 和结构化 operations，MCP 基于传入的 current topology 验证和执行。</p>
+        </div>
+      </div>
+      <div class="mini-flow">
+        <div>
+          <span class="badge gray">用户</span>
+          <h3>自然语言</h3>
+          <p>“添加交换机 3，放到交换机 1 和交换机 2 之间。”</p>
+        </div>
+        <div>
+          <span class="badge blue">上游</span>
+          <h3>消歧</h3>
+          <p><code>交换机 1 -> sw1</code>，<code>交换机 2 -> sw2</code>；当前拓扑由 project 层转换为 <code>IntermediateTopology</code>。</p>
+        </div>
+        <div>
+          <span class="badge green">MCP</span>
+          <h3>预览</h3>
+          <p>用 <code>dryRun</code> 验证 <code>link.delete</code> + <code>node.add</code> + 两个 <code>link.add</code>，返回 changeSet。</p>
+        </div>
+        <div>
+          <span class="badge violet">结果</span>
+          <h3>确认应用</h3>
+          <p>用户确认后重放同一份 topology snapshot 和 operations，并返回 updated topology 与 changeSet。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section grid-2">
+      <div class="panel">
+        <h2>Tauri 打包形态</h2>
+        <ul>
+          <li>P0 先提供开发/测试可运行的 topology domain 和 MCP adapter。</li>
+          <li>P0 只要求 domain fixture 与 project bridge 最小 round-trip；完整 staged workflow 集成进入 P1/integration。</li>
+          <li>生产前比较 stdio packaged server、Tauri-managed host、共享 package + adapter 三条路径。</li>
+          <li>如果选择 stdio，通常由 Agent SDK/MCP client spawn server；不要假设同一个 stdio 进程同时被客户端和 Agent 共享。</li>
+          <li><code>time_sync.*</code>、<code>flow.*</code>、<code>simulation.*</code> 属于后续独立需求。</li>
+          <li>只有出现独立生命周期、不同运行时或隔离需求时，才拆成多个 MCP server。</li>
+          <li>生产包若承诺不要求用户自行安装 Node，必须同时覆盖现有 Agent worker 链路。</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h2>常用拓扑模板</h2>
+        <ul>
+          <li>P0：<code>generic-line</code>、<code>generic-ring</code>，以及可由现有规则 fixture 化的 <code>aerospace-redundant</code> 场景模板。</li>
+          <li>P1 候选：<code>industrial-line</code>、<code>industrial-ring</code>、<code>automotive-zonal</code>、<code>aerospace-dual-plane</code> 等行业模板。</li>
+          <li>模板通过 <code>topology.initialize</code> 输出 initial intermediate topology，不输出完整 project，也不输出一串 add operations。</li>
+          <li>Agent/LLM 通过 <code>topology.describe_templates</code> 查询可用模板，再由 Project/Agent 层选择或向用户确认。</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>内容校验</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>校验项</th>
+            <th>结果</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>是否区分无拓扑初始化和已有拓扑修改</td>
+            <td><span class="badge green">Pass</span></td>
+            <td>无拓扑走 <code>topology.initialize</code>，已有拓扑才走 <code>topology.apply_operations</code>。</td>
+          </tr>
+          <tr>
+            <td>是否覆盖节点/链路增删改查模型</td>
+            <td><span class="badge green">Pass</span></td>
+            <td>已明确“查”走 <code>topology.inspect</code>，P0 “增删改”覆盖插入交换机 subset，P1 再扩完整 CRUD。</td>
+          </tr>
+          <tr>
+            <td>是否保留自然语言到落地架构链路</td>
+            <td><span class="badge green">Pass</span></td>
+            <td>保留“从 0 初始化环形拓扑”和“交换机 3 插入交换机 1/2 之间”两个摘要案例。</td>
+          </tr>
+          <tr>
+            <td>是否避免过细 JSON / 错误码矩阵</td>
+            <td><span class="badge green">Pass</span></td>
+            <td>已移除大段 schema、返回样例和长错误码矩阵。</td>
+          </tr>
+          <tr>
+            <td>是否明确 MCP 不调用大模型</td>
+            <td><span class="badge green">Pass</span></td>
+            <td>职责边界和确定性规则中均已体现。</td>
+          </tr>
+          <tr>
+            <td>是否解耦 <code>generate_project</code>、NED/INI、HTML 导出</td>
+            <td><span class="badge green">Pass</span></td>
+            <td>明确列为不属于 topology MCP。</td>
+          </tr>
+          <tr>
+            <td>是否覆盖 Tauri 打包和多 server 策略</td>
+            <td><span class="badge green">Pass</span></td>
+            <td>已区分 P0 dev/test adapter 和生产架构决策门，并标记 Node-free 全链路风险。</td>
+          </tr>
+          <tr>
+            <td>是否覆盖 review 后的高风险点</td>
+            <td><span class="badge green">Pass</span></td>
+            <td>补充权威 schema、dryRun 预览、summary/full、本地缓存清理、资源上限和敏感 artifact 边界。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer>
+      来源：<code>docs/brainstorms/2026-05-27-tsn-topology-mcp-requirements.md</code>、当前代码扫描、MCP TypeScript SDK 文档、Tauri v2 sidecar 文档。
+    </footer>
+  </main>
+</body>
+</html>
