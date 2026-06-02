@@ -261,10 +261,10 @@ describe("App", () => {
     invokeMock.mockReset();
     openDialogMock.mockReset();
     Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
-    // fake-agent kept as a test-only intent runtime (the production runtime path was removed
-    // in U3a). Tests that need natural-language stage advancement keep using it here; tests
-    // that need explicit fixture shapes use createTopologyWaitingConfirmationResult instead.
-    const { runFakeTsnAgent } = await import("../agent/fake-agent");
+    // src/test/fake-agent-test-runtime is a test-only intent runtime (production runtime
+    // path was removed in U3a). Tests that need natural-language stage advancement use it
+    // here; tests that need explicit fixture shapes use createTopologyWaitingConfirmationResult.
+    const { runFakeTsnAgent } = await import("../test/fake-agent-test-runtime");
     runTsnAgentMock.mockImplementation(
       async ({ userIntent, session }: { userIntent: string; session?: { project?: unknown; workflow?: unknown } }) =>
         runFakeTsnAgent(
