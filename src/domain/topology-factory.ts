@@ -344,7 +344,7 @@ function matchSwitchInterconnect(text: string): TopologyIntent["switchInterconne
   return undefined;
 }
 
-function inferIntentFromProject(project: CanonicalTsnProjectV0): TopologyIntent {
+export function inferIntentFromProject(project: CanonicalTsnProjectV0): TopologyIntent {
   const switchCount = project.topology.nodes.filter((node) => node.type === "switch").length;
   const endSystemCount = project.topology.nodes.filter((node) => node.type === "endSystem").length;
   const switchLinkCount = project.topology.links.filter((link) =>
