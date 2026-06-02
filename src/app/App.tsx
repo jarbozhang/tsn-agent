@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionRepository } from "./hooks/use-session-repository";
 import { useAgentRunController, type AgentRunPhase } from "./hooks/use-agent-run-controller";
+import { usePlannerRun, bundleForAgentResult, plannerRunForAgentResult } from "./hooks/use-planner-run";
 import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -136,8 +137,6 @@ export function App() {
   } = useAgentRunController({
     scrollDeps: [currentSession.id, currentSession.messages],
   });
-  const [plannerBaseUrl, setPlannerBaseUrl] = useState(resolvePlannerBaseUrl());
-  const [isPlannerActionRunning, setIsPlannerActionRunning] = useState(false);
   const [expandedStepTraceId, setExpandedStepTraceId] = useState<string | undefined>();
   const [exportResult, setExportResult] = useState<ProjectExportResult | undefined>();
   const [exportError, setExportError] = useState<string | undefined>();
@@ -145,8 +144,27 @@ export function App() {
   const [activeConfigTab, setActiveConfigTab] = useState<ConfigTabId>("flows");
   const [selectedTopologyItem, setSelectedTopologyItem] = useState<SelectedTopologyItem | undefined>();
   const [selectedFlowId, setSelectedFlowId] = useState<string | undefined>();
-  const plannerPollTimeoutRef = useRef<number | undefined>(undefined);
-  const plannerTransientFailureCountRef = useRef(0);
+  const {
+    plannerRun,
+    plannerBaseUrl,
+    setPlannerBaseUrl,
+    isPlannerActionRunning,
+    canStartPlanner,
+    canStopPlanner,
+    currentPlannerRequestFingerprint,
+    plannerResultForCurrentProject,
+    handleStartPlanner,
+    handleStopPlanner,
+  } = usePlannerRun({
+    currentSession,
+    repository,
+    diagnostics: diagnosticsRepository,
+    onPersistedSession: (next) => setCurrentSession((s) => (s.id === next.id ? next : s)),
+    onPlannerStart: () => {
+      setExportError(undefined);
+      setActiveConfigTab("artifacts");
+    },
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -178,32 +196,11 @@ export function App() {
     setActiveConfigTab("flows");
     setSelectedTopologyItem(undefined);
     setSelectedFlowId(undefined);
-    setPlannerBaseUrl(resolvePlannerBaseUrl(currentSession.plannerRun?.baseUrl));
   }, [currentSession.id]);
-
-  useEffect(() => {
-    setPlannerBaseUrl(resolvePlannerBaseUrl(currentSession.plannerRun?.baseUrl));
-  }, [currentSession.plannerRun?.baseUrl]);
-
-  useEffect(() => {
-    const run = normalizePlannerRunState(currentSession.plannerRun);
-
-    if (run.status !== "running" || !run.planId) {
-      clearPlannerPollTimeout();
-      return;
-    }
-
-    schedulePlannerPoll(currentSession.id, run.planId, run.baseUrl, run.runToken);
-  }, [currentSession.id, currentSession.plannerRun?.planId, currentSession.plannerRun?.runToken, currentSession.plannerRun?.status]);
-
-  useEffect(() => () => {
-    clearPlannerPollTimeout();
-  }, []);
 
   const project = currentSession.project;
   const bundle = currentSession.bundle;
   const workflow = currentSession.workflow;
-  const plannerRun = normalizePlannerRunState(currentSession.plannerRun);
   const scenarioConfig = getScenarioConfig(workflow.scenarioConfigId);
   const currentStage = workflow.stages[workflow.currentStep];
   const hasUserInteraction = currentSession.messages.some((message) => message.role === "user");
@@ -275,33 +272,6 @@ export function App() {
   const linkCount = project?.topology.links.length ?? 0;
   const flowCount = visibleFlows.length;
   const artifactGroups = useMemo(() => groupArtifacts(bundle?.artifacts ?? []), [bundle]);
-  const canStartPlanner = Boolean(
-    project
-      && workflow.currentStep === "planning-export"
-      && ["current", "waiting_confirmation", "confirmed"].includes(workflow.stages["planning-export"].status)
-      && !isPlannerActionRunning
-      && plannerRun.status !== "running"
-      && plannerRun.status !== "cancel_requested",
-  );
-  const canStopPlanner = Boolean(
-    (plannerRun.status === "running" || plannerRun.status === "busy" || plannerRun.status === "cancel_requested")
-      && !isPlannerActionRunning,
-  );
-  const currentPlannerRequestFingerprint = useMemo(() => {
-    if (!project) {
-      return undefined;
-    }
-
-    try {
-      return createPlannerRequestFingerprint(exportPlannerInput(project));
-    } catch {
-      return undefined;
-    }
-  }, [project]);
-  const plannerResultForCurrentProject = currentPlannerRequestFingerprint
-    && plannerRun.resultSnapshot?.requestFingerprint === currentPlannerRequestFingerprint
-    ? plannerRun.resultSnapshot
-    : undefined;
 
   useEffect(() => {
     if (!project || !selectedTopologyItem) {
@@ -325,12 +295,6 @@ export function App() {
     setSelectedFlowId(undefined);
   }, [selectedFlowId, visibleFlows]);
 
-  async function persistPlannerSession(nextSession: TsnSession, message: string) {
-    await persistSessionIfCurrent(nextSession, {
-      logMessage: message,
-      logDetails: plannerRunSummary(nextSession),
-    });
-  }
 
   async function handleSubmit() {
     await submitIntent(input);
@@ -565,257 +529,6 @@ export function App() {
       bundle: nextBundle,
       workflow,
     });
-  }
-
-  async function handleStartPlanner() {
-    if (!project || !canStartPlanner) {
-      return;
-    }
-
-    setIsPlannerActionRunning(true);
-    setExportError(undefined);
-    setActiveConfigTab("artifacts");
-
-    try {
-      const request = exportPlannerInput(project);
-      const requestSummary = summarizePlannerRequest(request);
-      const requestFingerprint = createPlannerRequestFingerprint(request);
-      const baseUrl = resolvePlannerBaseUrl(plannerBaseUrl);
-      const runToken = createPlannerRunToken();
-      const startedRun: PlannerRunState = {
-        status: "running",
-        baseUrl,
-        runToken,
-        requestFingerprint,
-        startedAt: new Date().toISOString(),
-        requestSummary,
-      };
-      const submittingSession: TsnSession = {
-        ...currentSession,
-        updatedAt: new Date().toISOString(),
-        plannerRun: startedRun,
-      };
-
-      await persistPlannerSession(submittingSession, "规划任务开始提交");
-
-      const response = await startPlannerPlan({ baseUrl, request });
-      const run = plannerRunFromStartResponse(startedRun, response);
-      const nextSession: TsnSession = {
-        ...submittingSession,
-        updatedAt: new Date().toISOString(),
-        plannerRun: run,
-      };
-
-      await persistPlannerSession(nextSession, "规划任务提交完成");
-
-      if (run.status === "running" && run.planId) {
-        schedulePlannerPoll(nextSession.id, run.planId, baseUrl, run.runToken);
-      } else if (run.status === "succeeded" && run.planId) {
-        const completedSession = await attachPlannerResult(nextSession, baseUrl, run.planId, run);
-        await persistPlannerSession(completedSession, "规划任务结果已读取");
-      }
-    } catch (error) {
-      const failedSession: TsnSession = {
-        ...currentSession,
-        updatedAt: new Date().toISOString(),
-        plannerRun: {
-          ...plannerRun,
-          status: "failed",
-          baseUrl: resolvePlannerBaseUrl(plannerBaseUrl),
-          updatedAt: new Date().toISOString(),
-          errorMessage: normalizeError(error),
-        },
-      };
-
-      await persistPlannerSession(failedSession, "规划任务启动失败");
-    } finally {
-      setIsPlannerActionRunning(false);
-    }
-  }
-
-  async function handleStopPlanner() {
-    if (!canStopPlanner) {
-      return;
-    }
-
-    setIsPlannerActionRunning(true);
-    clearPlannerPollTimeout();
-    const cancellingRun: PlannerRunState = {
-      ...plannerRun,
-      status: "cancel_requested",
-      runToken: createPlannerRunToken(),
-      updatedAt: new Date().toISOString(),
-    };
-    const cancellingSession: TsnSession = {
-      ...currentSession,
-      updatedAt: new Date().toISOString(),
-      plannerRun: cancellingRun,
-    };
-
-    await persistPlannerSession(cancellingSession, "规划任务停止请求已发出");
-
-    try {
-      const baseUrl = resolvePlannerBaseUrl(plannerRun.baseUrl);
-      const response = await stopPlannerPlan({ baseUrl, planId: plannerRun.planId });
-      const run: PlannerRunState = {
-        ...cancellingRun,
-        baseUrl,
-        status: normalizePlannerState(response.data.state),
-        planId: response.data.stopped_plan_id ?? response.data.requested_plan_id ?? plannerRun.planId,
-        updatedAt: response.timestamp ?? new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
-        errorCode: response.err_code === 0 ? undefined : response.err_code,
-        errorMessage: response.err_code === 0 ? undefined : response.err_msg,
-        traceId: response.trace_id,
-      };
-      const nextSession: TsnSession = {
-        ...cancellingSession,
-        updatedAt: new Date().toISOString(),
-        plannerRun: run,
-      };
-
-      await persistPlannerSession(nextSession, "规划任务停止请求完成");
-    } catch (error) {
-      const nextSession: TsnSession = {
-        ...cancellingSession,
-        updatedAt: new Date().toISOString(),
-        plannerRun: {
-          ...plannerRun,
-          status: "running",
-          runToken: createPlannerRunToken(),
-          updatedAt: new Date().toISOString(),
-          errorMessage: normalizeError(error),
-        },
-      };
-
-      await persistPlannerSession(nextSession, "规划任务停止失败");
-    } finally {
-      setIsPlannerActionRunning(false);
-    }
-  }
-
-  function clearPlannerPollTimeout() {
-    if (plannerPollTimeoutRef.current === undefined) {
-      return;
-    }
-
-    window.clearTimeout(plannerPollTimeoutRef.current);
-    plannerPollTimeoutRef.current = undefined;
-  }
-
-  function schedulePlannerPoll(sessionId: string, planId: string, baseUrl: string, runToken?: string) {
-    clearPlannerPollTimeout();
-
-    plannerPollTimeoutRef.current = window.setTimeout(() => {
-      void pollPlanner(sessionId, planId, baseUrl, runToken);
-    }, PLANNER_POLL_INTERVAL_MS);
-  }
-
-  async function pollPlanner(sessionId: string, planId: string, baseUrl: string, runToken?: string) {
-    try {
-      const latestSession = (await repository.list()).find((session) => session.id === sessionId);
-      const latestRun = normalizePlannerRunState(latestSession?.plannerRun);
-
-      if (!isExpectedPlannerRun(latestSession, planId, runToken)) {
-        return;
-      }
-
-      const response = await queryPlannerPlanStatus({ baseUrl, planId });
-      const nextRun = plannerRunFromQueryResponse(latestRun, response);
-      let nextSession: TsnSession = {
-        ...latestSession,
-        updatedAt: new Date().toISOString(),
-        plannerRun: nextRun,
-      };
-
-      if (!await isLatestPlannerRun(repository, sessionId, planId, runToken)) {
-        return;
-      }
-
-      if (nextRun.status === "succeeded") {
-        nextSession = await attachPlannerResult(nextSession, baseUrl, planId, nextRun);
-      }
-
-      if (!await isLatestPlannerRun(repository, sessionId, planId, runToken)) {
-        return;
-      }
-
-      plannerTransientFailureCountRef.current = 0;
-      await persistPlannerSession(nextSession, "规划任务状态已更新");
-
-      if (!isTerminalPlannerState(nextRun.status)) {
-        schedulePlannerPoll(sessionId, planId, baseUrl, nextRun.runToken);
-      }
-    } catch (error) {
-      const latestSession = (await repository.list()).find((session) => session.id === sessionId);
-
-      if (!isExpectedPlannerRun(latestSession, planId, runToken)) {
-        return;
-      }
-
-      plannerTransientFailureCountRef.current += 1;
-      const latestRun = normalizePlannerRunState(latestSession.plannerRun);
-      const exhaustedRetries = plannerTransientFailureCountRef.current > PLANNER_TRANSIENT_FAILURE_RETRY_LIMIT;
-      const nextRun: PlannerRunState = {
-        ...latestRun,
-        status: exhaustedRetries ? "failed" : latestRun.status,
-        updatedAt: new Date().toISOString(),
-        errorMessage: normalizeError(error),
-      };
-
-      await persistPlannerSession({
-        ...latestSession,
-        updatedAt: new Date().toISOString(),
-        plannerRun: nextRun,
-      }, "规划任务轮询失败");
-
-      if (!exhaustedRetries) {
-        schedulePlannerPoll(sessionId, planId, baseUrl, runToken);
-      }
-    }
-  }
-
-  async function attachPlannerResult(
-    session: TsnSession,
-    baseUrl: string,
-    planId: string,
-    run: PlannerRunState,
-  ): Promise<TsnSession> {
-    if (!session.project) {
-      return session;
-    }
-
-    const resultResponse = await getPlannerPlanResult({ baseUrl, planId });
-    assertSuccessfulPlannerResult(resultResponse, planId);
-    const sourceOutputs = resultResponse.data.source_outputs ?? {};
-    const outputFingerprints = resultResponse.data.output_fingerprints;
-    const summary = summarizePlannerResult(sourceOutputs, outputFingerprints);
-    const resultSnapshot = {
-      planId,
-      state: "succeeded" as const,
-      requestFingerprint: run.requestFingerprint,
-      sourceOutputs,
-      outputFingerprints,
-      traceId: resultResponse.trace_id,
-      timestamp: resultResponse.timestamp,
-      receivedAt: new Date().toISOString(),
-      summary,
-    };
-    const plannerRunWithResult: PlannerRunState = {
-      ...run,
-      resultSummary: summary,
-      resultSnapshot,
-      traceId: resultResponse.trace_id ?? run.traceId,
-      updatedAt: resultResponse.timestamp ?? run.updatedAt,
-    };
-
-    return {
-      ...session,
-      plannerRun: plannerRunWithResult,
-      bundle: createArtifactBundle(session.project, {
-        plannerResult: resultSnapshot,
-      }),
-    };
   }
 
   async function handleExportProject() {
@@ -1893,151 +1606,6 @@ function DetailRow({ label, value }: { label: string; value: string | number }) 
 
 function findPortIndex(node: { ports: Array<{ id: string; index: number }> }, portId: string): string | number {
   return node.ports.find((port) => port.id === portId)?.index ?? "无";
-}
-
-function createPlannerRunToken(): string {
-  return `planner-run-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function plannerRunForAgentResult(current: PlannerRunState, project: NonNullable<TsnSession["project"]>): PlannerRunState {
-  if (!current.resultSnapshot && !current.requestFingerprint) {
-    return current;
-  }
-
-  let nextFingerprint: string;
-
-  try {
-    nextFingerprint = createPlannerRequestFingerprint(exportPlannerInput(project));
-  } catch {
-    return createStalePlannerRunState(current);
-  }
-
-  if (current.requestFingerprint === nextFingerprint && current.resultSnapshot?.requestFingerprint === nextFingerprint) {
-    return current;
-  }
-
-  return createStalePlannerRunState(current);
-}
-
-function bundleForAgentResult(
-  project: NonNullable<TsnSession["project"]>,
-  bundle: TsnSession["bundle"],
-  plannerRun: PlannerRunState,
-): TsnSession["bundle"] {
-  if (!bundle) {
-    return bundle;
-  }
-
-  const fingerprint = createPlannerRequestFingerprint(exportPlannerInput(project));
-
-  if (plannerRun.resultSnapshot?.requestFingerprint !== fingerprint) {
-    return bundle;
-  }
-
-  return createArtifactBundle(project, {
-    plannerResult: plannerRun.resultSnapshot,
-  });
-}
-
-function isExpectedPlannerRun(
-  session: TsnSession | undefined,
-  planId: string,
-  runToken?: string,
-): session is TsnSession {
-  const run = normalizePlannerRunState(session?.plannerRun);
-
-  return Boolean(
-    session
-      && run.planId === planId
-      && ["running", "cancel_requested"].includes(run.status)
-      && (!runToken || run.runToken === runToken),
-  );
-}
-
-async function isLatestPlannerRun(
-  repo: import("../sessions/session-repository").SessionRepository,
-  sessionId: string,
-  planId: string,
-  runToken?: string,
-): Promise<boolean> {
-  const latestSession = (await repo.list()).find((session) => session.id === sessionId);
-  return isExpectedPlannerRun(latestSession, planId, runToken);
-}
-
-function assertSuccessfulPlannerResult(
-  response: PlannerServiceEnvelope<PlannerResultResponseData>,
-  expectedPlanId: string,
-): void {
-  if (response.err_code !== 0 || response.data.state !== "succeeded") {
-    throw new Error(response.data.error_message ?? response.err_msg ?? "规划结果尚未成功生成。");
-  }
-
-  if (response.data.plan_id && response.data.plan_id !== expectedPlanId) {
-    throw new Error(`规划结果任务 ID 不匹配：期望 ${expectedPlanId}，实际 ${response.data.plan_id}。`);
-  }
-
-  if (!response.data.source_outputs) {
-    throw new Error("规划结果缺少 source_outputs。");
-  }
-}
-
-function plannerRunFromStartResponse(
-  current: PlannerRunState,
-  response: PlannerServiceEnvelope<PlannerStartResponseData>,
-): PlannerRunState {
-  const state = normalizePlannerState(response.data.state);
-  const planId = response.data.plan_id ?? response.data.running_plan_id ?? current.planId;
-
-  return {
-    ...current,
-    status: state,
-    planId,
-    startedAt: response.data.started_at ?? current.startedAt,
-    updatedAt: response.timestamp ?? new Date().toISOString(),
-    runningDurationMs: response.data.running_duration_ms ?? current.runningDurationMs,
-    errorCode: response.err_code === 0 ? undefined : response.err_code,
-    errorMessage: response.err_code === 0 ? undefined : response.err_msg,
-    traceId: response.trace_id,
-  };
-}
-
-function plannerRunFromQueryResponse(
-  current: PlannerRunState,
-  response: PlannerServiceEnvelope<PlannerQueryStatusResponseData>,
-): PlannerRunState {
-  return {
-    ...current,
-    status: normalizePlannerState(response.data.state),
-    planId: response.data.plan_id ?? current.planId,
-    startedAt: response.data.started_at ?? current.startedAt,
-    updatedAt: response.data.updated_at ?? response.timestamp ?? new Date().toISOString(),
-    finishedAt: response.data.finished_at ?? current.finishedAt,
-    runningDurationMs: response.data.running_duration_ms ?? current.runningDurationMs,
-    internalResult: response.data.internal_result,
-    errorCode: response.data.error_code ?? (response.err_code === 0 ? undefined : response.err_code),
-    errorMessage: response.data.error_message ?? (response.err_code === 0 ? undefined : response.err_msg),
-    traceId: response.trace_id ?? current.traceId,
-  };
-}
-
-function normalizePlannerState(value: string): PlannerTaskState {
-  if ([
-    "idle",
-    "running",
-    "succeeded",
-    "failed",
-    "busy",
-    "cancel_requested",
-    "cancelled",
-    "no_running_plan",
-    "not_found",
-    "stale",
-    "unknown",
-  ].includes(value)) {
-    return value as PlannerTaskState;
-  }
-
-  return "unknown";
 }
 
 function groupArtifacts(artifacts: ExportedArtifact[]) {
