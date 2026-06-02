@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useSessionRepository } from "./hooks/use-session-repository";
 import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -25,10 +26,7 @@ import {
   sessionSummary,
   userIntentPreview,
 } from "../diagnostics/app-diagnostics";
-import {
-  createDiagnosticLogRepository,
-  type DiagnosticLogRepository,
-} from "../diagnostics/diagnostic-log-repository";
+import type { DiagnosticLogRepository } from "../diagnostics/diagnostic-log-repository";
 import { DiagnosticsLogView } from "../ui/diagnostics/DiagnosticsDrawer";
 import { SkillFilePreview } from "../ui/skills/SkillFilePreview";
 import { redactProviderNamesForDisplay } from "../ui/display-redaction";
@@ -72,11 +70,8 @@ import {
 } from "../project/project-exporter";
 import { appVersion, releaseNotes, type ReleaseNote } from "../release/release-info";
 import {
-  createEmptySession,
   createId,
-  createSessionRepository,
   type ChatMessage,
-  type SessionRepository,
   type TsnSession,
 } from "../sessions/session-repository";
 import {
@@ -85,8 +80,6 @@ import {
 } from "../skills/skill-catalog";
 import tsnAgentMark from "../assets/tsn-agent-mark.png";
 
-const repository: SessionRepository = createSessionRepository();
-const diagnosticsRepository: DiagnosticLogRepository = createDiagnosticLogRepository();
 const ASSISTANT_CONNECTING_MESSAGE = "正在连接智能助手，并结合当前会话上下文生成下一步规划...";
 const INTENT_PLACEHOLDER = "例如：我需要 4 个交换机，每个交换机连接 5 个端系统";
 const AGENT_STREAM_STALL_MS = 3000;
@@ -116,9 +109,22 @@ const CONFIG_TABS: Array<{ id: ConfigTabId; label: string }> = [
 const ARTIFACT_GROUP_ORDER: ArtifactGroupId[] = ["workspace", "planner", "simulation-inet", "manifest", "legacy"];
 
 export function App() {
-  const initialSession = useMemo(() => createEmptySession(), []);
-  const [sessions, setSessions] = useState<TsnSession[]>([initialSession]);
-  const [currentSession, setCurrentSession] = useState<TsnSession>(initialSession);
+  const {
+    sessions,
+    currentSession,
+    setCurrentSession,
+    repository,
+    persistSession,
+    persistSessionIfCurrent,
+    sessionExists,
+    updateAssistantMessage,
+    reloadSessionsList,
+    handleNewSession: hookHandleNewSession,
+    handleSelectSession: hookHandleSelectSession,
+    handleDuplicateSession: hookHandleDuplicateSession,
+    handleDeleteSession: hookHandleDeleteSession,
+    diagnostics: diagnosticsRepository,
+  } = useSessionRepository();
   const [input, setInput] = useState("");
   const [activeWorkspacePanel, setActiveWorkspacePanel] = useState<WorkspaceToolPanel | undefined>();
   const [isAgentRunning, setIsAgentRunning] = useState(false);
@@ -139,33 +145,6 @@ export function App() {
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const plannerPollTimeoutRef = useRef<number | undefined>(undefined);
   const plannerTransientFailureCountRef = useRef(0);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadSessionState() {
-      try {
-        const session = await repository.ensureCurrentSession();
-        const recentSessions = await repository.list();
-
-        if (!cancelled) {
-          setCurrentSession(session);
-          setSessions(recentSessions.length > 0 ? recentSessions : [session]);
-        }
-      } catch {
-        if (!cancelled) {
-          setCurrentSession(initialSession);
-          setSessions([initialSession]);
-        }
-      }
-    }
-
-    void loadSessionState();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -392,28 +371,11 @@ export function App() {
     setSelectedFlowId(undefined);
   }, [selectedFlowId, visibleFlows]);
 
-  async function persistSession(nextSession: TsnSession) {
-    await repository.save(nextSession);
-    logDiagnostic(diagnosticsRepository, {
-      sessionId: nextSession.id,
-      category: "session",
-      message: "会话已保存",
-      details: sessionSummary(nextSession),
-    });
-    setCurrentSession(nextSession);
-    setSessions(await repository.list());
-  }
-
   async function persistPlannerSession(nextSession: TsnSession, message: string) {
-    await repository.save(nextSession);
-    logDiagnostic(diagnosticsRepository, {
-      sessionId: nextSession.id,
-      category: "session",
-      message,
-      details: plannerRunSummary(nextSession),
+    await persistSessionIfCurrent(nextSession, {
+      logMessage: message,
+      logDetails: plannerRunSummary(nextSession),
     });
-    setCurrentSession((session) => (session.id === nextSession.id ? nextSession : session));
-    setSessions(await repository.list());
   }
 
   async function handleSubmit() {
@@ -478,7 +440,7 @@ export function App() {
         message: "pending session 已保存",
         details: sessionSummary(pendingSession),
       });
-      setSessions(await repository.list());
+      await reloadSessionsList();
 
       const runId = pendingRunId;
       const inFlightStepBuffer: Record<string, AgentStepDetail> = {};
@@ -570,7 +532,7 @@ export function App() {
         });
       }
       setCurrentSession((session) => (session.id === nextSession.id ? nextSession : session));
-      setSessions(await repository.list());
+      await reloadSessionsList();
     } catch (error) {
       setInput(trimmedInput);
       setPendingAssistantMessageId(undefined);
@@ -607,91 +569,32 @@ export function App() {
     }
   }
 
-  async function sessionExists(sessionId: string) {
-    return (await repository.list()).some((session) => session.id === sessionId);
-  }
-
-  function updateAssistantMessage(sessionId: string, messageId: string, content: string) {
-    setCurrentSession((session) => {
-      if (session.id !== sessionId) {
-        return session;
-      }
-
-      return {
-        ...session,
-        messages: session.messages.map((message) =>
-          message.id === messageId ? { ...message, content } : message,
-        ),
-      };
-    });
-  }
-
   async function handleNewSession() {
-    const session = createEmptySession();
-    await persistSession(session);
-    logDiagnostic(diagnosticsRepository, {
-      sessionId: session.id,
-      category: "session",
-      message: "新建会话",
-      details: sessionSummary(session),
-    });
+    await hookHandleNewSession();
     setInput("我需要4个交换机，每个交换机连接5个端系统");
     setActiveWorkspacePanel(undefined);
   }
 
   async function handleSelectSession(session: TsnSession) {
-    await repository.setCurrent(session.id);
-    logDiagnostic(diagnosticsRepository, {
-      sessionId: session.id,
-      category: "session",
-      message: "切换到会话",
-      details: sessionSummary(session),
-    });
-    setCurrentSession(session);
+    await hookHandleSelectSession(session);
     setActiveWorkspacePanel(undefined);
   }
 
   async function handleDuplicateSession() {
-    const duplicated = await repository.duplicate(currentSession.id);
-
+    const duplicated = await hookHandleDuplicateSession();
     if (duplicated) {
-      logDiagnostic(diagnosticsRepository, {
-        sessionId: duplicated.id,
-        category: "session",
-        message: "复制会话",
-        details: {
-          sourceSessionId: currentSession.id,
-          ...sessionSummary(duplicated),
-        },
-      });
-      setCurrentSession(duplicated);
       setExportDirectory("");
       setExportResult(undefined);
       setExportError(undefined);
-      setSessions(await repository.list());
       setActiveWorkspacePanel(undefined);
     }
   }
 
   async function handleDeleteSession() {
-    const deletedSessionId = currentSession.id;
-    await repository.remove(currentSession.id);
-    await diagnosticsRepository.clearSession(deletedSessionId);
-    const nextSession = await repository.ensureCurrentSession();
-    logDiagnostic(diagnosticsRepository, {
-      sessionId: nextSession.id,
-      category: "session",
-      message: "删除会话并切换",
-      details: {
-        deletedSessionId,
-        nextSessionId: nextSession.id,
-      },
-    });
-    setCurrentSession(nextSession);
+    await hookHandleDeleteSession();
     setExportDirectory("");
     setExportResult(undefined);
     setExportError(undefined);
-    setSessions(await repository.list());
     setActiveWorkspacePanel(undefined);
   }
 
@@ -880,7 +783,7 @@ export function App() {
         plannerRun: nextRun,
       };
 
-      if (!await isLatestPlannerRun(sessionId, planId, runToken)) {
+      if (!await isLatestPlannerRun(repository, sessionId, planId, runToken)) {
         return;
       }
 
@@ -888,7 +791,7 @@ export function App() {
         nextSession = await attachPlannerResult(nextSession, baseUrl, planId, nextRun);
       }
 
-      if (!await isLatestPlannerRun(sessionId, planId, runToken)) {
+      if (!await isLatestPlannerRun(repository, sessionId, planId, runToken)) {
         return;
       }
 
@@ -1110,7 +1013,7 @@ export function App() {
                   };
                   await repository.save(updated);
                   setCurrentSession(updated);
-                  setSessions(await repository.list());
+                  await reloadSessionsList();
                 }}
               />
             )}
@@ -2106,8 +2009,13 @@ function isExpectedPlannerRun(
   );
 }
 
-async function isLatestPlannerRun(sessionId: string, planId: string, runToken?: string): Promise<boolean> {
-  const latestSession = (await repository.list()).find((session) => session.id === sessionId);
+async function isLatestPlannerRun(
+  repo: import("../sessions/session-repository").SessionRepository,
+  sessionId: string,
+  planId: string,
+  runToken?: string,
+): Promise<boolean> {
+  const latestSession = (await repo.list()).find((session) => session.id === sessionId);
   return isExpectedPlannerRun(latestSession, planId, runToken);
 }
 
