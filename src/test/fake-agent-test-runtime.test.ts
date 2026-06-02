@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runFakeTsnAgent } from "./fake-agent";
+import { runFakeTsnAgent } from "./fake-agent-test-runtime";
 import { createProjectFromIntent } from "../domain/topology-factory";
 import { isEndSystem, isSwitch } from "../domain/canonical";
 import { createInitialWorkflowState } from "../project/project-state";

@@ -714,7 +714,7 @@ describe("claude-agent-worker", () => {
         content: [
           { type: "tool_use", id: "read-1", name: "Read", input: { file_path: "src/app/App.tsx" } },
           { type: "tool_use", id: "write-1", name: "Write", input: { file_path: "/tmp/stage-result.json" } },
-          { type: "tool_use", id: "edit-1", name: "Edit", input: { file_path: "src/agent/fake-agent.ts" } },
+          { type: "tool_use", id: "edit-1", name: "Edit", input: { file_path: "src/agent/agent-adapter.ts" } },
         ],
       },
     });
@@ -722,7 +722,7 @@ describe("claude-agent-worker", () => {
     expect(traces.map((trace) => trace.text)).toEqual([
       "[文件] 读取 src/app/App.tsx",
       "[文件] 写入 stage-result.json",
-      "[文件] 修改 src/agent/fake-agent.ts",
+      "[文件] 修改 src/agent/agent-adapter.ts",
     ]);
   });
 

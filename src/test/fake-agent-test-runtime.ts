@@ -1,12 +1,17 @@
 /**
- * @deprecated Test fixture runtime only — DO NOT import from production code.
+ * Test-only intent runtime. Lives under `src/test/` to keep it out of the
+ * production agent surface area: `src/agent/agent-adapter.ts` is fail-closed
+ * via `TsnAgentResult` three-state union (no fallback to fake) since U3a.
  *
- * The production agent runtime path no longer uses this module after U3a
- * (`src/agent/agent-adapter.ts` is fail-closed via `TsnAgentResult` three-state
- * union). This file is preserved to drive `src/app/App.test.tsx` multi-stage
- * natural-language progression scenarios; replacing those tests with explicit
- * fixture builders is tracked as a follow-up (U4 part 2: "下沉自然语言推进
- * 测试到 prompt/skill 层或 real-agent E2E").
+ * This module exists to drive `src/app/App.test.tsx` multi-stage
+ * natural-language progression scenarios (planner, flow stage, final stage
+ * confirmation, etc.) where a static fixture would not capture the workflow
+ * state machine. Tests that only need a single stage shape should use
+ * `src/test/agent-result-fixtures.ts` instead.
+ *
+ * **DO NOT import this from production code.** TypeScript path lint can
+ * additionally enforce by adding `src/test/**` to an "ignore from production"
+ * ESLint rule when one is added.
  */
 import type { CanonicalTsnProjectV0, TopologyIntent } from "../domain/canonical";
 import { getScenarioConfig } from "../domain/scenario-config";
@@ -28,8 +33,8 @@ import {
   type WorkflowStep,
 } from "../project/project-state";
 
-export type { AgentEvent, AgentEventKind } from "./agent-types";
-import type { AgentEvent } from "./agent-types";
+export type { AgentEvent, AgentEventKind } from "../agent/agent-types";
+import type { AgentEvent } from "../agent/agent-types";
 
 export interface FakeAgentResult {
   events: AgentEvent[];
