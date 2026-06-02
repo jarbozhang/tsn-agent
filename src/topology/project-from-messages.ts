@@ -7,7 +7,7 @@ import {
 } from "../topology/topology-factory";
 import { createArtifactBundle, type ArtifactBundle } from "../export/artifact-bundle";
 import { normalizePlannerRunState, type PlannerRunState } from "../planner/planner-contract";
-import type { WorkflowState } from "../project/project-state";
+import type { WorkflowState } from "../workflow/project-state";
 
 export interface RepairableSession {
   messages: Array<{

@@ -21,7 +21,7 @@ import { getScenarioConfig } from "../domain/scenario-config";
 import type { CanonicalTsnProjectV0, TopologyIntent } from "../domain/canonical";
 import { repairSessionTopologyFromMessages } from "../topology/project-from-messages";
 import { redactProviderNamesForDisplay } from "../ui/display-redaction";
-import { normalizeWorkflowState, recordStageResult, type WorkflowState } from "../project/project-state";
+import { normalizeWorkflowState, recordStageResult, type WorkflowState } from "../workflow/project-state";
 import { normalizePlannerRunState } from "../planner/planner-contract";
 import type { ArtifactBundle } from "../export/artifact-bundle";
 import {

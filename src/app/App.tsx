@@ -68,7 +68,7 @@ import {
   selectProjectExportDirectory,
   suggestProjectExportDirectory,
   type ProjectExportResult,
-} from "../project/project-exporter";
+} from "../workflow/project-exporter";
 import { appVersion, releaseNotes, type ReleaseNote } from "../release/release-info";
 import {
   createId,

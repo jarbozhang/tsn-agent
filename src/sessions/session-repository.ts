@@ -3,7 +3,7 @@ import { CURRENT_SESSION_RUNTIME_VERSION, type SessionMetadata } from "../agent/
 import type { CanonicalTsnProjectV0 } from "../domain/canonical";
 import type { ArtifactBundle } from "../export/artifact-bundle";
 import { normalizePlannerRunState, type PlannerRunState } from "../planner/planner-contract";
-import { normalizeWorkflowState, type WorkflowState } from "../project/project-state";
+import { normalizeWorkflowState, type WorkflowState } from "../workflow/project-state";
 import { repairSessionTopologyFromMessages } from "../topology/project-from-messages";
 import { invoke } from "@tauri-apps/api/core";
 

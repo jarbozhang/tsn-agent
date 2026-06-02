@@ -20,7 +20,7 @@ import {
 import { runTopologyStage } from "../../src-node/stage-skills/tsn-stage-runner";
 import { createProjectFromIntent } from "../topology/topology-factory";
 import type { TsnSession } from "../sessions/session-repository";
-import { createInitialWorkflowState } from "../project/project-state";
+import { createInitialWorkflowState } from "../workflow/project-state";
 
 const PROMPT = "我需要4个交换机，每个交换机连接5个端系统";
 

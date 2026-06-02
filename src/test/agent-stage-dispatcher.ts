@@ -25,7 +25,7 @@ import {
   createTopologyWaitingConfirmationResult,
 } from "./agent-result-fixtures";
 import type { CanonicalTsnProjectV0 } from "../domain/canonical";
-import type { WorkflowState } from "../project/project-state";
+import type { WorkflowState } from "../workflow/project-state";
 import type { TsnAgentResult } from "../agent/agent-types";
 
 const CONFIRMATION_PATTERN =

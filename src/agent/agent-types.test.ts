@@ -9,7 +9,7 @@ import {
   type AgentSuccessResult,
   type TsnAgentResult,
 } from "./agent-types";
-import { normalizeWorkflowState } from "../project/project-state";
+import { normalizeWorkflowState } from "../workflow/project-state";
 import { createProjectFromIntent } from "../topology/topology-factory";
 
 const baseProject = createProjectFromIntent("我需要2个交换机，每个交换机连接2个端系统");

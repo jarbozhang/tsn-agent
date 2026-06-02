@@ -12,7 +12,7 @@ import {
   withDefaultControlFlow,
   withFlowsFromIntent,
 } from "../topology/topology-factory";
-import { confirmCurrentStage, normalizeWorkflowState, recordStageResult } from "../project/project-state";
+import { confirmCurrentStage, normalizeWorkflowState, recordStageResult } from "../workflow/project-state";
 import type { CanonicalTsnProjectV0 } from "../domain/canonical";
 import { createArtifactBundle } from "../export/artifact-bundle";
 import type { ArtifactBundle } from "../export/artifact-bundle";

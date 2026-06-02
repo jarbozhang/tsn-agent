@@ -1,6 +1,6 @@
 import type { CanonicalTsnProjectV0 } from "../domain/canonical";
 import type { ArtifactBundle } from "../export/artifact-bundle";
-import type { WorkflowState, WorkflowStep } from "../project/project-state";
+import type { WorkflowState, WorkflowStep } from "../workflow/project-state";
 
 export type IsoTimestamp = string;
 

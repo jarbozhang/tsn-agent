@@ -11,7 +11,7 @@ import {
 import { createArtifactBundle } from "../export/artifact-bundle";
 import { createProjectFromIntent } from "../topology/topology-factory";
 import { isEndSystem, isSwitch } from "../domain/canonical";
-import { createInitialWorkflowState } from "../project/project-state";
+import { createInitialWorkflowState } from "../workflow/project-state";
 
 const DUAL_PLANE_TOPOLOGY_PROMPT = "我需要4个交换机，每个交换机连接2个端系统，双平面冗余";
 
