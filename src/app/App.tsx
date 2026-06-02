@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionRepository } from "./hooks/use-session-repository";
 import { useAgentRunController, type AgentRunPhase } from "./hooks/use-agent-run-controller";
 import { usePlannerRun, bundleForAgentResult, plannerRunForAgentResult } from "./hooks/use-planner-run";
+import { useProjectExport } from "./hooks/use-project-export";
 import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -138,9 +139,6 @@ export function App() {
     scrollDeps: [currentSession.id, currentSession.messages],
   });
   const [expandedStepTraceId, setExpandedStepTraceId] = useState<string | undefined>();
-  const [exportResult, setExportResult] = useState<ProjectExportResult | undefined>();
-  const [exportError, setExportError] = useState<string | undefined>();
-  const [exportDirectory, setExportDirectory] = useState("");
   const [activeConfigTab, setActiveConfigTab] = useState<ConfigTabId>("flows");
   const [selectedTopologyItem, setSelectedTopologyItem] = useState<SelectedTopologyItem | undefined>();
   const [selectedFlowId, setSelectedFlowId] = useState<string | undefined>();
@@ -161,36 +159,31 @@ export function App() {
     diagnostics: diagnosticsRepository,
     onPersistedSession: (next) => setCurrentSession((s) => (s.id === next.id ? next : s)),
     onPlannerStart: () => {
-      setExportError(undefined);
+      setExportErrorRef.current?.(undefined);
       setActiveConfigTab("artifacts");
     },
   });
-
-  useEffect(() => {
-    let cancelled = false;
-
-    setExportDirectory("");
-    setExportResult(undefined);
-    setExportError(undefined);
-
-    async function loadSuggestedExportDirectory() {
-      try {
-        const suggestedDirectory = await suggestProjectExportDirectory({ sessionId: currentSession.id });
-
-        if (!cancelled && suggestedDirectory) {
-          setExportDirectory(suggestedDirectory);
-        }
-      } catch {
-        // Browser mode does not have a native project directory suggestion.
-      }
-    }
-
-    void loadSuggestedExportDirectory();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentSession.id]);
+  const {
+    exportDirectory,
+    setExportDirectory,
+    exportResult,
+    exportError,
+    setExportResult,
+    setExportError,
+    canExport,
+    canRefreshBundle,
+    refreshBundle,
+    handleExportProject,
+    handleChooseExportDirectory,
+    handleOpenExportDirectory,
+  } = useProjectExport({
+    currentSession,
+    diagnostics: diagnosticsRepository,
+    persistSession,
+    plannerResultForCurrentProject,
+  });
+  const setExportErrorRef = useRef<typeof setExportError | undefined>(undefined);
+  setExportErrorRef.current = setExportError;
 
   useEffect(() => {
     setActiveConfigTab("flows");
@@ -204,12 +197,6 @@ export function App() {
   const scenarioConfig = getScenarioConfig(workflow.scenarioConfigId);
   const currentStage = workflow.stages[workflow.currentStep];
   const hasUserInteraction = currentSession.messages.some((message) => message.role === "user");
-  const canExport = Boolean(bundle && workflow.currentStep === "planning-export");
-  const canRefreshBundle = Boolean(
-    project
-      && workflow.currentStep === "planning-export"
-      && ["waiting_confirmation", "confirmed"].includes(workflow.stages["planning-export"].status),
-  );
   const isFlowStageVisible = workflow.stages["flow-template"].status === "waiting_confirmation"
     || workflow.stages["flow-template"].status === "confirmed";
   const visibleFlows = isFlowStageVisible ? project?.flows ?? [] : [];
@@ -505,92 +492,6 @@ export function App() {
     setExportResult(undefined);
     setExportError(undefined);
     setActiveWorkspacePanel(undefined);
-  }
-
-  async function refreshBundle() {
-    if (!project || !canRefreshBundle) {
-      return;
-    }
-
-    const nextBundle = createArtifactBundle(project, {
-      plannerResult: plannerResultForCurrentProject,
-    });
-
-    logDiagnostic(diagnosticsRepository, {
-      sessionId: currentSession.id,
-      category: "artifact",
-      message: "刷新 artifact bundle",
-      details: artifactBundleSummary(nextBundle),
-    });
-
-    await persistSession({
-      ...currentSession,
-      updatedAt: new Date().toISOString(),
-      bundle: nextBundle,
-      workflow,
-    });
-  }
-
-  async function handleExportProject() {
-    if (!bundle || !canExport) {
-      return;
-    }
-
-    setExportError(undefined);
-
-    try {
-      const outputDir = exportDirectory.trim() || undefined;
-      const result = await exportProjectBundle(bundle, outputDir);
-
-      setExportResult(result);
-      logDiagnostic(diagnosticsRepository, {
-        sessionId: currentSession.id,
-        category: "artifact",
-        message: "项目文件已导出",
-        details: {
-          mode: result.mode,
-          outputDir: result.outputDir,
-          writtenFiles: result.writtenFiles,
-        },
-      });
-    } catch (error) {
-      const message = normalizeError(error);
-      setExportError(message);
-      logDiagnostic(diagnosticsRepository, {
-        sessionId: currentSession.id,
-        category: "artifact",
-        level: "error",
-        message: "项目文件导出失败",
-        details: {
-          error: message,
-        },
-      });
-    }
-  }
-
-  async function handleChooseExportDirectory() {
-    try {
-      const selectedDirectory = await selectProjectExportDirectory(exportDirectory || undefined);
-
-      if (selectedDirectory) {
-        setExportDirectory(selectedDirectory);
-        setExportError(undefined);
-      }
-    } catch (error) {
-      setExportError(normalizeError(error));
-    }
-  }
-
-  async function handleOpenExportDirectory() {
-    if (!exportResult) {
-      return;
-    }
-
-    try {
-      await openProjectExportDirectory(exportResult.outputDir);
-    } catch (error) {
-      setExportError(normalizeError(error));
-    }
   }
 
   function handleNodeSelect(_event: unknown, node: Node) {
