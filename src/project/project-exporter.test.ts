@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createProjectFromIntent } from "../domain/topology-factory";
+import { createProjectFromIntent } from "../topology/topology-factory";
 import { createArtifactBundle } from "../export/artifact-bundle";
 
 const invokeMock = vi.hoisted(() => vi.fn());

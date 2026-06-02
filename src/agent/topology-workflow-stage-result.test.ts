@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createProjectFromIntent } from "../domain/topology-factory";
+import { createProjectFromIntent } from "../topology/topology-factory";
 import { initializeTopology } from "../topology/initialize";
 import { createTopologyWorkflowStageResult } from "./topology-workflow-stage-result";
 import { WORKFLOW_STAGE_RESULT_SCHEMA_VERSION, validateWorkflowStageResult } from "./workflow-stage-result";

@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { STAGE_SKILL_SCHEMA_VERSION } from "../../src/agent/stage-skill-contract";
-import { createProjectFromIntent } from "../../src/domain/topology-factory";
+import { createProjectFromIntent } from "../../src/topology/topology-factory";
 import { runCli, runFlowPlanningStage, runTopologyStage } from "./tsn-stage-runner";
 
 const execFileAsync = promisify(execFile);

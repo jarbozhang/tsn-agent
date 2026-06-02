@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createProjectFromIntent, withFlowsFromIntent } from "../domain/topology-factory";
+import { createProjectFromIntent, withFlowsFromIntent } from "../topology/topology-factory";
 import { createArtifactBundle } from "./artifact-bundle";
 import { exportOmnetppIni } from "./ini-exporter";
 import { exportInetTrafficIni } from "./inet-traffic-exporter";

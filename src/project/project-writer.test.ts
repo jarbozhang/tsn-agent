@@ -2,7 +2,7 @@ import path from "node:path";
 import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { createProjectFromIntent } from "../domain/topology-factory";
+import { createProjectFromIntent } from "../topology/topology-factory";
 import { createArtifactBundle } from "../export/artifact-bundle";
 import { validateExportManifest, withObservedPlannerResult } from "./export-manifest";
 import { assertSafeProjectPath, writeProjectArtifacts } from "./project-writer";

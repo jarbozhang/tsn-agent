@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createProjectFromIntent } from "../domain/topology-factory";
+import { createProjectFromIntent } from "../topology/topology-factory";
 import { createArtifactBundle } from "../export/artifact-bundle";
 import {
   STAGE_SKILL_SCHEMA_VERSION,

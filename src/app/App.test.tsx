@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createProjectFromIntent } from "../domain/topology-factory";
+import { createProjectFromIntent } from "../topology/topology-factory";
 import { createInitialWorkflowState } from "../project/project-state";
 import { appVersion, releaseNotes } from "../release/release-info";
 import { App } from "./App";

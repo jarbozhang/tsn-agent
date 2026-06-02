@@ -4,7 +4,7 @@ import type { CanonicalTsnProjectV0 } from "../domain/canonical";
 import type { ArtifactBundle } from "../export/artifact-bundle";
 import { normalizePlannerRunState, type PlannerRunState } from "../planner/planner-contract";
 import { normalizeWorkflowState, type WorkflowState } from "../project/project-state";
-import { repairSessionTopologyFromMessages } from "./session-topology-repair";
+import { repairSessionTopologyFromMessages } from "../topology/project-from-messages";
 import { invoke } from "@tauri-apps/api/core";
 
 const STORAGE_KEY = "tsn-agent.sessions.v0";

@@ -6,8 +6,8 @@ import {
   withDefaultControlFlow,
   withFlowsFromIntent,
 } from "./topology-factory";
-import { isEndSystem, isSwitch } from "./canonical";
-import { validateCanonicalProject } from "./validation";
+import { isEndSystem, isSwitch } from "../domain/canonical";
+import { validateCanonicalProject } from "../domain/validation";
 
 const DUAL_PLANE_FLOW_PROMPT = [
   "生成时序控制消息，周期1ms，需要同步，延迟约束，不允许丢包，8-10字节，高关键性；",

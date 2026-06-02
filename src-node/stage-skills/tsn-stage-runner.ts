@@ -1,8 +1,8 @@
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { CanonicalTsnProjectV0, TopologyIntent, TsnPort } from "../../src/domain/canonical";
-import { createProjectFromIntent, parseTopologyIntent } from "../../src/domain/topology-factory";
-import { withFlowsFromIntent, withDefaultControlFlow } from "../../src/domain/topology-factory";
+import { createProjectFromIntent, parseTopologyIntent } from "../../src/topology/topology-factory";
+import { withFlowsFromIntent, withDefaultControlFlow } from "../../src/topology/topology-factory";
 import { validateCanonicalProject } from "../../src/domain/validation";
 import { STAGE_SKILL_SCHEMA_VERSION, type StageSkillResult } from "../../src/agent/stage-skill-contract";
 

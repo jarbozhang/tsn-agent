@@ -4,10 +4,10 @@ import type {
   TsnFlow,
   TsnLink,
   TsnNode,
-} from "./canonical";
-import { getScenarioConfig, resolveScenarioConfig, type ScenarioFlowTemplate } from "./scenario-config";
-import { initializeTopology, type DualPlaneRedundantParams, type TopologyInitIntent } from "../topology/initialize";
-import { intermediateToCanonicalProject } from "../topology/project-bridge";
+} from "../domain/canonical";
+import { getScenarioConfig, resolveScenarioConfig, type ScenarioFlowTemplate } from "../domain/scenario-config";
+import { initializeTopology, type DualPlaneRedundantParams, type TopologyInitIntent } from "./initialize";
+import { intermediateToCanonicalProject } from "./project-bridge";
 
 export interface TopologyFactoryOptions {
   scenarioConfigId?: string;

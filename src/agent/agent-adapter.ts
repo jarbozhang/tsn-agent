@@ -19,7 +19,7 @@ import {
 import type { ChatMessage, TsnSession } from "../sessions/session-repository";
 import { getScenarioConfig } from "../domain/scenario-config";
 import type { CanonicalTsnProjectV0, TopologyIntent } from "../domain/canonical";
-import { repairSessionTopologyFromMessages } from "../sessions/session-topology-repair";
+import { repairSessionTopologyFromMessages } from "../topology/project-from-messages";
 import { redactProviderNamesForDisplay } from "../ui/display-redaction";
 import { normalizeWorkflowState, recordStageResult, type WorkflowState } from "../project/project-state";
 import { normalizePlannerRunState } from "../planner/planner-contract";

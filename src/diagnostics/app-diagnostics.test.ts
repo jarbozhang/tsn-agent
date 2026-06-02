@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createProjectFromIntent } from "../domain/topology-factory";
+import { createProjectFromIntent } from "../topology/topology-factory";
 import { createArtifactBundle } from "../export/artifact-bundle";
 import { createEmptySession } from "../sessions/session-repository";
 import { artifactBundleSummary, logDiagnostic, sessionSummary, userIntentPreview } from "./app-diagnostics";

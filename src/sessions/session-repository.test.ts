@@ -9,7 +9,7 @@ import {
   type TsnSession,
 } from "./session-repository";
 import { createArtifactBundle } from "../export/artifact-bundle";
-import { createProjectFromIntent } from "../domain/topology-factory";
+import { createProjectFromIntent } from "../topology/topology-factory";
 import { isEndSystem, isSwitch } from "../domain/canonical";
 import { createInitialWorkflowState } from "../project/project-state";
 

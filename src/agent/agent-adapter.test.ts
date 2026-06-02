@@ -18,7 +18,7 @@ import {
   type TsnAgentResult,
 } from "./agent-types";
 import { runTopologyStage } from "../../src-node/stage-skills/tsn-stage-runner";
-import { createProjectFromIntent } from "../domain/topology-factory";
+import { createProjectFromIntent } from "../topology/topology-factory";
 import type { TsnSession } from "../sessions/session-repository";
 import { createInitialWorkflowState } from "../project/project-state";
 
