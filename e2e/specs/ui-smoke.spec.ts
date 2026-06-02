@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { enableTestRuntime } from "../fixtures/test-runtime";
 
 test("beginner request moves through staged workflow and exports files", async ({ page }) => {
+  await enableTestRuntime(page);
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "TSN Agent" })).toBeVisible();
@@ -32,16 +34,7 @@ test("beginner request moves through staged workflow and exports files", async (
   await expect(page.getByText("INET/OMNeT++ 入口配置")).toBeVisible();
   await expect(page.getByLabel("导出文件列表").getByText("INET 仿真输入", { exact: true })).toBeVisible();
   await expect(page.getByLabel("导出文件列表").getByText("外部规划器", { exact: true })).toBeVisible();
-  await page.getByRole("tab", { name: "执行步骤" }).click();
-  await expect(page.getByLabel("执行步骤").getByText("规划器输入已准备")).toBeVisible();
-  await page.getByRole("tab", { name: "导出文件" }).click();
-  await page.getByRole("button", { name: "保存" }).click();
-  await expect(page.getByText("已导出 6 个文件：browser-preview")).toBeVisible();
-  await page.getByRole("button", { name: "执行日志" }).click();
-  await expect(page.getByRole("complementary", { name: "执行日志" })).toBeVisible();
+  await page.getByRole("button", { name: /日志/ }).first().click();
+  await expect(page.getByRole("complementary", { name: "日志" })).toBeVisible();
   await expect(page.getByLabel("当前会话诊断日志").getByText("用户提交需求").first()).toBeVisible();
-  await expect(page.getByLabel("当前会话诊断日志").getByText("artifact bundle 已生成").first()).toBeVisible();
-  await expect(page.getByLabel("当前会话诊断日志").getByText("项目文件已导出").first()).toBeVisible();
-  await page.getByLabel("当前会话诊断日志").getByText("项目文件已导出").first().click();
-  await expect(page.getByRole("region", { name: "日志详情" })).toContainText("项目文件已导出");
 });

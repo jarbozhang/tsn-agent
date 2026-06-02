@@ -88,6 +88,18 @@ interface ClaudeAgentEvent {
 const DESKTOP_DOWNLOAD_CTA_FALLBACK = "https://github.com/jarbozhang/tsn-agent#%E6%A1%8C%E9%9D%A2%E7%89%88";
 
 export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Promise<TsnAgentResult> {
+  // Dev-only Playwright test runtime swap. When main.tsx installs the test
+  // dispatcher, redirect runTsnAgent through it so e2e specs drive the same
+  // fixture builders the vitest suite uses.
+  if (typeof window !== "undefined") {
+    const dispatcher = (window as unknown as {
+      __TSN_TEST_DISPATCHER__?: (req: TsnAgentRequest | string) => Promise<TsnAgentResult>;
+    }).__TSN_TEST_DISPATCHER__;
+    if (dispatcher) {
+      return dispatcher(requestOrIntent);
+    }
+  }
+
   const request = typeof requestOrIntent === "string" ? { userIntent: requestOrIntent } : requestOrIntent;
   const { userIntent } = request;
   const normalizedSession = normalizeSessionForRun(request.session);
