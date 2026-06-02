@@ -9,7 +9,7 @@ import { WORKFLOW_STAGE_RESULT_SCHEMA_VERSION, type WorkflowStageSummary } from 
 import {
   confirmCurrentStage,
   createInitialWorkflowState,
-  createProjectState,
+  createWorkflowSessionView,
   normalizeWorkflowState,
   recordStageResult,
   requestStageChanges,
@@ -21,7 +21,7 @@ describe("project state snapshots", () => {
   it("captures and restores step snapshots without mutating later state", () => {
     const project = createProjectFromIntent("我需要4个交换机，每个交换机连接5个端系统");
     const bundle = createArtifactBundle(project);
-    const state = withProjectBundle(createProjectState({ sessionId: "session-1", project }), bundle);
+    const state = withProjectBundle(createWorkflowSessionView({ sessionId: "session-1", project }), bundle);
 
     const snapshotted = appendSnapshot(state, {
       step: "topology",
@@ -44,7 +44,7 @@ describe("project state snapshots", () => {
   });
 
   it("rejects missing snapshots explicitly", () => {
-    const state = createProjectState({
+    const state = createWorkflowSessionView({
       sessionId: "session-1",
       project: createProjectFromIntent("我需要4个交换机，每个交换机连接5个端系统"),
     });

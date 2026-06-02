@@ -53,7 +53,7 @@ export interface ProjectStepSnapshot {
   workflow: WorkflowState;
 }
 
-export interface ProjectState {
+export interface WorkflowSessionView {
   sessionId: string;
   project: CanonicalTsnProjectV0;
   bundle?: ArtifactBundle;
@@ -62,13 +62,13 @@ export interface ProjectState {
   activeSnapshotId?: string;
 }
 
-export function createProjectState(input: {
+export function createWorkflowSessionView(input: {
   sessionId: string;
   project: CanonicalTsnProjectV0;
   bundle?: ArtifactBundle;
   workflow?: WorkflowState;
   scenarioConfigId?: string;
-}): ProjectState {
+}): WorkflowSessionView {
   return {
     sessionId: input.sessionId,
     project: input.project,
@@ -78,7 +78,7 @@ export function createProjectState(input: {
   };
 }
 
-export function withProjectBundle(state: ProjectState, bundle: ArtifactBundle): ProjectState {
+export function withProjectBundle(state: WorkflowSessionView, bundle: ArtifactBundle): WorkflowSessionView {
   return {
     ...state,
     bundle,

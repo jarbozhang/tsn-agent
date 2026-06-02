@@ -131,27 +131,9 @@ export function App() {
   const [activeConfigTab, setActiveConfigTab] = useState<ConfigTabId>("flows");
   const [selectedTopologyItem, setSelectedTopologyItem] = useState<SelectedTopologyItem | undefined>();
   const [selectedFlowId, setSelectedFlowId] = useState<string | undefined>();
-  const {
-    plannerRun,
-    plannerBaseUrl,
-    setPlannerBaseUrl,
-    isPlannerActionRunning,
-    canStartPlanner,
-    canStopPlanner,
-    currentPlannerRequestFingerprint,
-    plannerResultForCurrentProject,
-    handleStartPlanner,
-    handleStopPlanner,
-  } = usePlannerRun({
-    currentSession,
-    repository,
-    diagnostics: diagnosticsRepository,
-    onPersistedSession: (next) => setCurrentSession((s) => (s.id === next.id ? next : s)),
-    onPlannerStart: () => {
-      setExportErrorRef.current?.(undefined);
-      setActiveConfigTab("artifacts");
-    },
-  });
+  // Hold a ref so usePlannerRun (declared after) can read planner-result-for-current-project
+  // and useProjectExport (declared first) can lazily resolve it during refreshBundle.
+  const plannerSnapshotRef = useRef<PlannerRunState["resultSnapshot"]>(undefined);
   const {
     exportDirectory,
     setExportDirectory,
@@ -169,10 +151,31 @@ export function App() {
     currentSession,
     diagnostics: diagnosticsRepository,
     persistSession,
-    plannerResultForCurrentProject,
+    getPlannerResultForCurrentProject: () => plannerSnapshotRef.current,
   });
-  const setExportErrorRef = useRef<typeof setExportError | undefined>(undefined);
-  setExportErrorRef.current = setExportError;
+  const {
+    plannerRun,
+    plannerBaseUrl,
+    setPlannerBaseUrl,
+    isPlannerActionRunning,
+    canStartPlanner,
+    canStopPlanner,
+    currentPlannerRequestFingerprint,
+    plannerResultForCurrentProject,
+    handleStartPlanner,
+    handleStopPlanner,
+  } = usePlannerRun({
+    currentSession,
+    repository,
+    diagnostics: diagnosticsRepository,
+    onPersistedSession: (next) => setCurrentSession((s) => (s.id === next.id ? next : s)),
+    onPlannerStart: () => {
+      setExportError(undefined);
+      setActiveConfigTab("artifacts");
+    },
+  });
+  // Keep the ref in sync so useProjectExport's lazy getter sees the latest snapshot.
+  plannerSnapshotRef.current = plannerResultForCurrentProject;
 
   useEffect(() => {
     setActiveConfigTab("flows");

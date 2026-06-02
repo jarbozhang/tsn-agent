@@ -17,7 +17,13 @@ export interface UseProjectExportOptions {
   currentSession: TsnSession;
   diagnostics: DiagnosticLogRepository;
   persistSession: (next: TsnSession, options?: { logCategory?: "session" | "agent" | "artifact"; logMessage?: string; logDetails?: Record<string, unknown> }) => Promise<void>;
-  plannerResultForCurrentProject: PlannerRunState["resultSnapshot"];
+  /**
+   * Called lazily by `refreshBundle` so this hook does not need to be ordered
+   * after `usePlannerRun`. The getter is invoked at refresh time, not at
+   * construction, so callers can safely close over a planner state that is
+   * declared after `useProjectExport`.
+   */
+  getPlannerResultForCurrentProject: () => PlannerRunState["resultSnapshot"];
 }
 
 export interface UseProjectExportReturn {
@@ -36,7 +42,7 @@ export interface UseProjectExportReturn {
 }
 
 export function useProjectExport(options: UseProjectExportOptions): UseProjectExportReturn {
-  const { currentSession, diagnostics, persistSession, plannerResultForCurrentProject } = options;
+  const { currentSession, diagnostics, persistSession, getPlannerResultForCurrentProject } = options;
   const project = currentSession.project;
   const bundle = currentSession.bundle;
   const workflow = currentSession.workflow;
@@ -81,7 +87,7 @@ export function useProjectExport(options: UseProjectExportOptions): UseProjectEx
       return;
     }
     const nextBundle = createArtifactBundle(project, {
-      plannerResult: plannerResultForCurrentProject,
+      plannerResult: getPlannerResultForCurrentProject(),
     });
     logDiagnostic(diagnostics, {
       sessionId: currentSession.id,
@@ -95,7 +101,7 @@ export function useProjectExport(options: UseProjectExportOptions): UseProjectEx
       bundle: nextBundle,
       workflow,
     });
-  }, [project, canRefreshBundle, plannerResultForCurrentProject, diagnostics, currentSession, workflow, persistSession]);
+  }, [project, canRefreshBundle, getPlannerResultForCurrentProject, diagnostics, currentSession, workflow, persistSession]);
 
   const handleExportProject = useCallback(async () => {
     if (!bundle || !canExport) {

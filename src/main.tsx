@@ -7,7 +7,7 @@ async function bootstrap() {
   // Dev-only Playwright test runtime swap. Production builds tree-shake this
   // entire block out via Vite's `import.meta.env.MODE` compile-time constant.
   if (import.meta.env.MODE === "development") {
-    const flag = (window as unknown as { __TSN_TEST_RUNTIME__?: boolean }).__TSN_TEST_RUNTIME__;
+    const flag = window.__TSN_TEST_RUNTIME__;
     if (flag) {
       const { installTestRuntime } = await import("./test/playwright-runtime-bridge");
       installTestRuntime();

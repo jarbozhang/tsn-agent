@@ -1,8 +1,8 @@
 import type { ArtifactBundle } from "../export/artifact-bundle";
-import type { ProjectState, ProjectStep } from "./project-state";
+import type { WorkflowSessionView, ProjectStep } from "./project-state";
 
 export function createStepSnapshot(
-  state: ProjectState,
+  state: WorkflowSessionView,
   input: {
     step: ProjectStep;
     summary: string;
@@ -23,13 +23,13 @@ export function createStepSnapshot(
 }
 
 export function appendSnapshot(
-  state: ProjectState,
+  state: WorkflowSessionView,
   input: {
     step: ProjectStep;
     summary: string;
     createdAt?: string;
   },
-): ProjectState {
+): WorkflowSessionView {
   const snapshot = createStepSnapshot(state, input);
 
   return {
@@ -39,7 +39,7 @@ export function appendSnapshot(
   };
 }
 
-export function restoreSnapshot(state: ProjectState, snapshotId: string): ProjectState {
+export function restoreSnapshot(state: WorkflowSessionView, snapshotId: string): WorkflowSessionView {
   const snapshot = state.snapshots.find((candidate) => candidate.id === snapshotId);
 
   if (!snapshot) {

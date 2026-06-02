@@ -44,7 +44,7 @@ describe("useProjectExport", () => {
         currentSession: session,
         diagnostics,
         persistSession: persistSessionMock,
-        plannerResultForCurrentProject: undefined,
+        getPlannerResultForCurrentProject: () => undefined,
       }),
     );
     await waitFor(() => {
@@ -60,7 +60,7 @@ describe("useProjectExport", () => {
         currentSession: session,
         diagnostics,
         persistSession: persistSessionMock,
-        plannerResultForCurrentProject: undefined,
+        getPlannerResultForCurrentProject: () => undefined,
       }),
     );
     expect(result.current.canExport).toBe(false);
@@ -73,7 +73,7 @@ describe("useProjectExport", () => {
         currentSession: session,
         diagnostics,
         persistSession: persistSessionMock,
-        plannerResultForCurrentProject: undefined,
+        getPlannerResultForCurrentProject: () => undefined,
       }),
     );
     act(() => {
@@ -89,7 +89,7 @@ describe("useProjectExport", () => {
           currentSession: s,
           diagnostics,
           persistSession: persistSessionMock,
-          plannerResultForCurrentProject: undefined,
+          getPlannerResultForCurrentProject: () => undefined,
         }),
       { initialProps: { s: session } },
     );

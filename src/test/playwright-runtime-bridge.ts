@@ -11,7 +11,15 @@
  * compile-time constant, so Vite tree-shakes the dynamic import branch.
  */
 import { dispatchAgentStage } from "./agent-stage-dispatcher";
+import { createAgentFailurePreservedStateResult } from "./agent-result-fixtures";
 import type { TsnAgentRequest, TsnAgentResult } from "../agent/agent-adapter";
+
+declare global {
+  interface Window {
+    /** Optional Playwright error-mode flag. When set, dispatcher returns a failure-preserved result. */
+    __TSN_TEST_ERROR_MODE__?: "agent_error" | "stall_timeout" | "no_stage_result";
+  }
+}
 
 const ORIGINAL_TAURI_KEY = "__TAURI_INTERNALS__";
 
@@ -40,6 +48,22 @@ export function installTestRuntime(): void {
     const userIntent = typeof request === "string" ? request : request.userIntent;
     const session = typeof request === "string" ? undefined : request.session;
     const runId = typeof request === "string" ? undefined : request.runId;
+
+    // Optional error-mode hook: when set, dispatcher returns failure-preserved
+    // so e2e specs can drive error UI paths through the same fixture builders.
+    const errorMode = window.__TSN_TEST_ERROR_MODE__;
+    if (errorMode) {
+      const failure = createAgentFailurePreservedStateResult({
+        failureReason: errorMode,
+        previousProject: session?.project,
+      });
+      return {
+        ...failure,
+        agentSteps: [],
+        runId: runId ?? "test-run-id",
+      } as TsnAgentResult;
+    }
+
     const result = dispatchAgentStage({
       userIntent,
       session: session as Parameters<typeof dispatchAgentStage>[0]["session"],
@@ -52,9 +76,26 @@ export function installTestRuntime(): void {
     } as TsnAgentResult;
   };
 
-  (window as unknown as { __TSN_TEST_DISPATCHER__?: typeof dispatcher }).__TSN_TEST_DISPATCHER__ = dispatcher;
+  window.__TSN_TEST_DISPATCHER__ = dispatcher;
 }
 
 export function isTestRuntimeRequested(): boolean {
-  return Boolean((window as unknown as { __TSN_TEST_RUNTIME__?: boolean }).__TSN_TEST_RUNTIME__);
+  return Boolean(window.__TSN_TEST_RUNTIME__);
+}
+
+/**
+ * Clear all test-runtime state on the window. Exported for unit tests that want
+ * a clean baseline between runs; production code never calls this.
+ */
+export function resetTestRuntime(): void {
+  installed = false;
+  delete window.__TSN_TEST_DISPATCHER__;
+  delete window.__TSN_TEST_RUNTIME__;
+  delete window.__TSN_TEST_ERROR_MODE__;
+  if (Object.prototype.hasOwnProperty.call(window, ORIGINAL_TAURI_KEY)) {
+    const value = window.__TAURI_INTERNALS__ as { __testRuntime?: boolean } | undefined;
+    if (value && value.__testRuntime) {
+      delete window.__TAURI_INTERNALS__;
+    }
+  }
 }

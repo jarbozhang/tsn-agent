@@ -243,8 +243,8 @@ function SettingsToolPanel({ version, releases }: { version: string; releases: R
       <div className="settings-list" aria-label="工作台设置">
         <DetailRow label="当前版本" value={`v${version}`} />
         <DetailRow label="默认规划服务" value={resolvePlannerBaseUrl()} />
-        <DetailRow label="会话存储" value={(window as any).__TAURI_INTERNALS__ ? "本机数据库" : "浏览器 localStorage"} />
-        <DetailRow label="导出模式" value={(window as any).__TAURI_INTERNALS__ ? "桌面文件系统" : "浏览器预览"} />
+        <DetailRow label="会话存储" value={window.__TAURI_INTERNALS__ ? "本机数据库" : "浏览器 localStorage"} />
+        <DetailRow label="导出模式" value={window.__TAURI_INTERNALS__ ? "桌面文件系统" : "浏览器预览"} />
       </div>
 
       <section className="settings-release-panel" aria-label="更新日志">
