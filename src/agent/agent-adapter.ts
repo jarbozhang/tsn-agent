@@ -179,6 +179,7 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
       workflow: baseWorkflow,
       previousSession: normalizedSession,
       userIntent,
+      runId,
     });
     logAgent(request.diagnostics, {
       sessionId,
@@ -640,6 +641,7 @@ function applyStageResults(input: {
   workflow: WorkflowState;
   previousSession?: TsnSession;
   userIntent: string;
+  runId: string;
 }): StageResultApplication {
   const rejections: string[] = [];
 
@@ -676,7 +678,7 @@ function applyStageResults(input: {
         kind: "success",
         project: parsed.payload.project,
         workflow,
-        events: createAppliedFlowPlanningEvents(parsed, skillResult),
+        events: tagEventsWithRunId(createAppliedFlowPlanningEvents(parsed, skillResult), input.runId),
         applied: skillResult,
         rejections,
       };
@@ -698,7 +700,7 @@ function applyStageResults(input: {
       kind: "success",
       project: parsed.payload.project,
       workflow,
-      events: createAppliedTopologyEvents(parsed, skillResult),
+      events: tagEventsWithRunId(createAppliedTopologyEvents(parsed, skillResult), input.runId),
       applied: skillResult,
       rejections,
     };
@@ -708,13 +710,19 @@ function applyStageResults(input: {
     workflow: input.workflow,
     previousSession: input.previousSession,
     rejections,
+    runId: input.runId,
   });
+}
+
+function tagEventsWithRunId(events: AgentEvent[], runId: string): AgentEvent[] {
+  return events.map((event) => (event.runId ? event : { ...event, runId }));
 }
 
 function buildNoStageResultFailure(input: {
   workflow: WorkflowState;
   previousSession?: TsnSession;
   rejections: string[];
+  runId: string;
 }): StageResultApplication {
   const message = buildTopologyFailureText(input.rejections);
   const previousProject = input.previousSession?.project;
@@ -744,7 +752,10 @@ function buildNoStageResultFailure(input: {
     project: previousProject,
     bundle: input.previousSession?.bundle,
     workflow: input.previousSession?.workflow ?? input.workflow,
-    events: rejectionEvent ? [preserveEvent, rejectionEvent] : [preserveEvent],
+    events: tagEventsWithRunId(
+      rejectionEvent ? [preserveEvent, rejectionEvent] : [preserveEvent],
+      input.runId,
+    ),
     assistantText: message,
     rejections: input.rejections,
   };

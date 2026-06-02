@@ -91,6 +91,20 @@ describe("runTsnAgent — Tauri runtime success path", () => {
     expect(result.workflow.stages.topology.status).toBe("waiting_confirmation");
   });
 
+  it("tags every produced event with the runId so UI grouping can render step cards", async () => {
+    invokeMock.mockResolvedValue({
+      assistantText: "拓扑已生成",
+      sessionId: "claude-session-1",
+      stageResults: [topologyStageResult(PROMPT)],
+      agentSteps: [],
+    });
+    const result = await runTsnAgent({ userIntent: PROMPT, runId: "agent-run-fixed" });
+    expect(result.events.length).toBeGreaterThan(0);
+    for (const event of result.events) {
+      expect(event.runId).toBe("agent-run-fixed");
+    }
+  });
+
   it("rejects stage result when stage does not match current workflow step", async () => {
     invokeMock.mockResolvedValue({
       assistantText: "已生成",
