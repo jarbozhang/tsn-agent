@@ -4,6 +4,8 @@ import { useProjectExport } from "./use-project-export";
 import { createEmptySession, type TsnSession } from "../../sessions/session-repository";
 import { BrowserDiagnosticLogRepository } from "../../diagnostics/diagnostic-log-repository";
 
+type PersistSessionFn = (next: TsnSession, options?: { logCategory?: "artifact" | "session" | "agent"; logMessage?: string; logDetails?: Record<string, unknown> }) => Promise<void>;
+
 vi.mock("../../workflow/project-exporter", () => ({
   exportProjectBundle: vi.fn(),
   selectProjectExportDirectory: vi.fn(),
@@ -27,12 +29,12 @@ function createMemoryStorage(): Storage {
 
 describe("useProjectExport", () => {
   let diagnostics: BrowserDiagnosticLogRepository;
-  let persistSessionMock: any;
+  let persistSessionMock: PersistSessionFn & { mock?: unknown };
   let session: TsnSession;
 
   beforeEach(() => {
     diagnostics = new BrowserDiagnosticLogRepository(createMemoryStorage());
-    persistSessionMock = vi.fn(async () => undefined);
+    persistSessionMock = vi.fn(async () => undefined) as unknown as PersistSessionFn & { mock?: unknown };
     session = createEmptySession();
   });
 

@@ -11,6 +11,7 @@ import {
 } from "../../workflow/project-exporter";
 import type { TsnSession } from "../../sessions/session-repository";
 import type { PlannerRunState } from "../../planner/planner-contract";
+import { normalizeError } from "../components/shared";
 
 export interface UseProjectExportOptions {
   currentSession: TsnSession;
@@ -167,9 +168,3 @@ export function useProjectExport(options: UseProjectExportOptions): UseProjectEx
   };
 }
 
-function normalizeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}

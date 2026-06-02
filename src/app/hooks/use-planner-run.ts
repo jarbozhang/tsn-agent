@@ -25,6 +25,7 @@ import {
   type PlannerTaskState,
 } from "../../planner/planner-contract";
 import type { SessionRepository, TsnSession } from "../../sessions/session-repository";
+import { normalizeError } from "../components/shared";
 
 const PLANNER_POLL_INTERVAL_MS = import.meta.env.MODE === "test" ? 20 : 3000;
 const PLANNER_TRANSIENT_FAILURE_RETRY_LIMIT = 2;
@@ -548,9 +549,3 @@ function normalizePlannerState(value: string): PlannerTaskState {
   return "unknown";
 }
 
-function normalizeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}

@@ -1,7 +1,8 @@
 import { redactProviderNamesForDisplay } from "../../../ui/display-redaction";
 import type { AgentEvent, AgentStepDetail } from "../../../agent/agent-types";
+import type { AgentRunPhase } from "../../hooks/use-agent-run-controller";
 
-export type AgentRunPhase = "idle" | "connecting" | "streaming" | "waiting";
+export type { AgentRunPhase };
 
 export function Step({
   index,

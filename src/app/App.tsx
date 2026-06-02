@@ -4,7 +4,7 @@ import { useAgentRunController, type AgentRunPhase } from "./hooks/use-agent-run
 import { usePlannerRun, bundleForAgentResult, plannerRunForAgentResult } from "./hooks/use-planner-run";
 import { useProjectExport } from "./hooks/use-project-export";
 import { WorkspaceToolRail, WorkspaceToolDrawer, type WorkspaceToolPanel } from "./components/workspace-tools";
-import { Stat, DetailRow, formatTime } from "./components/shared";
+import { Stat, DetailRow, formatTime, normalizeError } from "./components/shared";
 import {
   AgentRunStatusBar,
   AgentStepSummaryGroup,
@@ -52,43 +52,16 @@ import { DiagnosticsLogView } from "../ui/diagnostics/DiagnosticsDrawer";
 import { SkillFilePreview } from "../ui/skills/SkillFilePreview";
 import { redactProviderNamesForDisplay } from "../ui/display-redaction";
 import { isEndSystem, isSwitch } from "../domain/canonical";
-import { createArtifactBundle, type ExportedArtifact } from "../export/artifact-bundle";
-import { classifyArtifact, type ArtifactClassification, type ArtifactGroupId } from "../export/artifact-classification";
-import { exportPlannerInput } from "../export/planner-exporter";
 import { exportReactFlowTopology } from "../export/react-flow-exporter";
 import {
   PLANNER_LINK_DEFAULTS,
   PLANNER_NODE_PARAMETER_DEFAULTS,
 } from "../planner/planner-defaults";
 import {
-  getPlannerPlanResult,
-  queryPlannerPlanStatus,
-  startPlannerPlan,
-  stopPlannerPlan,
-} from "../planner/planner-client";
-import {
-  createPlannerRequestFingerprint,
-  createStalePlannerRunState,
-  isTerminalPlannerState,
   normalizePlannerRunState,
-  resolvePlannerBaseUrl,
-  summarizePlannerRequest,
-  summarizePlannerResult,
-  type PlannerQueryStatusResponseData,
-  type PlannerResultResponseData,
   type PlannerRunState,
-  type PlannerServiceEnvelope,
-  type PlannerStartResponseData,
-  type PlannerTaskState,
 } from "../planner/planner-contract";
 import { getScenarioConfig } from "../domain/scenario-config";
-import {
-  exportProjectBundle,
-  openProjectExportDirectory,
-  selectProjectExportDirectory,
-  suggestProjectExportDirectory,
-  type ProjectExportResult,
-} from "../workflow/project-exporter";
 import { appVersion, releaseNotes, type ReleaseNote } from "../release/release-info";
 import {
   createId,
@@ -963,18 +936,6 @@ export function App() {
       </main>
     </div>
   );
-}
-
-function normalizeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (typeof error === "string") {
-    return error;
-  }
-
-  return "未知错误";
 }
 
 
