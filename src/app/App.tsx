@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionRepository } from "./hooks/use-session-repository";
+import { useAgentRunController, type AgentRunPhase } from "./hooks/use-agent-run-controller";
 import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -82,7 +83,6 @@ import tsnAgentMark from "../assets/tsn-agent-mark.png";
 
 const ASSISTANT_CONNECTING_MESSAGE = "正在连接智能助手，并结合当前会话上下文生成下一步规划...";
 const INTENT_PLACEHOLDER = "例如：我需要 4 个交换机，每个交换机连接 5 个端系统";
-const AGENT_STREAM_STALL_MS = 3000;
 const PLANNER_POLL_INTERVAL_MS = import.meta.env.MODE === "test" ? 20 : 3000;
 const PLANNER_TRANSIENT_FAILURE_RETRY_LIMIT = 2;
 
@@ -96,8 +96,6 @@ type WorkspaceToolPanel = "sessions" | "diagnostics" | "skills" | "settings";
 type SelectedTopologyItem =
   | { kind: "node"; id: string }
   | { kind: "link"; id: string };
-
-type AgentRunPhase = "idle" | "connecting" | "streaming" | "waiting";
 
 const CONFIG_TABS: Array<{ id: ConfigTabId; label: string }> = [
   { id: "flows", label: "流量列表" },
@@ -127,14 +125,19 @@ export function App() {
   } = useSessionRepository();
   const [input, setInput] = useState("");
   const [activeWorkspacePanel, setActiveWorkspacePanel] = useState<WorkspaceToolPanel | undefined>();
-  const [isAgentRunning, setIsAgentRunning] = useState(false);
-  const [agentRunPhase, setAgentRunPhase] = useState<AgentRunPhase>("idle");
-  const [agentRunStartedAt, setAgentRunStartedAt] = useState<number | undefined>();
-  const [agentRunElapsedSeconds, setAgentRunElapsedSeconds] = useState(0);
-  const [lastAgentChunkAt, setLastAgentChunkAt] = useState<number | undefined>();
+  const {
+    isAgentRunning,
+    agentRunPhase,
+    agentRunStartedAt,
+    agentRunElapsedSeconds,
+    pendingAssistantMessageId,
+    scrollContainerRef: messagesContainerRef,
+    actions: agentRunActions,
+  } = useAgentRunController({
+    scrollDeps: [currentSession.id, currentSession.messages],
+  });
   const [plannerBaseUrl, setPlannerBaseUrl] = useState(resolvePlannerBaseUrl());
   const [isPlannerActionRunning, setIsPlannerActionRunning] = useState(false);
-  const [pendingAssistantMessageId, setPendingAssistantMessageId] = useState<string | undefined>();
   const [expandedStepTraceId, setExpandedStepTraceId] = useState<string | undefined>();
   const [exportResult, setExportResult] = useState<ProjectExportResult | undefined>();
   const [exportError, setExportError] = useState<string | undefined>();
@@ -142,7 +145,6 @@ export function App() {
   const [activeConfigTab, setActiveConfigTab] = useState<ConfigTabId>("flows");
   const [selectedTopologyItem, setSelectedTopologyItem] = useState<SelectedTopologyItem | undefined>();
   const [selectedFlowId, setSelectedFlowId] = useState<string | undefined>();
-  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const plannerPollTimeoutRef = useRef<number | undefined>(undefined);
   const plannerTransientFailureCountRef = useRef(0);
 
@@ -197,54 +199,6 @@ export function App() {
   useEffect(() => () => {
     clearPlannerPollTimeout();
   }, []);
-
-  useEffect(() => {
-    if (!isAgentRunning || agentRunPhase !== "streaming") {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setAgentRunPhase((phase) => (phase === "streaming" ? "waiting" : phase));
-    }, AGENT_STREAM_STALL_MS);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [agentRunPhase, isAgentRunning, lastAgentChunkAt]);
-
-  useEffect(() => {
-    if (!isAgentRunning || agentRunStartedAt === undefined) {
-      return;
-    }
-
-    const updateElapsedSeconds = () => {
-      setAgentRunElapsedSeconds(Math.max(0, Math.floor((Date.now() - agentRunStartedAt) / 1000)));
-    };
-
-    updateElapsedSeconds();
-    const intervalId = window.setInterval(updateElapsedSeconds, 1000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [agentRunStartedAt, isAgentRunning]);
-
-  useEffect(() => {
-    const messagesContainer = messagesContainerRef.current;
-
-    if (!messagesContainer) {
-      return;
-    }
-
-    if (typeof messagesContainer.scrollTo === "function") {
-      messagesContainer.scrollTo({
-        top: messagesContainer.scrollHeight,
-        behavior: isAgentRunning ? "smooth" : "auto",
-      });
-    } else {
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }
-  }, [currentSession.id, currentSession.messages, isAgentRunning]);
 
   const project = currentSession.project;
   const bundle = currentSession.bundle;
@@ -416,12 +370,8 @@ export function App() {
     let streamedText = "";
 
     setInput((value) => (value.trim() === trimmedInput ? "" : value));
-    setIsAgentRunning(true);
-    setAgentRunPhase("connecting");
-    setAgentRunStartedAt(Date.now());
-    setAgentRunElapsedSeconds(0);
-    setLastAgentChunkAt(undefined);
-    setPendingAssistantMessageId(assistantMessage.id);
+    agentRunActions.startRun();
+    agentRunActions.setPendingAssistantMessageId(assistantMessage.id);
     setExportResult(undefined);
     setExportError(undefined);
     setCurrentSession(pendingSession);
@@ -451,9 +401,9 @@ export function App() {
         diagnostics: diagnosticsRepository,
         onChunk: (chunk) => {
           streamedText += chunk;
-          setAgentRunPhase("streaming");
-          setLastAgentChunkAt(Date.now());
-          setPendingAssistantMessageId(undefined);
+          agentRunActions.markStreaming();
+          agentRunActions.recordChunkAt(Date.now());
+          agentRunActions.setPendingAssistantMessageId(undefined);
           updateAssistantMessage(pendingSession.id, assistantMessage.id, redactProviderNamesForDisplay(streamedText));
         },
         onAgentStep: (step) => {
@@ -535,7 +485,7 @@ export function App() {
       await reloadSessionsList();
     } catch (error) {
       setInput(trimmedInput);
-      setPendingAssistantMessageId(undefined);
+      agentRunActions.setPendingAssistantMessageId(undefined);
       logDiagnostic(diagnosticsRepository, {
         sessionId: pendingSession.id,
         category: "session",
@@ -560,12 +510,7 @@ export function App() {
         };
       });
     } finally {
-      setPendingAssistantMessageId(undefined);
-      setAgentRunPhase("idle");
-      setAgentRunStartedAt(undefined);
-      setAgentRunElapsedSeconds(0);
-      setLastAgentChunkAt(undefined);
-      setIsAgentRunning(false);
+      agentRunActions.finishRun();
     }
   }
 
