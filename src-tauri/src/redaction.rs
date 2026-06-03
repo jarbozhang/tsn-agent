@@ -22,14 +22,14 @@ const SENSITIVE_KEYS: &[&str] = &[
     "authorization",
 ];
 
-/// 对单个 token-like 词做敏感字面值过滤。
+/// 对单个 token-like 词做敏感字面值过滤。模块内部 helper，不暴露公开 API。
 ///
 /// 规则：
 /// 1. 词中包含 `sk-ant-` 直接整体替换为 `[redacted]`。
 /// 2. 词形如 `key=value` 或 `key:value` 且 key 命中 `SENSITIVE_KEYS` →
 ///    保留 key + `=`/`:` + `[redacted]`。
 /// 3. 其余原样返回。
-pub fn redact_token_like_word(word: &str) -> String {
+fn redact_token_like_word(word: &str) -> String {
     let lower = word.to_ascii_lowercase();
 
     if lower.contains("sk-ant-") {
@@ -126,5 +126,23 @@ mod tests {
     #[test]
     fn redact_error_renames_claude_run_prefix() {
         assert_eq!(redact_error("claude-run-001 done"), "agent-run-001 done");
+    }
+
+    #[test]
+    fn redact_error_masks_authorization_header_in_error_path() {
+        // U2b 修复 commands::redact_error 之前漏检 authorization 的问题——
+        // 经由统一 redact_secrets，error 路径上的 Authorization 头现在也会脱敏。
+        // 注意：redact_token_like_word 按空白分词后逐词识别 key=value / key:value
+        // 形式，所以 `Authorization:<jwt>`（无空格紧贴）能被检测；
+        // 而 `Authorization: <jwt>`（含空格）只把 key 部分标记为 [redacted]，
+        // 后续 token 不再算 key=value，是已知 split_whitespace 限制。
+        let single_token = redact_error("Error: Authorization:abc.def.ghi");
+        assert!(!single_token.contains("abc.def.ghi"), "single_token = {single_token}");
+        assert!(single_token.contains("[redacted]"), "single_token = {single_token}");
+
+        // 含空格的 Authorization 头：当前实现只能脱敏 key 字面，
+        // value 落在下一个 token 上不会自动被遮盖（adversarial#4 已知限制）。
+        let split_form = redact_error("Error: Authorization: Bearer abc.def.ghi");
+        assert!(split_form.contains("Authorization:[redacted]"), "split_form = {split_form}");
     }
 }

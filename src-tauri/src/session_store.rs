@@ -355,9 +355,15 @@ mod tests {
     }
 
     async fn fresh_memory_pool() -> Pool<Sqlite> {
+        // 与 `connect_app_database` 生产路径一致：通过 SqliteConnectOptions
+        // builder 启用 foreign_keys=true，而不是事后手动 PRAGMA，
+        // 以保证测试覆盖到 .foreign_keys(true) 初始化路径。
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .in_memory(true)
+            .foreign_keys(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
-            .connect("sqlite::memory:")
+            .connect_with(options)
             .await
             .expect("memory sqlite");
         sqlx::query(&crate::db::safety_net_schema_sql())
@@ -416,13 +422,9 @@ mod tests {
     #[test]
     fn nodes_subtable_foreign_key_cascade_works() {
         tauri::async_runtime::block_on(async {
+            // fresh_memory_pool 已通过 .foreign_keys(true) builder 启用 FK，
+            // 与 `connect_app_database` 生产路径一致。
             let pool = fresh_memory_pool().await;
-            // SQLite 内存库默认 PRAGMA foreign_keys=OFF；测试里手动启用以
-            // 模拟生产 connect_app_database 的 .foreign_keys(true) 配置。
-            sqlx::query("PRAGMA foreign_keys = ON")
-                .execute(&pool)
-                .await
-                .expect("enable FK");
 
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','t','t','{}')")
                 .execute(&pool).await.expect("seed session");

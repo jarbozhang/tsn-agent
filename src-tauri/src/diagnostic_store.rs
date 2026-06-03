@@ -193,8 +193,8 @@ pub fn redact_and_truncate(value: &str, max_chars: usize) -> String {
 }
 
 // `redact_secrets` 与底层 `redact_token_like_word` 实现 plan v3 U2b 已统一到
-// `crate::redaction`；此处 re-export 保留既有 import path 兼容。
-pub use crate::redaction::redact_secrets;
+// `crate::redaction`；本文件以普通 use 引入，避免再 re-export 形成隐性 API 表面。
+use crate::redaction::redact_secrets;
 
 fn db_error(error: sqlx::Error) -> String {
     format!("diagnostic database error: {error}")
