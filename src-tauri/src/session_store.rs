@@ -345,7 +345,6 @@ mod tests {
     #[test]
     fn migration_v3_drops_diagnostic_logs() {
         let migs = crate::db::migrations();
-        assert_eq!(migs.len(), 3);
         assert_eq!(migs[2].version, 3);
         assert_eq!(migs[2].description, "drop_diagnostic_logs_for_file_writer");
         assert!(crate::db::DROP_DIAGNOSTIC_LOGS_SQL.contains("DROP TABLE IF EXISTS diagnostic_logs"));
@@ -398,15 +397,17 @@ mod tests {
     }
 
     #[test]
-    fn migrations_expose_v1_v2_v3_in_order() {
+    fn migrations_expose_v1_through_v4_in_order() {
         let migs = crate::db::migrations();
-        assert_eq!(migs.len(), 3);
+        assert_eq!(migs.len(), 4);
         assert_eq!(migs[0].version, 1);
         assert_eq!(migs[0].description, "create_session_store");
         assert_eq!(migs[1].version, 2);
         assert_eq!(migs[1].description, "create_p0_domain_tables");
         assert_eq!(migs[2].version, 3);
         assert_eq!(migs[2].description, "drop_diagnostic_logs_for_file_writer");
+        assert_eq!(migs[3].version, 4);
+        assert_eq!(migs[3].description, "create_session_backfill_state");
     }
 
     async fn fresh_memory_pool() -> Pool<Sqlite> {

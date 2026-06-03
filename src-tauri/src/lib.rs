@@ -9,6 +9,7 @@ mod session_export;
 mod session_import;
 mod session_store;
 mod skill_files;
+mod topology_backfill;
 mod topology_mutation_buffer;
 mod topology_mutations_command;
 mod topology_ops;
@@ -43,6 +44,13 @@ pub fn run() {
                 session_store::connect_app_database(&app.handle()),
             )
             .expect("connect app database");
+            // Plan v3 U5 scaffold：把无 backfill_state 的 session 标 pending_walker。
+            // 实际 walker（payload TEXT → 15 P0 表）在后续 unit 完成。
+            if let Err(error) = tauri::async_runtime::block_on(
+                topology_backfill::mark_pending_for_all_sessions(&pool),
+            ) {
+                eprintln!("backfill pending 扫描失败：{error}");
+            }
             let buffer: std::sync::Arc<topology_mutation_buffer::TopologyMutationBuffer> = app
                 .state::<std::sync::Arc<topology_mutation_buffer::TopologyMutationBuffer>>()
                 .inner()
@@ -84,6 +92,9 @@ pub fn run() {
             project_writer::write_project_artifacts,
             session_export::export_session,
             session_import::import_session,
+            topology_backfill::list_backfill_failures,
+            topology_backfill::retry_backfill,
+            topology_backfill::view_session_payload,
             topology_mutations_command::get_topology_mutations_since,
             topology_query_command::query_topology,
             session_store::get_current_session,

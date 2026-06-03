@@ -242,11 +242,12 @@ pub const P0_DOMAIN_SCHEMA_SQL: &str = r#"
     PRAGMA application_id = 1414745601;  -- 0x54534E01 ("TSN\x01")
 "#;
 
-/// `connect_app_database` 内 safety-net 用：覆盖 v1 + v2 schema 的 `CREATE IF NOT EXISTS`，
-/// 末尾追加 v3 的 `DROP diagnostic_logs` 兜底。`CREATE` 与 `DROP IF EXISTS` 均幂等，
-/// 老 db 升级与新 db 创建都安全。
+/// `connect_app_database` 内 safety-net 用：v1 + v2 schema 的 `CREATE IF NOT EXISTS`
+/// + v3 `DROP diagnostic_logs` + v4 backfill state 表，均幂等。
 pub fn safety_net_schema_sql() -> String {
-    format!("{SESSION_SCHEMA_SQL}\n{P0_DOMAIN_SCHEMA_SQL}\n{DROP_DIAGNOSTIC_LOGS_SQL}")
+    format!(
+        "{SESSION_SCHEMA_SQL}\n{P0_DOMAIN_SCHEMA_SQL}\n{DROP_DIAGNOSTIC_LOGS_SQL}\n{SESSION_BACKFILL_STATE_SQL}"
+    )
 }
 
 /// Plan v3 U_R5：lazy migration。旧 v1 db 含 `diagnostic_logs` 表 + 索引；
@@ -256,6 +257,21 @@ pub const DROP_DIAGNOSTIC_LOGS_SQL: &str = r#"
     DROP INDEX IF EXISTS idx_diagnostic_logs_session_created_at;
     DROP INDEX IF EXISTS idx_diagnostic_logs_session_category;
     DROP TABLE IF EXISTS diagnostic_logs;
+"#;
+
+/// Plan v3 U5：backfill state 表（migration v4）。追踪每个 session 的
+/// payload TEXT → 15 P0 表的迁移状态。
+/// 实际 walker（CanonicalTsnProjectV0 JSON → topology_nodes / links 等）
+/// 由 next session 实现；本 unit 先建表 + 命令骨架。
+pub const SESSION_BACKFILL_STATE_SQL: &str = r#"
+    CREATE TABLE IF NOT EXISTS session_backfill_state (
+        session_id    TEXT    PRIMARY KEY NOT NULL,
+        state         TEXT    NOT NULL,
+        error_code    TEXT,
+        attempted_at  TEXT    NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_backfill_state
+        ON session_backfill_state(state);
 "#;
 
 pub fn migrations() -> Vec<tauri_plugin_sql::Migration> {
@@ -276,6 +292,12 @@ pub fn migrations() -> Vec<tauri_plugin_sql::Migration> {
             version: 3,
             description: "drop_diagnostic_logs_for_file_writer",
             sql: DROP_DIAGNOSTIC_LOGS_SQL,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
+        tauri_plugin_sql::Migration {
+            version: 4,
+            description: "create_session_backfill_state",
+            sql: SESSION_BACKFILL_STATE_SQL,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
     ]
