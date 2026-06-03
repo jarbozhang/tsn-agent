@@ -44,12 +44,19 @@ pub fn run() {
                 session_store::connect_app_database(&app.handle()),
             )
             .expect("connect app database");
-            // Plan v3 U5 scaffold：把无 backfill_state 的 session 标 pending_walker。
-            // 实际 walker（payload TEXT → 15 P0 表）在后续 unit 完成。
+            // Plan v3 U5：把无 backfill_state 的 session 标 pending_walker，然后立即
+            // 跑 walker 把 sessions.payload 写进 topology_nodes/_links/_refs。
+            // 最小路径只覆盖基础拓扑表；13 张 nodes.* + topo_feature 由 MCP
+            // apply_operations 增量补齐（Phase A 边界）。
             if let Err(error) = tauri::async_runtime::block_on(
                 topology_backfill::mark_pending_for_all_sessions(&pool),
             ) {
                 eprintln!("backfill pending 扫描失败：{error}");
+            }
+            if let Err(error) = tauri::async_runtime::block_on(
+                topology_backfill::run_walker_for_pending_sessions(&pool),
+            ) {
+                eprintln!("backfill walker 启动期扫描失败：{error}");
             }
             let buffer: std::sync::Arc<topology_mutation_buffer::TopologyMutationBuffer> = app
                 .state::<std::sync::Arc<topology_mutation_buffer::TopologyMutationBuffer>>()
