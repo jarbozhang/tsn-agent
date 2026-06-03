@@ -148,6 +148,7 @@ pub async fn set_current_session(
 pub async fn remove_session(
     app: tauri::AppHandle,
     store: tauri::State<'_, SessionStore>,
+    diagnostics: tauri::State<'_, crate::diagnostic_store::DiagnosticStore>,
     request: SessionIdRequest,
 ) -> Result<(), String> {
     let pool = store.pool(&app).await?;
@@ -158,7 +159,13 @@ pub async fn remove_session(
         .execute(pool)
         .await
         .map_err(db_error)?;
-    crate::diagnostic_store::clear_logs_for_session(pool, &request.session_id).await?;
+    // U_R5：删除文件 jsonl 而非 sqlite 行。即使目录不存在也直接返回。
+    crate::diagnostic_store::clear_logs_for_session_fs(
+        &app,
+        diagnostics.inner(),
+        &request.session_id,
+    )
+    .await?;
 
     if current_id.as_deref() != Some(request.session_id.as_str()) {
         return Ok(());
@@ -299,7 +306,8 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::{Pool, Row, Sqlite};
 
-    const EXPECTED_V1_TABLES: &[&str] = &["sessions", "app_state", "diagnostic_logs"];
+    /// U_R5 后 v1 schema 不再含 `diagnostic_logs`（迁出到文件 jsonl）。
+    const EXPECTED_V1_TABLES: &[&str] = &["sessions", "app_state"];
 
     /// Plan v3 U2a schema 草案：15 张 P0 领域表。
     const EXPECTED_V2_TABLES: &[&str] = &[
@@ -327,10 +335,55 @@ mod tests {
     fn session_schema_contains_expected_tables() {
         assert!(crate::db::SESSION_SCHEMA_SQL.contains("CREATE TABLE IF NOT EXISTS sessions"));
         assert!(crate::db::SESSION_SCHEMA_SQL.contains("CREATE TABLE IF NOT EXISTS app_state"));
+        // U_R5: v1 schema 不再含 diagnostic_logs（迁到文件 jsonl）。
         assert!(
-            crate::db::SESSION_SCHEMA_SQL.contains("CREATE TABLE IF NOT EXISTS diagnostic_logs")
+            !crate::db::SESSION_SCHEMA_SQL.contains("CREATE TABLE IF NOT EXISTS diagnostic_logs")
         );
         assert!(crate::db::SESSION_SCHEMA_SQL.contains("idx_sessions_updated_at"));
+    }
+
+    #[test]
+    fn migration_v3_drops_diagnostic_logs() {
+        let migs = crate::db::migrations();
+        assert_eq!(migs.len(), 3);
+        assert_eq!(migs[2].version, 3);
+        assert_eq!(migs[2].description, "drop_diagnostic_logs_for_file_writer");
+        assert!(crate::db::DROP_DIAGNOSTIC_LOGS_SQL.contains("DROP TABLE IF EXISTS diagnostic_logs"));
+    }
+
+    #[test]
+    fn safety_net_drops_legacy_diagnostic_logs_table_on_v1_db() {
+        tauri::async_runtime::block_on(async {
+            // 模拟 v1 老 db：含 sessions + app_state + 历史 diagnostic_logs。
+            let options = sqlx::sqlite::SqliteConnectOptions::new()
+                .in_memory(true)
+                .foreign_keys(true);
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(options)
+                .await
+                .expect("memory sqlite");
+            sqlx::query(crate::db::SESSION_SCHEMA_SQL)
+                .execute(&pool)
+                .await
+                .expect("v1 schema");
+            sqlx::query(crate::db::LEGACY_DIAGNOSTIC_LOGS_DDL)
+                .execute(&pool)
+                .await
+                .expect("legacy diagnostic_logs");
+
+            // 升级路径：safety_net_schema_sql 末尾的 DROP 会移除老表。
+            sqlx::query(&crate::db::safety_net_schema_sql())
+                .execute(&pool)
+                .await
+                .expect("safety_net_schema_sql");
+
+            let tables = list_tables(&pool).await;
+            assert!(
+                !tables.iter().any(|t| t == "diagnostic_logs"),
+                "diagnostic_logs 应已被 DROP，actual = {tables:?}"
+            );
+        });
     }
 
     #[test]
@@ -345,13 +398,15 @@ mod tests {
     }
 
     #[test]
-    fn migrations_expose_v1_and_v2_in_order() {
+    fn migrations_expose_v1_v2_v3_in_order() {
         let migs = crate::db::migrations();
-        assert_eq!(migs.len(), 2);
+        assert_eq!(migs.len(), 3);
         assert_eq!(migs[0].version, 1);
         assert_eq!(migs[0].description, "create_session_store");
         assert_eq!(migs[1].version, 2);
         assert_eq!(migs[1].description, "create_p0_domain_tables");
+        assert_eq!(migs[2].version, 3);
+        assert_eq!(migs[2].description, "drop_diagnostic_logs_for_file_writer");
     }
 
     async fn fresh_memory_pool() -> Pool<Sqlite> {

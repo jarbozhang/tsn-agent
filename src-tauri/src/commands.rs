@@ -456,11 +456,6 @@ fn log_worker_event(
     let Some(session_id) = session_id else {
         return;
     };
-    let pool = match tauri::async_runtime::block_on(crate::session_store::connect_app_database(app))
-    {
-        Ok(pool) => pool,
-        Err(_) => return,
-    };
     let entry = crate::diagnostic_store::DiagnosticLogEntry {
         id: create_log_id(),
         session_id: session_id.to_string(),
@@ -473,9 +468,12 @@ fn log_worker_event(
         details: Some(details),
     };
 
-    let _ = tauri::async_runtime::block_on(crate::diagnostic_store::append_diagnostic_log_entry(
-        &pool, entry,
-    ));
+    // U_R5：诊断日志改写 jsonl 文件。LogFileWriter 是 async + 串行 Mutex，
+    // 这里在 worker stderr 同步处理路径上以 block_on 桥接。
+    use tauri::Manager;
+    if let Some(store) = app.try_state::<crate::diagnostic_store::DiagnosticStore>() {
+        let _ = tauri::async_runtime::block_on(store.writer().append(app, entry));
+    }
 }
 
 fn iso_now() -> String {

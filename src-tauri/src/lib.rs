@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod diagnostic_store;
+mod log_file_writer;
 mod planner_client;
 mod project_writer;
 mod redaction;

@@ -1,6 +1,7 @@
 pub const DATABASE_URL: &str = "sqlite:tsn-agent.db";
 
-/// Schema-version 1：sessions / app_state / diagnostic_logs。原始 plan baseline 表。
+/// Schema-version 1：sessions / app_state（U_R5 后 `diagnostic_logs` 已迁出 sqlite，
+/// 改由文件 jsonl 存储；旧 v1 db 通过 v3 migration 自动 `DROP TABLE`）。
 pub const SESSION_SCHEMA_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY NOT NULL,
@@ -23,7 +24,11 @@ pub const SESSION_SCHEMA_SQL: &str = r#"
         value TEXT NOT NULL,
         updated_at TEXT NOT NULL
     );
+"#;
 
+/// V1 历史 schema：fresh dev db 之前会含 `diagnostic_logs` 表 + 两个索引。
+/// 仅供 v1 → v3 升级路径上对老 db 的 `DROP TABLE` 兜底逻辑测试参考。
+pub const LEGACY_DIAGNOSTIC_LOGS_DDL: &str = r#"
     CREATE TABLE IF NOT EXISTS diagnostic_logs (
         id TEXT PRIMARY KEY NOT NULL,
         session_id TEXT NOT NULL,
@@ -237,11 +242,21 @@ pub const P0_DOMAIN_SCHEMA_SQL: &str = r#"
     PRAGMA application_id = 1414745601;  -- 0x54534E01 ("TSN\x01")
 "#;
 
-/// `connect_app_database` 内 safety-net 用：覆盖 v1 + v2 全部 schema，
-/// `CREATE TABLE IF NOT EXISTS` 幂等，老 db 升级与新 db 创建都安全。
+/// `connect_app_database` 内 safety-net 用：覆盖 v1 + v2 schema 的 `CREATE IF NOT EXISTS`，
+/// 末尾追加 v3 的 `DROP diagnostic_logs` 兜底。`CREATE` 与 `DROP IF EXISTS` 均幂等，
+/// 老 db 升级与新 db 创建都安全。
 pub fn safety_net_schema_sql() -> String {
-    format!("{SESSION_SCHEMA_SQL}\n{P0_DOMAIN_SCHEMA_SQL}")
+    format!("{SESSION_SCHEMA_SQL}\n{P0_DOMAIN_SCHEMA_SQL}\n{DROP_DIAGNOSTIC_LOGS_SQL}")
 }
+
+/// Plan v3 U_R5：lazy migration。旧 v1 db 含 `diagnostic_logs` 表 + 索引；
+/// 升级到 v3 时一次性 `DROP TABLE IF EXISTS`，数据直接丢弃（脱敏摘要，
+/// 不属用户数据，参考 KTD）。新写入 jsonl 由 `log_file_writer` 负责。
+pub const DROP_DIAGNOSTIC_LOGS_SQL: &str = r#"
+    DROP INDEX IF EXISTS idx_diagnostic_logs_session_created_at;
+    DROP INDEX IF EXISTS idx_diagnostic_logs_session_category;
+    DROP TABLE IF EXISTS diagnostic_logs;
+"#;
 
 pub fn migrations() -> Vec<tauri_plugin_sql::Migration> {
     vec![
@@ -255,6 +270,12 @@ pub fn migrations() -> Vec<tauri_plugin_sql::Migration> {
             version: 2,
             description: "create_p0_domain_tables",
             sql: P0_DOMAIN_SCHEMA_SQL,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
+        tauri_plugin_sql::Migration {
+            version: 3,
+            description: "drop_diagnostic_logs_for_file_writer",
+            sql: DROP_DIAGNOSTIC_LOGS_SQL,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
     ]
