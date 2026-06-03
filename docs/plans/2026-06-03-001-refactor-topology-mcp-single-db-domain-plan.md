@@ -59,9 +59,10 @@ Plan 入口需要 boss 提供 4 件套对应表的字段草案（U1 pre-conditio
 ### Relevant Code and Patterns
 
 **DB 与连接池**
-- `src-tauri/src/session_store.rs:179-204` — `connect_app_database` `max_connections=1`，须升级到 WAL + ≥4
-- `src-tauri/src/db.rs:1-51` — `DATABASE_URL` 相对 vs `connect_app_database` 绝对，U1 Spike C 验后选一条
+- `src-tauri/src/session_store.rs:179-204` — `connect_app_database` `max_connections=1`，须升级到 ≥4（**sqlx 0.8 默认已 WAL**，见 Spike C report）
+- `src-tauri/src/db.rs:1-51` — `DATABASE_URL = "sqlite:tsn-agent.db"` 相对路径**与** `connect_app_database` 绝对路径**实际指向同一 db**（Spike C 已验证：`_sqlx_migrations` + `sessions` 共存于同一文件，plugin 智能解析相对路径到 `app_config_dir`）
 - `src-tauri/src/diagnostic_store.rs:136-146` — `DiagnosticStore.pool()` 委托 `connect_app_database`
+- **Schema versioning**: `tauri-plugin-sql` 用 `_sqlx_migrations` 表（标准 sqlx migrate），**不用 PRAGMA `user_version`**；U2a 新表走 plugin migration version 2 entry
 
 **MCP 工具统一入口**
 - `src-node/mcp/topology-tools.ts:162-196` — `runAgentFacing(callback, args, options)` 是 8 handler 统一壳
@@ -136,7 +137,12 @@ Plan 入口需要 boss 提供 4 件套对应表的字段草案（U1 pre-conditio
 ### Resolved During Planning
 
 - axum 0.8.9 / sqlx 0.8.6 / Tauri 2 / Agent SDK 0.3.160 / MCP SDK 1.29.0 — 已锁版本
-- DB 路径合并 — U1 Spike C 后选一条
+- **DB 路径合并** — Spike C 验证：plugin migration 与 `connect_app_database` 同 db（不需要二选一）
+- **Schema versioning 机制** — Spike C 验证：`tauri-plugin-sql` 用 `_sqlx_migrations` 表，**不用 PRAGMA `user_version`**；U2a 走 plugin migration version 2 entry
+- **WAL 升级** — Spike C 验证：sqlx 0.8 默认 `journal_mode=Wal`，dev db 已经是 WAL；U2a 真正改动是 `busy_timeout=5000` + `max_connections=4` + `application_id` + 新表 schema
+- **`mcpServers.tsn_topology.env` 字段** — Spike B 验证：Node `child_process.spawn` 显式 env **REPLACE** 不是 merge；U4b 必须显式声明 `env: { TSN_AGENT_*, PATH, HOME, SystemRoot, APPDATA, LANG }`，**不能依赖默认透传**
+- **CLAUDECODE 处理** — Spike B 验证：CLAUDECODE 会随 default-inherit 透传；U4b 必须在 SDK spawn 前 `delete process.env.CLAUDECODE`
+- **Node IPv4 fetch** — Spike C 验证：`127.0.0.1` literal in URL 足够（macOS 直接 work）；`node:undici` 在 Node 24 不暴露，无法用 Agent dispatcher；可选在 worker 启动入口加 `dns.setDefaultResultOrder('ipv4first')` 作 Windows 防御
 - Backfill 执行点 — 应用启动一次性
 - `session_db_changed` 粒度 — domain 级 mutationId
 - MCP handler 选项 — Rust 端 DB-direct artifact build
@@ -270,30 +276,32 @@ RELEASE Phase B
 
 ### Phase A — 上线新机制
 
-- [ ] **U2a: DB schema + WAL 升级 + version_2**
+- [ ] **U2a: DB schema (plugin migration v2) + busy_timeout + max_connections + application_id**
 
-**Goal:** main db 升 WAL + max_connections≥4；新增 6 张 topology 表；schema_version 框架。
+**Goal:** main db `connect_app_database` 加 `busy_timeout=5000` + `max_connections(4)` + `application_id`；通过 `tauri-plugin-sql` migration version 2 新增 6 张 topology 表。**WAL 已是 sqlx 0.8 默认（Spike C 验证）**，本 unit 不再做 WAL 升级。
 
 **Requirements:** R1-R4, R20a (部分)
 
 **Dependencies:** U1
 
 **Files:**
-- Modify: `src-tauri/src/db.rs` — `migrations()` version 2；扩 `SESSION_SCHEMA_SQL`；`PRAGMA application_id = 0x54534E01`
-- Modify: `src-tauri/src/session_store.rs` — `connect_app_database` max_connections(4) + `journal_mode=WAL` + `busy_timeout=5000`；migration 顺序 PRAGMA-pre / DDL-in-tx / version-post（PRAGMA 不能在 tx 内是 SQLite 硬约束）
-- Test: schema migration partial 失败 + fresh db / version 1 → 2
+- Modify: `src-tauri/src/db.rs` — `migrations()` 追加 version 2 entry `create_topology_domain_tables`（含 `CREATE TABLE IF NOT EXISTS topology_nodes/links/ports/features/data_server_entries/mac_forwarding_entries` + `PRAGMA application_id = 0x54534E01`）；扩 `SESSION_SCHEMA_SQL` safety-net 同步含新 6 表（与 plugin migration 幂等）
+- Modify: `src-tauri/src/session_store.rs` — `connect_app_database` `max_connections(4)` + 启动时 `PRAGMA busy_timeout=5000`（**保留 sqlx 默认 WAL，可选 explicit 声明做 invariant**）
+- Test: 新 6 表 CREATE TABLE IF NOT EXISTS 命中 + plugin migration v2 apply + `_sqlx_migrations` 含 v1+v2
 
 **Approach:**
-- 顺序：`PRAGMA journal_mode=WAL` (不在 tx) → `PRAGMA busy_timeout=5000` → `BEGIN; CREATE TABLE IF NOT EXISTS; COMMIT` → `PRAGMA user_version=2`
-- WAL 升级是单向门，rollback 需重装 + 备份恢复（在 Risks 写明）
+- Plugin migration mechanism: `tauri-plugin-sql` 用 `_sqlx_migrations` 表（标准 sqlx migrate），不用 PRAGMA `user_version`。`db.rs::migrations()` 返回数组追加 v2 entry 即可
+- `connect_app_database` 内 PRAGMA 顺序：`busy_timeout=5000` → 跑 SESSION_SCHEMA_SQL safety-net（CREATE IF NOT EXISTS 幂等）
+- `application_id` 通过 v2 migration 内 `PRAGMA application_id` 设置（v1 dev db 升级到 v2 时自动 set）
+- 既有 dev db (`_sqlx_migrations` 含 v1) 升级路径：plugin 自动跑 v2 migration 时 IF NOT EXISTS 兼容已有数据
 
 **Test scenarios:**
-- Happy: fresh db 启动 8 张表 + user_version=2 + journal_mode=wal
-- Edge: 已有 db 升级 IF NOT EXISTS 命中
-- Edge: DDL 部分失败 → user_version 仍 1
-- Error: disk full → 中文错误
+- Happy: fresh db 启动后 `_sqlx_migrations` 含 v1+v2、含 6 张新 topology 表 + 既有 sessions/app_state/diagnostic_logs + `application_id = 0x54534E01`
+- Edge: 已有 v1 db 升级 → `_sqlx_migrations` 加一行 v2；既有表数据不动；新 6 表创建
+- Edge: 应用反复启动 → plugin migration 幂等（不重复跑 v2）
+- Error: disk full → plugin migration 错误，下次启动 retry（plugin 内置）
 
-**Verification:** `cargo test` 全绿 + DB PRAGMA 检查
+**Verification:** `cargo test` 全绿 + `sqlite3 ~/Library/.../tsn-agent.db "SELECT version, description FROM _sqlx_migrations"` 含 v1+v2 两行 + `PRAGMA application_id` = 0x54534E01 + `PRAGMA busy_timeout` = 5000
 
 ---
 
@@ -431,7 +439,7 @@ RELEASE Phase B
 - Modify: `src-node/mcp/tsn-topology-server.ts` — 启动 env 校验缺失 exit 1
 - Create: `src-node/mcp/sidecar-client.ts` — `fetchSidecar(route, body, abortMs=15000)`；`AbortSignal.timeout` + Bearer + 强制 `family: 4`
 - Modify: `src/topology/topology-service.ts` — `validate_intermediate → topology.validate`
-- Modify: `src-node/claude-agent-worker.mjs` — `mcpServers.tsn_topology.env = { ... 全套 ... }` + spawn 前 `delete process.env.CLAUDECODE`；**删除 v1 in-process buildXxxArtifacts 直接调用 path**（不留 fallback）
+- Modify: `src-node/claude-agent-worker.mjs` — `mcpServers.tsn_topology.env` **必须显式声明**（Spike B 验证：Node `child_process.spawn` 显式 env REPLACE 不是 merge）含 `{ PATH, HOME, ...(SystemRoot ? { SystemRoot } : {}), ...(APPDATA ? { APPDATA } : {}), ...(LANG ? { LANG } : {}), ...(LC_ALL ? { LC_ALL } : {}), TSN_AGENT_SESSION_ID, TSN_AGENT_DB_RPC_URL, TSN_AGENT_DB_RPC_TOKEN }`；spawn 前 **`delete process.env.CLAUDECODE`**（Spike B 验证：默认会透传）；可选 worker startup 加 `dns.setDefaultResultOrder('ipv4first')` 作 Windows 防御；**删除 v1 in-process buildXxxArtifacts 直接调用 path**（不留 fallback）
 - Modify: agent system prompt — 删除 responseMode 要求
 
 **Approach:**
@@ -886,6 +894,8 @@ flowchart TB
 ## Sources & References
 
 - **Origin:** [docs/brainstorms/2026-06-03-session-db-mcp-requirements.md](../brainstorms/2026-06-03-session-db-mcp-requirements.md)
+- **Spike B report (env passthrough):** [docs/plans/2026-06-03-001-spike-b-report.md](./2026-06-03-001-spike-b-report.md) — confirms `mcpServers.env` must be explicit + delete CLAUDECODE
+- **Spike C report (WAL + plugin migration + IPv4):** [docs/plans/2026-06-03-001-spike-c-report.md](./2026-06-03-001-spike-c-report.md) — WAL already default, plugin migration uses `_sqlx_migrations` not `user_version`, plugin + connect_app_database same db, 127.0.0.1 IPv4 literal works
 - **Superseded:** [docs/brainstorms/2026-05-27-tsn-topology-mcp-requirements.md](../brainstorms/2026-05-27-tsn-topology-mcp-requirements.md)（Phase B U9c 加 deprecation header）
 - **Phase A/B 模板:** [docs/plans/2026-05-21-001-feat-real-stage-skills-inet-smoke-plan.md](./2026-05-21-001-feat-real-stage-skills-inet-smoke-plan.md):207-228
 - **UI event 模板:** [docs/plans/2026-06-01-002-feat-agent-runtime-and-session-experience-plan.md](./2026-06-01-002-feat-agent-runtime-and-session-experience-plan.md) U3b
