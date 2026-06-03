@@ -108,6 +108,20 @@ fn run_claude_agent_blocking(
             "auditDir": audit_dir.as_ref().map(|path| path.display().to_string()),
         }),
     );
+    // Plan v3 U3+U4b：注入 sidecar url + token + session_id 给 worker，
+    // worker 再透传给 MCP child 的 `env`（避免 SDK env passthrough bug，见 Spike B）。
+    let (sidecar_url, sidecar_token, app_session_id_for_env) = {
+        use tauri::Manager;
+        let handle = app
+            .try_state::<crate::topology_sidecar::SidecarHandle>()
+            .ok_or_else(|| "拓扑 sidecar 未启动；应用初始化异常".to_string())?;
+        (
+            handle.url.clone(),
+            handle.token.expose().to_string(),
+            request.app_session_id.clone().unwrap_or_default(),
+        )
+    };
+
     let payload = serde_json::json!({
         "prompt": request.prompt,
         "cwd": cwd,
@@ -117,6 +131,11 @@ fn run_claude_agent_blocking(
         "resumeSessionId": request.resume_session_id,
         "conversationContext": request.conversation_context,
         "stageRunnerInput": request.stage_runner_input,
+        "sidecar": {
+            "url": sidecar_url.clone(),
+            // 不在 payload 内 echo token（避免被 worker 端 audit log 序列化）；
+            // token 通过 env 注入。
+        },
     })
     .to_string();
 
@@ -124,6 +143,13 @@ fn run_claude_agent_blocking(
         .arg(&worker_path)
         .arg(payload)
         .current_dir(cwd)
+        // 注入 sidecar url + token + session_id 到 worker 进程 env；
+        // worker.mjs 再通过 mcpServers.tsn_topology.env 显式声明透传到 MCP child。
+        .env("TSN_AGENT_DB_RPC_URL", &sidecar_url)
+        .env("TSN_AGENT_DB_RPC_TOKEN", &sidecar_token)
+        .env("TSN_AGENT_SESSION_ID", &app_session_id_for_env)
+        // CLAUDECODE=1 在 Claude Code 进程下会被 SDK 拒绝（Spike B + plan v3 KTD）。
+        .env_remove("CLAUDECODE")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
