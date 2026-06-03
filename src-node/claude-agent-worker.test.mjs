@@ -143,6 +143,31 @@ describe("claude-agent-worker", () => {
     expect(result.stageResults).toEqual([]);
   });
 
+  it("Plan v3 U7: accepts mutationId-shaped sidecar tool_result as trusted signal", async () => {
+    const { _isTrustedTopologyToolResultForTest } = await import("./claude-agent-worker.mjs");
+    // 新 sidecar 形态
+    expect(_isTrustedTopologyToolResultForTest({
+      ok: true,
+      summary: { sessionId: "s1", mutationId: 7, applied: [], dryRun: false },
+    })).toBe(true);
+    // 缺 mutationId → 拒绝
+    expect(_isTrustedTopologyToolResultForTest({
+      ok: true,
+      summary: { sessionId: "s1" },
+    })).toBe(false);
+    // ok=false → 拒绝
+    expect(_isTrustedTopologyToolResultForTest({
+      ok: false,
+      summary: { mutationId: 1 },
+    })).toBe(false);
+    // 兼容期 legacy responseMode:full 仍认（U9b 移除）
+    expect(_isTrustedTopologyToolResultForTest({
+      ok: true,
+      metadata: { responseMode: "full", summaryOnly: false },
+      full: { topology: { nodes: [], links: [] } },
+    })).toBe(true);
+  });
+
   it("extracts topology workflow stage results from full MCP tool_result blocks", () => {
     const toolUseNamesById = new Map([
       ["toolu-init", "mcp__tsn_topology__topology_initialize"],

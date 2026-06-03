@@ -6,6 +6,7 @@ mod planner_client;
 mod project_writer;
 mod redaction;
 mod session_export;
+mod session_import;
 mod session_store;
 mod skill_files;
 mod topology_mutation_buffer;
@@ -81,6 +82,7 @@ pub fn run() {
             project_writer::suggest_project_export_dir,
             project_writer::write_project_artifacts,
             session_export::export_session,
+            session_import::import_session,
             topology_mutations_command::get_topology_mutations_since,
             session_store::get_current_session,
             session_store::list_sessions,

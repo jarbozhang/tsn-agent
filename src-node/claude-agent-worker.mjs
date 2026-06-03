@@ -1248,14 +1248,29 @@ function parseJsonOrUndefined(text) {
   }
 }
 
+// Plan v3 U7：trusted signal 改为 sidecar 返回的 `summary.mutationId`。
+// 兼容期保留旧 `responseMode==="full"` 路径供升级前历史 session 的 resume 使用
+// （legacyResumeMode）；新 session 一律走 mutationId path。
 function isTrustedTopologyToolResult(value) {
-  return isRecord(value)
-    && value.ok === true
-    && isRecord(value.metadata)
+  if (!isRecord(value) || value.ok !== true) {
+    return false;
+  }
+  // 新路径：sidecar apply_operations 响应携带 mutationId。
+  if (isRecord(value.summary) && typeof value.summary.mutationId === "number") {
+    return true;
+  }
+  // 旧路径（兼容期）：升级前历史 session 的 responseMode:"full" 全 topology。
+  // U9b（Phase B）删除。
+  return isRecord(value.metadata)
     && value.metadata.responseMode === "full"
     && value.metadata.summaryOnly === false
     && isRecord(value.full)
     && isRecord(value.full.topology);
+}
+
+/// Test-only helper to make extractor symmetry assertable from outside.
+export function _isTrustedTopologyToolResultForTest(value) {
+  return isTrustedTopologyToolResult(value);
 }
 
 function toolNameToTopologyToolName(toolName) {
