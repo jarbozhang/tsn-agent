@@ -186,16 +186,25 @@ impl SessionStore {
 
 pub async fn connect_app_database(app: &tauri::AppHandle) -> Result<Pool<Sqlite>, String> {
     let db_path = session_database_path(app)?;
+    // Plan v3 U2a (Spike C 验证):
+    // - sqlx 0.8 默认 journal_mode=Wal，无需显式 PRAGMA
+    // - max_connections 由 1 提至 4 以支持后续 axum sidecar 并发读 + UI 写共享同一 pool
+    // - busy_timeout=5000ms 在等待写锁时不立即返回 BUSY
     let options = SqliteConnectOptions::new()
         .filename(db_path)
-        .create_if_missing(true);
+        .create_if_missing(true)
+        .foreign_keys(true)
+        .busy_timeout(std::time::Duration::from_millis(5_000));
     let pool = SqlitePoolOptions::new()
-        .max_connections(1)
+        .max_connections(4)
         .connect_with(options)
         .await
         .map_err(db_error)?;
 
-    sqlx::query(crate::db::SESSION_SCHEMA_SQL)
+    // Safety-net schema：v1 + v2（15 张 P0 表）全部 IF NOT EXISTS 幂等执行。
+    // 与 tauri_plugin_sql migrations() 双写保险，避免 plugin migration 与
+    // 直 sqlx 路径在不同 db 实例上的版本漂移（Spike C 已确认两者指向同一 db）。
+    sqlx::query(&crate::db::safety_net_schema_sql())
         .execute(&pool)
         .await
         .map_err(db_error)?;
@@ -287,6 +296,33 @@ fn db_error(error: sqlx::Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::{Pool, Row, Sqlite};
+
+    const EXPECTED_V1_TABLES: &[&str] = &["sessions", "app_state", "diagnostic_logs"];
+
+    /// Plan v3 U2a schema 草案：15 张 P0 领域表。
+    const EXPECTED_V2_TABLES: &[&str] = &[
+        // topology.json (3)
+        "topology_nodes",
+        "topology_links",
+        "topology_refs",
+        // topo_feature.json (1)
+        "topo_feature_links",
+        // node.json (11)
+        "nodes",
+        "nodes_oss_cfg",
+        "nodes_sdu_table_cfg",
+        "nodes_gcl_cfg",
+        "nodes_time_cfg",
+        "nodes_psfg_stream_filters",
+        "nodes_psfg_flow_meters",
+        "nodes_psfg_stream_gates",
+        "nodes_frer_cfg",
+        "nodes_array_cfg",
+        "nodes_object_cfg",
+    ];
+
     #[test]
     fn session_schema_contains_expected_tables() {
         assert!(crate::db::SESSION_SCHEMA_SQL.contains("CREATE TABLE IF NOT EXISTS sessions"));
@@ -295,5 +331,116 @@ mod tests {
             crate::db::SESSION_SCHEMA_SQL.contains("CREATE TABLE IF NOT EXISTS diagnostic_logs")
         );
         assert!(crate::db::SESSION_SCHEMA_SQL.contains("idx_sessions_updated_at"));
+    }
+
+    #[test]
+    fn p0_domain_schema_lists_all_fifteen_tables() {
+        let sql = crate::db::P0_DOMAIN_SCHEMA_SQL;
+        for table in EXPECTED_V2_TABLES {
+            let needle = format!("CREATE TABLE IF NOT EXISTS {table}");
+            assert!(sql.contains(&needle), "missing {table} in P0 schema");
+        }
+        // application_id (0x54534E01 = 1414745601) 必须由 v2 migration 写入。
+        assert!(sql.contains("PRAGMA application_id = 1414745601"));
+    }
+
+    #[test]
+    fn migrations_expose_v1_and_v2_in_order() {
+        let migs = crate::db::migrations();
+        assert_eq!(migs.len(), 2);
+        assert_eq!(migs[0].version, 1);
+        assert_eq!(migs[0].description, "create_session_store");
+        assert_eq!(migs[1].version, 2);
+        assert_eq!(migs[1].description, "create_p0_domain_tables");
+    }
+
+    async fn fresh_memory_pool() -> Pool<Sqlite> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("memory sqlite");
+        sqlx::query(&crate::db::safety_net_schema_sql())
+            .execute(&pool)
+            .await
+            .expect("safety_net_schema_sql executes");
+        pool
+    }
+
+    async fn list_tables(pool: &Pool<Sqlite>) -> Vec<String> {
+        sqlx::query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(pool)
+            .await
+            .expect("list tables")
+            .iter()
+            .map(|row| row.get::<String, _>("name"))
+            .collect()
+    }
+
+    #[test]
+    fn safety_net_schema_creates_all_v1_and_v2_tables_idempotently() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_memory_pool().await;
+
+            let tables = list_tables(&pool).await;
+            for expected in EXPECTED_V1_TABLES.iter().chain(EXPECTED_V2_TABLES.iter()) {
+                assert!(
+                    tables.iter().any(|t| t == expected),
+                    "missing table {expected}; actual = {tables:?}"
+                );
+            }
+
+            // Re-running the safety-net schema must remain idempotent.
+            sqlx::query(&crate::db::safety_net_schema_sql())
+                .execute(&pool)
+                .await
+                .expect("idempotent re-run");
+
+            let tables_again = list_tables(&pool).await;
+            assert_eq!(tables, tables_again);
+        });
+    }
+
+    #[test]
+    fn safety_net_schema_applies_application_id_pragma() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_memory_pool().await;
+            let app_id: i64 = sqlx::query_scalar("PRAGMA application_id")
+                .fetch_one(&pool)
+                .await
+                .expect("application_id pragma");
+            assert_eq!(app_id, 0x5453_4E01);
+        });
+    }
+
+    #[test]
+    fn nodes_subtable_foreign_key_cascade_works() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_memory_pool().await;
+            // SQLite 内存库默认 PRAGMA foreign_keys=OFF；测试里手动启用以
+            // 模拟生产 connect_app_database 的 .foreign_keys(true) 配置。
+            sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&pool)
+                .await
+                .expect("enable FK");
+
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','t','t','{}')")
+                .execute(&pool).await.expect("seed session");
+            sqlx::query("INSERT INTO nodes (session_id, node_id) VALUES ('s1', 'n0')")
+                .execute(&pool).await.expect("seed node");
+            sqlx::query("INSERT INTO nodes_oss_cfg (session_id, node_id, cfg_json) VALUES ('s1','n0','{}')")
+                .execute(&pool).await.expect("seed oss_cfg");
+
+            // 删除 session → 应级联删除 nodes 与 nodes_oss_cfg。
+            sqlx::query("DELETE FROM sessions WHERE id = 's1'")
+                .execute(&pool).await.expect("delete session");
+
+            let node_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes")
+                .fetch_one(&pool).await.expect("count nodes");
+            let oss_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes_oss_cfg")
+                .fetch_one(&pool).await.expect("count oss_cfg");
+            assert_eq!(node_count, 0);
+            assert_eq!(oss_count, 0);
+        });
     }
 }
