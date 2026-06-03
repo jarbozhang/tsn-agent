@@ -12,6 +12,7 @@ mod skill_files;
 mod topology_mutation_buffer;
 mod topology_mutations_command;
 mod topology_ops;
+mod topology_query_command;
 mod topology_sidecar;
 mod topology_sidecar_routes;
 
@@ -84,6 +85,7 @@ pub fn run() {
             session_export::export_session,
             session_import::import_session,
             topology_mutations_command::get_topology_mutations_since,
+            topology_query_command::query_topology,
             session_store::get_current_session,
             session_store::list_sessions,
             session_store::remove_session,
