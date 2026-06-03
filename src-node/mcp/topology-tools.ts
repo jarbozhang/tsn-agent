@@ -70,8 +70,8 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       )),
     },
     {
-      name: "topology.validate_intermediate",
-      allowedToolName: "mcp__tsn_topology__topology_validate_intermediate",
+      name: "topology.validate",
+      allowedToolName: "mcp__tsn_topology__topology_validate",
       title: "Validate intermediate topology",
       description: "Validate an IntermediateTopology and return structured errors.",
       inputSchema: {

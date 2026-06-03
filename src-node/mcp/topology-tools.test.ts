@@ -293,7 +293,7 @@ describe("topology MCP tool registry", () => {
     const describeArtifacts = parseToolText(runTopologyTool("topology.describe_artifacts", {
       artifacts: built.full!.artifacts,
     }));
-    const validateIntermediate = parseToolText(runTopologyTool("topology.validate_intermediate", {
+    const validateIntermediate = parseToolText(runTopologyTool("topology.validate", {
       topology: initialized.full!.topology,
     }));
     const validateArtifacts = parseToolText(runTopologyTool("topology.validate_artifacts", {

@@ -11,7 +11,7 @@ export const TOPOLOGY_MCP_ALLOWED_TOOLS = [
   "mcp__tsn_topology__topology_initialize",
   "mcp__tsn_topology__topology_inspect",
   "mcp__tsn_topology__topology_describe_artifacts",
-  "mcp__tsn_topology__topology_validate_intermediate",
+  "mcp__tsn_topology__topology_validate",
   "mcp__tsn_topology__topology_build_artifacts",
   "mcp__tsn_topology__topology_validate_artifacts",
   "mcp__tsn_topology__topology_apply_operations",
@@ -45,6 +45,33 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
   const skillOutputDir = resolvedOptions.skillOutputDir ?? await createSkillOutputDir(stageResultPath);
   const stageRunnerPath = resolvedOptions.stageRunnerPath ?? resolveStageRunnerPath(cwd);
   const topologyMcpServerPath = resolvedOptions.topologyMcpServerPath ?? resolveTopologyMcpServerPath(cwd);
+  // Plan v3 U4b + Spike B：MCP child env 必须显式声明（Node child_process.spawn
+  // 显式 env 字段语义是 REPLACE 不是 merge）；CLAUDECODE 必须不带过去防嵌套
+  // session 拒绝。Tauri 端通过 `commands::run_claude_agent` 向 worker 注入
+  // TSN_AGENT_DB_RPC_URL/TOKEN/SESSION_ID + env_remove(CLAUDECODE)。
+  const buildTopologyMcpEnv = () => {
+    const env = {};
+    const passthrough = [
+      "PATH",
+      "HOME",
+      "SystemRoot",
+      "APPDATA",
+      "LANG",
+      "LC_ALL",
+      "TMPDIR",
+      "TEMP",
+      "TMP",
+      "TSN_AGENT_DB_RPC_URL",
+      "TSN_AGENT_DB_RPC_TOKEN",
+      "TSN_AGENT_SESSION_ID",
+    ];
+    for (const key of passthrough) {
+      if (process.env[key] !== undefined) {
+        env[key] = process.env[key];
+      }
+    }
+    return env;
+  };
   const topologyMcpConfig = topologyMcpServerPath && existsSync(topologyMcpServerPath)
     ? {
         [TOPOLOGY_MCP_SERVER_NAME]: {
@@ -52,6 +79,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
           command: process.execPath,
           args: [topologyMcpServerPath],
           alwaysLoad: true,
+          env: buildTopologyMcpEnv(),
         },
       }
     : undefined;
