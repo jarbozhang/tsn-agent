@@ -28,9 +28,11 @@ Plan 入口需要 boss 提供 4 件套对应表的字段草案（U1 pre-conditio
 
 ## Requirements Trace
 
+> **U1 Schema Draft 修正 (2026-06-03)**：参考 CDT 工程 (`docs/plans/2026-06-03-001-schema-draft.md`)，实际 4 件套 = **topology.json + topo_feature.json + node.json + flow_plan_<id>.json**（不是 brainstorm v3 R1 原列的 4 件套）。P0 = **3 件套**（topology + topo_feature + node，**新增 node.json**），P0 表数 6 → **15** (3 topology + 1 topo_feature + 11 node 派生)。`data-server.json` 是上游 Qunee 源数据不在 4 件套；`mac-forwarding-table.json` CDT 不生成，已删除。
+
 直接对齐 brainstorm v3 R1-R22 + R5a + R20a-g：
 
-- **R1-R4**: DB 结构与边界（4 件套表 + session_id 列 + 删 `diagnostic_logs` 表 → 文件日志，由 **U_R5** 落地）
+- **R1-R4**: DB 结构与边界（**3 件套对应 15 张表** + session_id 列 + 删 `diagnostic_logs` 表 → 文件日志，由 **U_R5** 落地）
 - **R5 + R5a**: 日志移到 `<app-config>/logs/sess-<id>/agent-run-<runId>.jsonl` + 字段 allowlist 继承（**U_R5**；R5a 仅在 U8 默认行为"不打包日志"中体现）
 - **R6-R9**: MCP 工具契约（`tsn_topology` 名保留、env 注入 sessionId、`validate_intermediate→topology.validate`、**`build_artifacts` 仍返完整 4 件套 JSON**）
 - **R10-R12**: 事务与一致性（sqlx Transaction + 单 session 1 个写 tx + 5s timeout）
@@ -285,7 +287,7 @@ RELEASE Phase B
 **Dependencies:** U1
 
 **Files:**
-- Modify: `src-tauri/src/db.rs` — `migrations()` 追加 version 2 entry `create_topology_domain_tables`（含 `CREATE TABLE IF NOT EXISTS topology_nodes/links/ports/features/data_server_entries/mac_forwarding_entries` + `PRAGMA application_id = 0x54534E01`）；扩 `SESSION_SCHEMA_SQL` safety-net 同步含新 6 表（与 plugin migration 幂等）
+- Modify: `src-tauri/src/db.rs` — `migrations()` 追加 version 2 entry `create_p0_domain_tables`（含 **15 张 P0 表**的 `CREATE TABLE IF NOT EXISTS` + `PRAGMA application_id = 0x54534E01`；表列表见 `docs/plans/2026-06-03-001-schema-draft.md`：3 张 topology (`topology_nodes/links/refs`) + 1 张 topo_feature (`topo_feature_links`) + 11 张 node 派生 (`nodes` + `nodes_oss_cfg/sdu_table_cfg/gcl_cfg/time_cfg/psfg_stream_filters/psfg_flow_meters/psfg_stream_gates/frer_cfg/array_cfg/object_cfg`)）；扩 `SESSION_SCHEMA_SQL` safety-net 同步含新 15 表（与 plugin migration 幂等）
 - Modify: `src-tauri/src/session_store.rs` — `connect_app_database` `max_connections(4)` + 启动时 `PRAGMA busy_timeout=5000`（**保留 sqlx 默认 WAL，可选 explicit 声明做 invariant**）
 - Test: 新 6 表 CREATE TABLE IF NOT EXISTS 命中 + plugin migration v2 apply + `_sqlx_migrations` 含 v1+v2
 
@@ -296,12 +298,13 @@ RELEASE Phase B
 - 既有 dev db (`_sqlx_migrations` 含 v1) 升级路径：plugin 自动跑 v2 migration 时 IF NOT EXISTS 兼容已有数据
 
 **Test scenarios:**
-- Happy: fresh db 启动后 `_sqlx_migrations` 含 v1+v2、含 6 张新 topology 表 + 既有 sessions/app_state/diagnostic_logs + `application_id = 0x54534E01`
-- Edge: 已有 v1 db 升级 → `_sqlx_migrations` 加一行 v2；既有表数据不动；新 6 表创建
+- Happy: fresh db 启动后 `_sqlx_migrations` 含 v1+v2、含 **15 张新 P0 表** + 既有 sessions/app_state/diagnostic_logs + `application_id = 0x54534E01`
+- Edge: 已有 v1 db 升级 → `_sqlx_migrations` 加一行 v2；既有表数据不动；新 15 表创建
 - Edge: 应用反复启动 → plugin migration 幂等（不重复跑 v2）
+- Edge: FK 约束验证 — 删除 sessions 行级联删除 15 张表中该 session 数据
 - Error: disk full → plugin migration 错误，下次启动 retry（plugin 内置）
 
-**Verification:** `cargo test` 全绿 + `sqlite3 ~/Library/.../tsn-agent.db "SELECT version, description FROM _sqlx_migrations"` 含 v1+v2 两行 + `PRAGMA application_id` = 0x54534E01 + `PRAGMA busy_timeout` = 5000
+**Verification:** `cargo test` 全绿 + `sqlite3 ~/Library/.../tsn-agent.db "SELECT version, description FROM _sqlx_migrations"` 含 v1+v2 两行 + `PRAGMA application_id` = 0x54534E01 + `PRAGMA busy_timeout` = 5000 + `.tables` 显示 15 张 P0 表
 
 ---
 
@@ -896,6 +899,8 @@ flowchart TB
 - **Origin:** [docs/brainstorms/2026-06-03-session-db-mcp-requirements.md](../brainstorms/2026-06-03-session-db-mcp-requirements.md)
 - **Spike B report (env passthrough):** [docs/plans/2026-06-03-001-spike-b-report.md](./2026-06-03-001-spike-b-report.md) — confirms `mcpServers.env` must be explicit + delete CLAUDECODE
 - **Spike C report (WAL + plugin migration + IPv4):** [docs/plans/2026-06-03-001-spike-c-report.md](./2026-06-03-001-spike-c-report.md) — WAL already default, plugin migration uses `_sqlx_migrations` not `user_version`, plugin + connect_app_database same db, 127.0.0.1 IPv4 literal works
+- **U1 Schema draft:** [docs/plans/2026-06-03-001-schema-draft.md](./2026-06-03-001-schema-draft.md) — CDT-derived schema (15 P0 tables); revises plan v3 R1 (4-piece set now = topology + topo_feature + node + flow_plan; data-server/mac-forwarding dropped)
+- **CDT JSON analysis (source):** `/Users/jiabozhang/Documents/Develop/TSN-BIT/CDT/docs/analysis/json-generation-analysis.html`
 - **Superseded:** [docs/brainstorms/2026-05-27-tsn-topology-mcp-requirements.md](../brainstorms/2026-05-27-tsn-topology-mcp-requirements.md)（Phase B U9c 加 deprecation header）
 - **Phase A/B 模板:** [docs/plans/2026-05-21-001-feat-real-stage-skills-inet-smoke-plan.md](./2026-05-21-001-feat-real-stage-skills-inet-smoke-plan.md):207-228
 - **UI event 模板:** [docs/plans/2026-06-01-002-feat-agent-runtime-and-session-experience-plan.md](./2026-06-01-002-feat-agent-runtime-and-session-experience-plan.md) U3b

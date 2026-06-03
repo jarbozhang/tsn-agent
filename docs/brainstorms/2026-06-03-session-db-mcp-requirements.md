@@ -111,7 +111,7 @@ Tauri `setup()` 内**同步**执行：
 ## Requirements
 
 **DB 结构与边界**
-- R1. P0 表结构以 topology 4 件套（`topology.json / topo_feature.json / data-server.json / mac-forwarding-table.json`）为 round-trip 目标；DB 表字段平铺。**`flow_plan_1.json` 不在 P0 round-trip 范围内**（flow domain 进 P1）。
+- R1. ~~P0 表结构以 topology 4 件套（`topology.json / topo_feature.json / data-server.json / mac-forwarding-table.json`）为 round-trip 目标~~。**2026-06-03 U1 schema draft 修正**：参考 CDT 工程 `docs/plans/2026-06-03-001-schema-draft.md`，实际 4 件套 = `topology.json + topo_feature.json + node.json + flow_plan_<id>.json`。`data-server.json` 是上游 Qunee 源数据**不在 4 件套**；`mac-forwarding-table.json` CDT **不生成**已删除；新增 `node.json`（9 类业务配置 + base_info）进 P0。**P0 表结构 = 3 件套（topology + topo_feature + node）的 15 张表**；DB 表字段平铺。`flow_plan_<id>.json` 不在 P0 round-trip 范围内（flow domain 进 P1）。
 - R2. P0 实质覆盖 **topology 一个 domain**；flow / time-sync 推到 P1。Boss 在 plan 入口提供 topology 4 件套对应表的列清单草案。
 - R3. 单 sqlite 物理文件 `<app-config>/tsn-agent.db`；所有领域行加 `session_id` 列作为外键到 `sessions.id`，并建 `(session_id, ...)` 复合索引（具体索引尾列由 plan 阶段根据 R8 工具查询模式确定）。
 - R4. main db 表清单：保留 `sessions` / `app_state`；新增 `topology_nodes` / `topology_links` / `topology_ports` / `topology_features` / `data_server_entries` / `mac_forwarding_entries`；删除 `diagnostic_logs` 表（迁移到文件，见 R5）。flow / time-sync 表 P1 加。
