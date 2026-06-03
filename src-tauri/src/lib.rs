@@ -10,6 +10,7 @@ mod session_store;
 mod skill_files;
 mod topology_mutation_buffer;
 mod topology_mutations_command;
+mod topology_ops;
 mod topology_sidecar;
 mod topology_sidecar_routes;
 
@@ -31,10 +32,38 @@ pub fn run() {
         )
         .manage(session_store::SessionStore::default())
         .manage(diagnostic_store::DiagnosticStore::default())
-        .manage(topology_mutation_buffer::TopologyMutationBuffer::default())
+        .manage(std::sync::Arc::new(topology_mutation_buffer::TopologyMutationBuffer::default()))
         .setup(|app| {
-            // Plan v3 U3：sidecar 在 setup() 内同步起，bind 失败直接 panic（fail-closed）。
-            let handle = tauri::async_runtime::block_on(topology_sidecar::launch());
+            // Plan v3 U3 + U4a-1：sidecar 起前先拉起 sqlx pool 与 mutation buffer。
+            // emit 闭包桥接到 Tauri AppHandle，生产 emit_to("main", ...)；
+            // 失败回退到全局 emit，再失败写 stderr（UI 端 watchdog 兜底）。
+            let pool = tauri::async_runtime::block_on(
+                session_store::connect_app_database(&app.handle()),
+            )
+            .expect("connect app database");
+            let buffer: std::sync::Arc<topology_mutation_buffer::TopologyMutationBuffer> = app
+                .state::<std::sync::Arc<topology_mutation_buffer::TopologyMutationBuffer>>()
+                .inner()
+                .clone();
+            let emit_handle = app.handle().clone();
+            let emit: topology_sidecar_routes::MutationEmitFn =
+                std::sync::Arc::new(move |record| {
+                    let payload = serde_json::json!({
+                        "sessionId": record.session_id,
+                        "domain": record.domain,
+                        "mutationId": record.mutation_id,
+                    });
+                    use tauri::Emitter;
+                    if emit_handle
+                        .emit_to("main", "session_db_changed", payload.clone())
+                        .is_err()
+                    {
+                        let _ = emit_handle.emit("session_db_changed", payload);
+                    }
+                });
+            let handle = tauri::async_runtime::block_on(topology_sidecar::launch(
+                pool, buffer, emit,
+            ));
             app.manage(handle);
             Ok(())
         })

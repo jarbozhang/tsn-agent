@@ -6,11 +6,8 @@
 //! （U4a-1 后续实现）。
 
 use serde::Deserialize;
-use tauri::Emitter;
 
-use crate::topology_mutation_buffer::{
-    CatchUpResponse, MutationRecord, TopologyMutationBuffer,
-};
+use crate::topology_mutation_buffer::{CatchUpResponse, TopologyMutationBuffer};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,34 +18,15 @@ pub struct GetTopologyMutationsRequest {
 
 #[tauri::command]
 pub async fn get_topology_mutations_since(
-    buffer: tauri::State<'_, TopologyMutationBuffer>,
+    buffer: tauri::State<'_, std::sync::Arc<TopologyMutationBuffer>>,
     request: GetTopologyMutationsRequest,
 ) -> Result<CatchUpResponse, String> {
     Ok(buffer.since(&request.session_id, request.last_seen))
 }
 
-/// 在 sidecar route apply commit 后调用：push buffer + emit Tauri event。
-/// 限定 `emit_to("main", ...)` 避免跨 webview 泄露。
-pub fn push_and_emit(
-    app: &tauri::AppHandle,
-    buffer: &TopologyMutationBuffer,
-    session_id: &str,
-    domain: &str,
-) -> MutationRecord {
-    let record = buffer.push(session_id.to_string(), domain.to_string());
-    let payload = serde_json::json!({
-        "sessionId": record.session_id,
-        "domain": record.domain,
-        "mutationId": record.mutation_id,
-    });
-    // emit_to("main", ...) 不存在时回退到全局 emit；忽略 emit 失败（UI 端有 watchdog 兜底）。
-    if let Err(error) = app.emit_to("main", "session_db_changed", payload.clone()) {
-        let _ = app.emit("session_db_changed", payload);
-        // 写到 stderr 用于诊断（不致命）
-        eprintln!("session_db_changed emit_to(main) 失败：{error}");
-    }
-    record
-}
+// emit closure 现在由 `topology_sidecar::launch` 的调用方注入到 RouteState，
+// 不再需要本模块内的 push_and_emit helper（refactor: 解耦 Tauri Runtime 类型，
+// 让 sidecar route 单测可以零依赖 AppHandle 跑通）。
 
 #[cfg(test)]
 mod tests {
