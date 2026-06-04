@@ -425,10 +425,10 @@ function buildAllowedToolsForStage(stageRunnerInput, hasTopologyMcpConfig) {
 
 function buildSystemPromptForStage(stageRunnerInput) {
   if (isRecord(stageRunnerInput) && stageRunnerInput.stage === "topology") {
-    return "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。工程状态只接受结构化校验结果。拓扑初始化、校验、artifact 构建、inspect 和 apply_operations 必须优先通过 tsn_topology MCP 工具产生 trusted topology result；initialize/apply_operations 需要落图时必须请求 responseMode: \"full\" 且 topologyFullAllowed: true。artifact、端口表、MAC 表和完整 changeSet 不得进入对话。拓扑阶段不要调用 stage runner，不要写 TSN_AGENT_STAGE_RESULT_PATH，不要用自然语言重新构建拓扑。固定阶段顺序是拓扑、时间同步、流量规划、模拟仿真；拓扑确认后必须进入时间同步。当前应用没有接入 OMNeT++/远程仿真 runner，不能声称已启动仿真、SSH 执行或稍后通知结果。";
+    return "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。工程状态只接受结构化校验结果。拓扑初始化、校验、artifact 构建、inspect 和 apply_operations 必须通过 tsn_topology MCP 工具调用 sidecar，所有工具结果都已是结构化领域响应（不再需要 responseMode/topologyFullAllowed 字段）。artifact、端口表、MAC 表和完整 changeSet 不得再在自然语言里复述。拓扑阶段不要调用 stage runner，不要写 TSN_AGENT_STAGE_RESULT_PATH，不要用自然语言重新构建拓扑。固定阶段顺序是拓扑、时间同步、流量规划、模拟仿真；拓扑确认后必须进入时间同步。当前应用没有接入 OMNeT++/远程仿真 runner，不能声称已启动仿真、SSH 执行或稍后通知结果。";
   }
 
-  return "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。可以使用本轮启用的工具和 TSN 项目 skill，但工程状态只接受结构化校验结果。拓扑初始化、校验、artifact 构建、inspect 和 apply_operations 必须优先通过 tsn_topology MCP 工具产生 trusted topology result；流量规划可暂时通过本地 stage runner 产生结构化结果落地。MCP 只允许在 initialize/apply_operations 需要传递 IntermediateTopology 时使用 responseMode: \"full\" 且 topologyFullAllowed: true，artifact、端口表、MAC 表和完整 changeSet 不得进入对话。除 TSN_AGENT_SKILL_OUTPUT_DIR 和 TSN_AGENT_STAGE_RESULT_PATH 指向的位置外，不要写入仓库文件。固定阶段顺序是拓扑、时间同步、流量规划、模拟仿真；拓扑确认后必须进入时间同步。当前应用没有接入 OMNeT++/远程仿真 runner，不能声称已启动仿真、SSH 执行或稍后通知结果。";
+  return "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。可以使用本轮启用的工具和 TSN 项目 skill，但工程状态只接受结构化校验结果。拓扑初始化、校验、artifact 构建、inspect 和 apply_operations 必须通过 tsn_topology MCP 工具调用 sidecar；流量规划可暂时通过本地 stage runner 产生结构化结果落地。MCP 工具返回值已经是结构化领域响应（不再需要 responseMode/topologyFullAllowed 字段），artifact、端口表、MAC 表和完整 changeSet 仍不得在自然语言里复述。除 TSN_AGENT_SKILL_OUTPUT_DIR 和 TSN_AGENT_STAGE_RESULT_PATH 指向的位置外，不要写入仓库文件。固定阶段顺序是拓扑、时间同步、流量规划、模拟仿真；拓扑确认后必须进入时间同步。当前应用没有接入 OMNeT++/远程仿真 runner，不能声称已启动仿真、SSH 执行或稍后通知结果。";
 }
 
 function buildStageResultRetryPrompt({
@@ -448,7 +448,7 @@ function buildStageResultRetryPrompt({
 现在必须重新执行拓扑 MCP 工具链：
 1. 从 0 初始化时调用 topology.describe_templates 和 topology.initialize。
 2. 已有拓扑编辑时调用 topology.inspect 和 topology.apply_operations。
-3. 需要右侧落图时，topology.initialize / topology.apply_operations 必须请求 responseMode="full" 且 topologyFullAllowed=true。
+3. tsn_topology MCP 工具结果已是 sidecar 结构化领域响应，不再需要 responseMode/topologyFullAllowed 字段。
 4. 不要调用 stage runner，不要写 TSN_AGENT_STAGE_RESULT_PATH，不要只返回文字说明。
 
 用户原始需求：
@@ -524,13 +524,13 @@ export function buildPrompt(
     ? `结构化结果回传：
 - 当前阶段如果需要生成或修改拓扑，必须优先使用 tsn_topology MCP 工具。
 - 从 0 初始化拓扑时，先通过 topology.describe_templates 理解模板，再调用 topology.initialize；已有拓扑编辑时，调用 topology.inspect / topology.apply_operations。
-- 需要右侧落图时，topology.initialize / topology.apply_operations 必须请求 responseMode="full" 且 topologyFullAllowed=true，让 worker 捕获 full IntermediateTopology 并合成 WorkflowStageResult。
+- tsn_topology MCP 工具结果已是 sidecar 结构化领域响应（不再需要 responseMode/topologyFullAllowed 字段）；worker 会自动解析结果并合成 WorkflowStageResult。
 - 不要调用 stage runner，不要写 TSN_AGENT_STAGE_RESULT_PATH，不要让模型复述完整拓扑 JSON，不要从 summary 文本反解析拓扑。
 - TSN_AGENT_SKILL_OUTPUT_DIR=${skillOutputDir}
 - 调用 tsn-topology skill 时，只能作为 MCP 使用指引；不要让 skill 维护独立 builder 或写 stage-result.json。`
     : `结构化结果回传：
 - 当前阶段如果需要生成或修改拓扑，必须使用 tsn-topology skill。
-- 如果可用，拓扑模板目录、初始化、校验、artifact 构建、inspect 和 apply_operations 必须使用 tsn_topology MCP 工具；只有 initialize/apply_operations 为了把 IntermediateTopology 继续传给后续工具时，才允许请求 responseMode="full" 且 topologyFullAllowed=true；不要请求 full artifact、完整端口表、MAC 表或完整 changeSet。
+- 如果可用，拓扑模板目录、初始化、校验、artifact 构建、inspect 和 apply_operations 必须使用 tsn_topology MCP 工具；返回值已是 sidecar 结构化领域响应（不再需要 responseMode/topologyFullAllowed 字段），但 artifact、端口表、MAC 表和完整 changeSet 仍不得在自然语言里复述。
 - 当前阶段如果需要生成或修改流量规划，必须使用 tsn-flow-planning skill。
 - 结构化结果必须由项目 runner 写入 TSN_AGENT_STAGE_RESULT_PATH。
 - TSN_AGENT_STAGE_RESULT_PATH=${stageResultPath}

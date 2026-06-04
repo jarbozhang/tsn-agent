@@ -334,17 +334,24 @@ mod tests {
     }
 
     #[test]
-    fn router_returns_501_on_describe_templates_until_u4a_2() {
+    fn router_returns_template_catalog_on_describe_templates() {
         tauri::async_runtime::block_on(async {
             let (pool, buf) = test_state().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+                .execute(&pool).await.unwrap();
             let (router, token) = build_test_router_with_pool(pool, buf).await;
+            let body = serde_json::json!({ "sessionId": "s1" }).to_string();
             let resp = router
                 .oneshot(Request::builder().method("POST").uri("/db/topology/describe_templates")
                     .header("Authorization", format!("Bearer {}", token.expose()))
                     .header("Content-Type", "application/json")
-                    .body(Body::from("{}")).unwrap())
+                    .body(Body::from(body)).unwrap())
                 .await.unwrap();
-            assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
+            assert_eq!(resp.status(), StatusCode::OK);
+            let bytes = to_bytes(resp.into_body(), 16_384).await.unwrap();
+            let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(parsed["ok"], true);
+            assert_eq!(parsed["summary"]["templateCount"], 3);
         });
     }
 

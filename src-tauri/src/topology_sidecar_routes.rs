@@ -1,24 +1,29 @@
-//! Plan v3 U4a-1：拓扑 sidecar 8 个领域 route 的实际 sqlx 实现。
+//! Plan v3 U4a：拓扑 sidecar 8 个领域 route 的实际实现。
 //!
-//! 已接：
-//!   - POST /db/topology/apply_operations  (insert/update/delete + emit mutation)
-//!   - POST /db/topology/inspect           (only counts / row dump per session)
-//!   - POST /db/topology/validate          (structural sanity)
+//! U4a-1 已接：apply_operations / inspect (counts) / validate (基础结构)。
+//! U4a-2 接：describe_templates / initialize / inspect (含 selector) /
+//!          validate (含完整结构校验) / build_artifacts / describe_artifacts /
+//!          validate_artifacts。计算实现 1:1 镜像 `src/topology/*.ts`，落于
+//!          `topology_compute` + `topology_intermediate`。
 //!
-//! 仍占位（待 U4a-2 完成 artifacts.ts 的 Rust 端重写）：
-//!   - describe_templates / describe_artifacts / build_artifacts /
-//!     validate_artifacts
-//!
-//! `initialize` 简化实现：写 sessions 不存在则报错 (template 逻辑 deferred)。
+//! 所有路由都先做 `require_session(sessionId)`，再进 compute 模块，保证 sidecar
+//! 仍是单写者 + per-session 隔离的事实源边界（即便算法本身是 pure compute）。
 
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use sqlx::Row;
 use std::sync::Arc;
 
+use crate::topology_compute::{
+    build_topology_artifacts, describe_templates_catalog, describe_topology_artifacts,
+    initialize_topology as compute_initialize, inspect_topology as compute_inspect,
+    validate_intermediate_topology, validate_topology_artifacts, InitializeIntent,
+    InspectRequestBody,
+};
 use crate::topology_mutation_buffer::{MutationRecord, TopologyMutationBuffer};
 use crate::topology_ops::{apply_op, TopologyOp};
 
@@ -33,12 +38,6 @@ pub struct RouteState {
     pub emit: MutationEmitFn,
 }
 
-const NOT_IMPLEMENTED_BODY: &str = r#"{"error":"not_implemented","unit":"U4a-2"}"#;
-
-fn not_implemented() -> Response {
-    (StatusCode::NOT_IMPLEMENTED, NOT_IMPLEMENTED_BODY).into_response()
-}
-
 fn structured_error(status: StatusCode, code: &str, message: &str, retryable: bool) -> Response {
     let body = serde_json::json!({
         "ok": false,
@@ -47,6 +46,35 @@ fn structured_error(status: StatusCode, code: &str, message: &str, retryable: bo
         "retryable": retryable,
     });
     (status, Json(body)).into_response()
+}
+
+fn ok_summary(summary: Value) -> Response {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "ok": true, "summary": summary })),
+    )
+        .into_response()
+}
+
+fn ok_summary_with_full(summary: Value, full: Value) -> Response {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "ok": true, "summary": summary, "full": full })),
+    )
+        .into_response()
+}
+
+fn fail_with_errors(errors: Vec<crate::topology_compute::TopologyErrorOut>) -> Response {
+    let payload = json!({
+        "ok": false,
+        "errors": errors,
+        "code": errors.first().map(|e| e.code.clone()).unwrap_or_else(|| "TOPOLOGY_ERROR".into()),
+        "message": errors.first().map(|e| e.message.clone()).unwrap_or_default(),
+        "retryable": false,
+    });
+    // 200 表示 compute 层结构化错误（agent 拿到 ok:false 即处理）；
+    // sidecar 层错误才用 4xx/5xx。
+    (StatusCode::OK, Json(payload)).into_response()
 }
 
 pub async fn healthz() -> Response {
@@ -58,20 +86,93 @@ pub async fn healthz() -> Response {
         .into_response()
 }
 
-pub async fn describe_templates() -> Response {
-    not_implemented()
+// ---------- describe_templates ----------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOnlyRequest {
+    session_id: String,
 }
 
-pub async fn describe_artifacts() -> Response {
-    not_implemented()
+pub async fn describe_templates(
+    State(state): State<Arc<RouteState>>,
+    Json(req): Json<SessionOnlyRequest>,
+) -> Response {
+    if let Err(resp) = require_session(&state.pool, &req.session_id).await {
+        return resp;
+    }
+    ok_summary(describe_templates_catalog())
 }
 
-pub async fn build_artifacts() -> Response {
-    not_implemented()
+// ---------- describe_artifacts ----------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DescribeArtifactsRequest {
+    session_id: String,
+    artifacts: Value,
 }
 
-pub async fn validate_artifacts() -> Response {
-    not_implemented()
+pub async fn describe_artifacts(
+    State(state): State<Arc<RouteState>>,
+    Json(req): Json<DescribeArtifactsRequest>,
+) -> Response {
+    if let Err(resp) = require_session(&state.pool, &req.session_id).await {
+        return resp;
+    }
+    ok_summary(describe_topology_artifacts(&req.artifacts))
+}
+
+// ---------- build_artifacts ----------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildArtifactsRequest {
+    session_id: String,
+    topology: Value,
+}
+
+pub async fn build_artifacts(
+    State(state): State<Arc<RouteState>>,
+    Json(req): Json<BuildArtifactsRequest>,
+) -> Response {
+    if let Err(resp) = require_session(&state.pool, &req.session_id).await {
+        return resp;
+    }
+    match build_topology_artifacts(&req.topology) {
+        Ok(result) => ok_summary_with_full(
+            serde_json::to_value(&result.summary).unwrap_or(Value::Null),
+            json!({ "artifacts": result.artifacts }),
+        ),
+        Err(errors) => fail_with_errors(errors),
+    }
+}
+
+// ---------- validate_artifacts ----------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateArtifactsRequest {
+    session_id: String,
+    artifacts: Value,
+}
+
+pub async fn validate_artifacts(
+    State(state): State<Arc<RouteState>>,
+    Json(req): Json<ValidateArtifactsRequest>,
+) -> Response {
+    if let Err(resp) = require_session(&state.pool, &req.session_id).await {
+        return resp;
+    }
+    let report = validate_topology_artifacts(&req.artifacts);
+    if !report.ok {
+        return fail_with_errors(report.errors);
+    }
+    ok_summary(json!({
+        "valid": true,
+        "errorCount": 0,
+        "artifactNames": report.artifact_names,
+    }))
 }
 
 // ---------- initialize ----------
@@ -80,37 +181,28 @@ pub async fn validate_artifacts() -> Response {
 #[serde(rename_all = "camelCase")]
 pub struct InitializeRequest {
     session_id: String,
-    /// 模板初始化 deferred 到 U4a-2 完成模板库 Rust 重写；
-    /// 当前仅校验 session 存在并返回空 changeSet 占位。
+    template_id: String,
     #[serde(default)]
-    #[allow(dead_code)]
-    template_id: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InitializeResponse {
-    ok: bool,
-    summary: serde_json::Value,
+    params: Value,
 }
 
 pub async fn initialize(
     State(state): State<Arc<RouteState>>,
     Json(req): Json<InitializeRequest>,
 ) -> Response {
-    match require_session(&state.pool, &req.session_id).await {
-        Ok(()) => (
-            StatusCode::OK,
-            Json(InitializeResponse {
-                ok: true,
-                summary: serde_json::json!({
-                    "note": "template instantiation deferred to U4a-2",
-                    "sessionId": req.session_id,
-                }),
-            }),
-        )
-            .into_response(),
-        Err(resp) => resp,
+    if let Err(resp) = require_session(&state.pool, &req.session_id).await {
+        return resp;
+    }
+    let intent = InitializeIntent {
+        template_id: req.template_id,
+        params: req.params,
+    };
+    match compute_initialize(&intent) {
+        Ok((topology, summary)) => ok_summary_with_full(
+            serde_json::to_value(&summary).unwrap_or(Value::Null),
+            json!({ "topology": topology }),
+        ),
+        Err(errors) => fail_with_errors(errors),
     }
 }
 
@@ -120,21 +212,12 @@ pub async fn initialize(
 #[serde(rename_all = "camelCase")]
 pub struct InspectRequest {
     session_id: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InspectResponse {
-    ok: bool,
-    summary: InspectSummary,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InspectSummary {
-    session_id: String,
-    node_count: i64,
-    link_count: i64,
+    #[serde(default)]
+    topology: Option<Value>,
+    #[serde(default)]
+    selectors: Vec<Value>,
+    #[serde(default)]
+    include_adjacency: Option<bool>,
 }
 
 pub async fn inspect(
@@ -144,30 +227,39 @@ pub async fn inspect(
     if let Err(resp) = require_session(&state.pool, &req.session_id).await {
         return resp;
     }
-    let node_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id = ?")
-            .bind(&req.session_id)
-            .fetch_one(&state.pool)
-            .await
-            .unwrap_or(0);
-    let link_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM topology_links WHERE session_id = ?")
-            .bind(&req.session_id)
-            .fetch_one(&state.pool)
-            .await
-            .unwrap_or(0);
-    (
-        StatusCode::OK,
-        Json(InspectResponse {
-            ok: true,
-            summary: InspectSummary {
-                session_id: req.session_id,
-                node_count,
-                link_count,
-            },
-        }),
-    )
-        .into_response()
+    // 兼容：agent 不传 topology 时，沿用 U4a-1 行为返 P0 表 count 摘要。
+    let Some(topology) = req.topology else {
+        let node_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id = ?")
+                .bind(&req.session_id)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap_or(0);
+        let link_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM topology_links WHERE session_id = ?")
+                .bind(&req.session_id)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap_or(0);
+        return ok_summary(json!({
+            "sessionId": req.session_id,
+            "nodeCount": node_count,
+            "linkCount": link_count,
+            "selectedNodeIds": Vec::<String>::new(),
+            "selectedLinkIds": Vec::<String>::new(),
+            "adjacency": Vec::<Value>::new(),
+            "source": "p0_tables",
+        }));
+    };
+    let body = InspectRequestBody {
+        topology,
+        selectors: req.selectors,
+        include_adjacency: req.include_adjacency.unwrap_or(true),
+    };
+    match compute_inspect(&body) {
+        Ok((summary, _warnings)) => ok_summary(serde_json::to_value(&summary).unwrap_or(Value::Null)),
+        Err(errors) => fail_with_errors(errors),
+    }
 }
 
 // ---------- validate ----------
@@ -176,20 +268,8 @@ pub async fn inspect(
 #[serde(rename_all = "camelCase")]
 pub struct ValidateRequest {
     session_id: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ValidateResponse {
-    ok: bool,
-    summary: ValidateSummary,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ValidateSummary {
-    errors: Vec<String>,
-    warnings: Vec<String>,
+    #[serde(default)]
+    topology: Option<Value>,
 }
 
 pub async fn validate(
@@ -199,52 +279,64 @@ pub async fn validate(
     if let Err(resp) = require_session(&state.pool, &req.session_id).await {
         return resp;
     }
-    let mut errors = Vec::new();
-    let mut warnings = Vec::new();
 
-    // 基础检查：节点 0 个 → 错误；链路引用未知节点 → 错误。
-    let node_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id = ?")
-            .bind(&req.session_id)
-            .fetch_one(&state.pool)
-            .await
-            .unwrap_or(0);
-    if node_count == 0 {
-        warnings.push("topology has no nodes yet".to_string());
+    // 兼容：未传 topology 时，沿用 U4a-1 行为做 P0 表层 dangling link 检测。
+    let Some(topology) = req.topology else {
+        let mut errors = Vec::new();
+        let mut warnings = Vec::new();
+        let node_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id = ?")
+                .bind(&req.session_id)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap_or(0);
+        if node_count == 0 {
+            warnings.push("topology has no nodes yet".to_string());
+        }
+        let dangling: Vec<(i64, i64)> = sqlx::query(
+            r#"SELECT l.src_imac, l.dst_imac FROM topology_links l
+               WHERE l.session_id = ?
+                 AND (
+                   NOT EXISTS (SELECT 1 FROM topology_nodes n
+                               WHERE n.session_id = l.session_id AND n.imac = l.src_imac)
+                   OR
+                   NOT EXISTS (SELECT 1 FROM topology_nodes n
+                               WHERE n.session_id = l.session_id AND n.imac = l.dst_imac)
+                 )"#,
+        )
+        .bind(&req.session_id)
+        .fetch_all(&state.pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|r| (r.get::<i64, _>("src_imac"), r.get::<i64, _>("dst_imac")))
+                .collect()
+        })
+        .unwrap_or_default();
+        for (src, dst) in dangling {
+            errors.push(format!("link references missing node(s): {src}->{dst}"));
+        }
+        let ok = errors.is_empty();
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "ok": ok,
+                "summary": {
+                    "valid": ok,
+                    "errors": errors,
+                    "warnings": warnings,
+                    "source": "p0_tables",
+                }
+            })),
+        )
+            .into_response();
+    };
+
+    let report = validate_intermediate_topology(&topology);
+    if !report.ok {
+        return fail_with_errors(report.errors);
     }
-
-    let dangling: Vec<(i64, i64)> = sqlx::query(
-        r#"SELECT l.src_imac, l.dst_imac FROM topology_links l
-           WHERE l.session_id = ?
-             AND (
-               NOT EXISTS (SELECT 1 FROM topology_nodes n
-                           WHERE n.session_id = l.session_id AND n.imac = l.src_imac)
-               OR
-               NOT EXISTS (SELECT 1 FROM topology_nodes n
-                           WHERE n.session_id = l.session_id AND n.imac = l.dst_imac)
-             )"#,
-    )
-    .bind(&req.session_id)
-    .fetch_all(&state.pool)
-    .await
-    .map(|rows| {
-        rows.into_iter()
-            .map(|r| (r.get::<i64, _>("src_imac"), r.get::<i64, _>("dst_imac")))
-            .collect()
-    })
-    .unwrap_or_default();
-    for (src, dst) in dangling {
-        errors.push(format!("link references missing node(s): {src}->{dst}"));
-    }
-
-    (
-        StatusCode::OK,
-        Json(ValidateResponse {
-            ok: errors.is_empty(),
-            summary: ValidateSummary { errors, warnings },
-        }),
-    )
-        .into_response()
+    ok_summary(serde_json::to_value(&report.summary).unwrap_or(Value::Null))
 }
 
 // ---------- apply_operations ----------

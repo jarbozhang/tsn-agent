@@ -10,6 +10,8 @@ mod session_import;
 mod session_store;
 mod skill_files;
 mod topology_backfill;
+mod topology_compute;
+mod topology_intermediate;
 mod topology_mutation_buffer;
 mod topology_mutations_command;
 mod topology_ops;
