@@ -1011,54 +1011,27 @@ function summarizeStageResultForTrace(result) {
       : `状态为 ${String(result.status ?? "unknown")}`;
   }
 
-  const project = isRecord(result.payload) && isRecord(result.payload.project) ? result.payload.project : undefined;
-  const topology = isRecord(project?.topology) ? project.topology : undefined;
-  const nodes = Array.isArray(topology?.nodes) ? topology.nodes : undefined;
-  const links = Array.isArray(topology?.links) ? topology.links : undefined;
-
-  if (nodes && links) {
-    const switchCount = nodes.filter((node) => isRecord(node) && node.type === "switch").length;
-    const endSystemCount = nodes.filter((node) => isRecord(node) && node.type === "endSystem").length;
-    const flowCount = Array.isArray(project?.flows) ? project.flows.length : undefined;
-    const parts = [`${switchCount} 个交换机`, `${endSystemCount} 个端系统`, `${links.length} 条链路`];
-    if (typeof flowCount === "number" && flowCount > 0) {
-      parts.push(`${flowCount} 条流`);
-    }
-
-    return parts.join("，");
-  }
-
   return summary ? truncate(summary.replace(/\s+/g, " "), 120) : "";
 }
 
 function hasRecoverableStageResult(stageResults) {
   return stageResults.some((result) =>
     isRecord(result)
-      && (result.stage === "topology" || result.stage === "flow-template")
+      && result.stage === "topology"
       && result.status === "success"
       && isRecord(result.validation)
       && result.validation.ok === true
       && isRecord(result.payload)
-      && (result.payload.kind === "topology" || result.payload.kind === "flow-template")
-      && isRecord(result.payload.project)
+      && result.payload.kind === "topology"
+      && typeof result.payload.mutationId === "number"
   );
 }
 
 function buildRecoveredStageResultAssistantText(stageResults) {
-  const result = stageResults.find((candidate) =>
-    isRecord(candidate) && (candidate.stage === "topology" || candidate.stage === "flow-template")
-  );
+  const result = stageResults.find((candidate) => isRecord(candidate) && candidate.stage === "topology");
   const summary = isRecord(result) && typeof result.summary === "string"
     ? result.summary
     : "已生成当前阶段结构化结果。";
-
-  if (isRecord(result) && result.stage === "flow-template") {
-    return [
-      "已根据本轮需求更新流量规划。",
-      summary,
-      "确认流量规划后生成仿真输入和导出清单，或继续描述需要新增、删除或调整的流。",
-    ].join("\n");
-  }
 
   return [
     "已根据本轮需求生成拓扑草案。",
@@ -1162,11 +1135,12 @@ export function extractTopologyWorkflowStageResults(message, toolUseNamesById = 
     }
 
     const toolResult = extractJsonFromToolResultBlock(block);
-    if (!isTrustedTopologyToolResult(toolResult)) {
+    const mutation = extractTrustedTopologyMutation(toolResult);
+    if (!mutation) {
       continue;
     }
 
-    const workflowResult = createTopologyWorkflowStageResult(toolResult, {
+    const workflowResult = createTopologyWorkflowStageResult(mutation, {
       producer: {
         type: "mcp",
         name: TOPOLOGY_MCP_SERVER_NAME,
@@ -1248,29 +1222,32 @@ function parseJsonOrUndefined(text) {
   }
 }
 
-// Plan v3 U7：trusted signal 改为 sidecar 返回的 `summary.mutationId`。
-// 兼容期保留旧 `responseMode==="full"` 路径供升级前历史 session 的 resume 使用
-// （legacyResumeMode）；新 session 一律走 mutationId path。
-function isTrustedTopologyToolResult(value) {
-  if (!isRecord(value) || value.ok !== true) {
-    return false;
+// Plan v3 Phase B-β：trusted signal 是 sidecar 响应的 `summary.mutationId`。
+// 旧 `responseMode==="full"` resume 路径已删除 —— 新 workflow-stage-result
+// 契约要求 payload 携带 mutationId，legacy 全量 topology 无法再合成阶段结果。
+function extractTrustedTopologyMutation(value) {
+  if (!isRecord(value) || value.ok !== true || !isRecord(value.summary)) {
+    return undefined;
   }
-  // 新路径：sidecar apply_operations 响应携带 mutationId。
-  if (isRecord(value.summary) && typeof value.summary.mutationId === "number") {
-    return true;
+
+  const { sessionId, mutationId, applied } = value.summary;
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    return undefined;
   }
-  // 旧路径（兼容期）：升级前历史 session 的 responseMode:"full" 全 topology。
-  // U9b（Phase B）删除。
-  return isRecord(value.metadata)
-    && value.metadata.responseMode === "full"
-    && value.metadata.summaryOnly === false
-    && isRecord(value.full)
-    && isRecord(value.full.topology);
+  if (typeof mutationId !== "number" || !Number.isInteger(mutationId) || mutationId <= 0) {
+    return undefined;
+  }
+
+  return {
+    sessionId,
+    mutationId,
+    appliedCount: Array.isArray(applied) ? applied.length : undefined,
+  };
 }
 
 /// Test-only helper to make extractor symmetry assertable from outside.
-export function _isTrustedTopologyToolResultForTest(value) {
-  return isTrustedTopologyToolResult(value);
+export function _extractTrustedTopologyMutationForTest(value) {
+  return extractTrustedTopologyMutation(value);
 }
 
 function toolNameToTopologyToolName(toolName) {
