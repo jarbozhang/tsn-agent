@@ -195,7 +195,6 @@ pub async fn apply_op(
 pub enum OpError {
     NotFound(String),
     Database(String),
-    InvalidArg(String),
 }
 
 impl OpError {
@@ -203,19 +202,17 @@ impl OpError {
         match self {
             OpError::NotFound(_) => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             OpError::Database(_) => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-            OpError::InvalidArg(_) => axum::http::StatusCode::BAD_REQUEST,
         }
     }
     pub fn code(&self) -> &'static str {
         match self {
             OpError::NotFound(_) => "NOT_FOUND",
             OpError::Database(_) => "DATABASE_ERROR",
-            OpError::InvalidArg(_) => "INVALID_OPERATION",
         }
     }
     pub fn message(&self) -> String {
         match self {
-            OpError::NotFound(m) | OpError::Database(m) | OpError::InvalidArg(m) => m.clone(),
+            OpError::NotFound(m) | OpError::Database(m) => m.clone(),
         }
     }
 }
@@ -343,8 +340,8 @@ mod tests {
     #[test]
     fn op_error_maps_to_http_codes() {
         assert_eq!(OpError::NotFound("x".into()).http_status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(OpError::InvalidArg("y".into()).http_status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(OpError::Database("y".into()).http_status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(OpError::NotFound("x".into()).code(), "NOT_FOUND");
-        assert_eq!(OpError::InvalidArg("y".into()).code(), "INVALID_OPERATION");
+        assert_eq!(OpError::Database("y".into()).code(), "DATABASE_ERROR");
     }
 }

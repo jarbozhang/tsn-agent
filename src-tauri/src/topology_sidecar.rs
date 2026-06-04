@@ -11,7 +11,7 @@
 //! Bearer 校验走自定义 `from_fn` middleware + `subtle::ConstantTimeEq`（**不用** tower-http
 //! builtin `ValidateRequestHeaderLayer::bearer`，后者按字符串 `==` 非常量时间）。
 //!
-//! U4a 接 sqlx handler；当前 8 route 占位返回 501。
+//! U4a 已完成：8 个 `/db/topology/*` route 由 topology_sidecar_routes 提供 sqlx 实现。
 
 use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr};
