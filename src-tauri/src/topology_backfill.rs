@@ -54,7 +54,8 @@ pub async fn mark_pending_for_all_sessions(pool: &SqlitePool) -> Result<u64, Str
 }
 
 /// 返回当前 iso8601 时间戳；避免引入 chrono 依赖。
-fn chrono_like_iso_now() -> String {
+/// pub(crate)：session_import 写 completed_walker 状态行时复用同一时间戳格式。
+pub(crate) fn chrono_like_iso_now() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
