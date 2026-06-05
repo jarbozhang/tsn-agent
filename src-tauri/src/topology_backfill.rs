@@ -220,11 +220,16 @@ async fn apply_canonical_to_db(
         .await
         .map_err(|e| format!("CONSTRAINT_VIOLATION:topology_refs_delete:{e}"))?;
 
-    let mut sorted_nodes: Vec<(&Value, i64)> = topology
-        .nodes
-        .iter()
-        .filter_map(|node| node.get("numericId").and_then(Value::as_i64).map(|n| (node, n)))
-        .collect();
+    // 缺 numericId 必须显式失败（mark_failed → 进入恢复列表），
+    // 不允许静默丢节点后标记 completed（拓扑缺数据的「假成功」）。
+    let mut sorted_nodes: Vec<(&Value, i64)> = Vec::with_capacity(topology.nodes.len());
+    for node in topology.nodes {
+        let numeric_id = node
+            .get("numericId")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| "CANONICAL_SCHEMA_INVALID:node_missing_numeric_id".to_string())?;
+        sorted_nodes.push((node, numeric_id));
+    }
     sorted_nodes.sort_by_key(|(_, n)| *n);
 
     let mut imac_by_id: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
@@ -270,11 +275,14 @@ async fn apply_canonical_to_db(
         sorted_node_ids.push((node_id, *numeric_id));
     }
 
-    let mut sorted_links: Vec<(&Value, i64)> = topology
-        .links
-        .iter()
-        .filter_map(|link| link.get("numericId").and_then(Value::as_i64).map(|n| (link, n)))
-        .collect();
+    let mut sorted_links: Vec<(&Value, i64)> = Vec::with_capacity(topology.links.len());
+    for link in topology.links {
+        let numeric_id = link
+            .get("numericId")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| "CANONICAL_SCHEMA_INVALID:link_missing_numeric_id".to_string())?;
+        sorted_links.push((link, numeric_id));
+    }
     sorted_links.sort_by_key(|(_, n)| *n);
 
     for (index, (link, _)) in sorted_links.iter().enumerate() {
@@ -483,6 +491,41 @@ mod tests {
         format!(
             r#"{{"schemaVersion":"tsn-agent.canonical.v0","id":"p1","name":"n","createdAt":"a","updatedAt":"b","topology":{nodes_links_json},"flows":[],"simulationHints":{{"inetVersion":"v","nedPackage":"p","defaultDataRateMbps":1000,"timeSynchronization":"assumed-synchronized"}}}}"#
         )
+    }
+
+    #[test]
+    fn walker_fails_explicitly_when_node_missing_numeric_id() {
+        // 数据可靠性包：缺 numericId 不再静默丢节点后标 completed（假成功），
+        // 必须 mark_failed 进入恢复列表，且 P0 表保持空。
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let topology = r#"{
+                "nodes":[
+                  {"id":"sw1","numericId":1,"name":"SW-1","type":"switch","ports":[],"position":{"x":0,"y":0}},
+                  {"id":"sw2","name":"SW-2","type":"switch","ports":[],"position":{"x":1,"y":1}}
+                ],
+                "links":[]
+            }"#;
+            let payload = canonical_payload(topology);
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1', 't', 'now', 'now', ?)")
+                .bind(&payload).execute(&pool).await.unwrap();
+
+            walker_run_session(&pool, "s1").await.unwrap();
+
+            let (state, code): (String, Option<String>) = sqlx::query_as(
+                "SELECT state, error_code FROM session_backfill_state WHERE session_id = 's1'",
+            )
+            .fetch_one(&pool).await.unwrap();
+            assert!(state.starts_with("failed"), "state = {state}");
+            assert!(
+                code.as_deref().unwrap_or("").contains("node_missing_numeric_id"),
+                "error_code = {code:?}"
+            );
+
+            let node_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
+                .fetch_one(&pool).await.unwrap();
+            assert_eq!(node_count, 0, "partial rows must not survive a failed walk");
+        });
     }
 
     #[test]
