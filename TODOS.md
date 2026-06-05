@@ -16,18 +16,6 @@ Rust `export_session` / `import_session` 命令已就绪并经测试，UI 无入
 
 ## Sidecar / 数据完整性
 
-### apply_operations 幂等性 + timeout-after-commit
-**Priority:** P1
-`node_add` / `link_add` 是裸 INSERT，超时重试会撞 UNIQUE 导致整批回滚并报 `DATABASE_ERROR`；commit 后响应超时被客户端报为 retryable，UI 已更新而对话报失败。需要幂等键 / `ON CONFLICT` 语义 + commit 状态可查询。（adversarial：claude P1#9/#10）
-
-### link_add 悬空引用校验 + 操作数量上限
-**Priority:** P1
-`topology_links` 无 FK，`link_add` 不校验 imac 存在，悬空链路可持久化；operations 数量无 Rust 端上限（MCP 层 maxOperations 未落到 sidecar）。（adversarial：codex #4/#5）
-
-### backfill walker 静默丢弃缺 numericId 的节点/链路
-**Priority:** P1
-`filter_map` 跳过缺字段节点后仍标记 `completed_walker`，拓扑缺数据但无错误状态。（adversarial：claude P2#15 + codex #9，多源确认）
-
 ### mutationId 跨重启语义
 **Priority:** P2
 in-memory 计数器重启归零，但 `topologyMutationId` 持久化在 session payload，跨重启数值比较会错。UI 当前只作布尔/唤醒信号用（安全）；引入跨重启比较前需持久化计数或携带 launch epoch。（adversarial：claude P0#1）
@@ -37,10 +25,6 @@ in-memory 计数器重启归零，但 `topologyMutationId` 持久化在 session 
 `out_of_range` 按全局 buffer head 计算；多会话高频写入时其它会话被误触发全量 refetch 或漏报 gap。需按 session 维护保留下界。（adversarial：claude P1#5）
 
 ## Agent runtime / UI
-
-### use-session-db-listener 竞态修复 + 新 hook 单测
-**Priority:** P1
-初始 catch-up 与事件回调并发读写 `lastSeenRef`，乱序时永久退化为 60s watchdog 轮询。`use-session-db-listener` / `use-topology-snapshot` / `sidecar-client` 均无直接单测（coverage audit + testing specialist 多源确认，2026-06-04）。
 
 ### run_claude_agent 超时不杀 MCP 子进程组
 **Priority:** P2
@@ -65,6 +49,22 @@ Plan 要求复用 ops 白名单，实际实现为独立 validator + 直接 INSER
 canonicalizer 移除后缺少 Spike A 基线 fixture 的字节级对照测试，「单一事实源 byte-equal」保证未在代码中强制。（plan audit PARTIAL）
 
 ## Completed
+
+### apply_operations 幂等性 + timeout-after-commit
+**Completed:** v0.3.x 数据可靠性包 (2026-06-05)
+node_add/link_add 改 UPSERT；node_delete/link_delete 删除不存在目标为 no-op（rows_affected=0）；timeout 后重试整批安全（回归测试 insert_switch_batch_replay_is_retry_safe）。
+
+### link_add 悬空引用校验 + 操作数量上限
+**Completed:** v0.3.x 数据可靠性包 (2026-06-05)
+link_add 校验两端 imac 存在（UNKNOWN_NODE）；node_delete 拒绝仍被链路引用的节点（NODE_HAS_LINKS）；sidecar 端 operations ≤ 32（LIMIT_EXCEEDED，对齐 MCP maxOperations）。
+
+### backfill walker 静默丢弃缺 numericId 的节点/链路
+**Completed:** v0.3.x 数据可靠性包 (2026-06-05)
+缺 numericId 显式 mark_failed（CANONICAL_SCHEMA_INVALID:node/link_missing_numeric_id），进入恢复列表，不再假成功。
+
+### use-session-db-listener 竞态修复 + 新 hook 单测
+**Completed:** v0.3.x 数据可靠性包 (2026-06-05)
+catch-up 单链串行化 + latest 取 max 防游标回退 + 重复事件忽略 + session 切换游标归零；新增 use-session-db-listener / use-topology-snapshot / sidecar-client 三个测试文件（20 cases）。
 
 ### check-no-legacy-types.sh 接入 CI workflow
 **Completed:** v0.3.x PR-β2 (2026-06-05)
