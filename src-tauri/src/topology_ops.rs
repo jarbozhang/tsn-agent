@@ -613,6 +613,34 @@ mod tests {
     }
 
     #[test]
+    fn node_update_rejects_unknown_target() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let mut tx = pool.begin().await.unwrap();
+            // 更新不存在的目标是逻辑错误（非重试场景），必须报 NOT_FOUND。
+            let err = apply_op(&mut *tx, "s1", &TopologyOp::NodeUpdate(NodeUpdateArgs {
+                imac: 999, sync_name: Some("ghost".into()),
+                x: None, y: None, sync_type: None, node_type: None,
+            })).await.unwrap_err();
+            assert!(matches!(err, OpError::NotFound(_)));
+            assert_eq!(err.code(), "NOT_FOUND");
+        });
+    }
+
+    #[test]
+    fn link_delete_missing_target_is_idempotent_noop() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let mut tx = pool.begin().await.unwrap();
+            // 幂等：删除不存在的链路 = no-op 成功（重试安全），rows_affected=0。
+            let s = apply_op(&mut *tx, "s1", &TopologyOp::LinkDelete(LinkDeleteArgs { link_seq: 999 }))
+                .await.unwrap();
+            assert_eq!(s.op_kind, "link.delete");
+            assert_eq!(s.rows_affected, 0);
+        });
+    }
+
+    #[test]
     fn node_update_preserves_unmentioned_fields() {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;

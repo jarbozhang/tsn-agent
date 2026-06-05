@@ -474,6 +474,16 @@ describe("applyOperationsInputSchema", () => {
     expect(issueText).toContain("op");
   });
 
+  it("accepts node_update with partial fields and node_delete", () => {
+    const result = schema.safeParse({
+      operations: [
+        { op: "node_update", imac: 100, x: 300, y: 50 },
+        { op: "node_delete", imac: 101 },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("rejects node_add missing required fields (imac / syncType / nodeType)", () => {
     const base = { op: "node_add", imac: 1, syncName: "0", x: 0, y: 0, syncType: "{}", nodeType: "switch", insertOrder: 0 };
     for (const missing of ["imac", "syncType", "nodeType"]) {

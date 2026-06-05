@@ -342,6 +342,19 @@ pub async fn inspect(
         return resp;
     }
 
+    // nodes/links 两条 SELECT 包在同一只读事务里：并发 apply_operations commit
+    // 落在两条查询之间时，响应不会出现「新节点已可见但链路还是旧的」撕裂快照。
+    let mut tx = match state.pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            return structured_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "DATABASE_ERROR",
+                &e.to_string(),
+                true,
+            )
+        }
+    };
     let node_rows = sqlx::query(
         r#"SELECT imac, sync_name, x, y, sync_type, node_type, insert_order
            FROM topology_nodes
@@ -349,7 +362,7 @@ pub async fn inspect(
            ORDER BY insert_order, imac"#,
     )
     .bind(&req.session_id)
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await;
     let node_rows = match node_rows {
         Ok(rows) => rows,
@@ -369,7 +382,7 @@ pub async fn inspect(
            ORDER BY link_seq"#,
     )
     .bind(&req.session_id)
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await;
     let link_rows = match link_rows {
         Ok(rows) => rows,
@@ -382,6 +395,8 @@ pub async fn inspect(
             )
         }
     };
+    // 只读事务，commit 仅释放快照。
+    let _ = tx.commit().await;
 
     let nodes: Vec<TopologyNodeRow> = node_rows
         .into_iter()
