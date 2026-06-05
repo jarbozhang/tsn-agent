@@ -58,7 +58,7 @@ session/workflow state 只保存 scenario config id。未知 id 会回退到 `ge
 
 拓扑、时间同步和流量规划阶段可以存在 project 草案，但 UI 不显示“仿真已执行”或“导出已完成”。只有到 `planning-export` 阶段后，用户才看到仿真输入文件和保存/导出动作。
 
-会话导出/导入（单会话切片 `.db` 文件，v0.4.0）是与 `planning-export` 项目导出无关的独立能力，不受阶段门禁约束；导出文件不含对话记录。
+会话导出/导入（单会话切片 `.db` 文件，v0.4.0）是与 `planning-export` 项目导出无关的独立能力，不受阶段门禁约束；导出文件含完整会话（入库已脱敏的对话 + 流程进度 + 拓扑），导入后可从原进度续走。
 
 `planner/flow_plan_1.json` 是规划器输入，不是规划器运行结果。真实规划任务成功并读取结果后，应用才会生成 `planner/flow_plan_result_1.json`，并标记为 `planner-output` / `observedExternal=true`。
 

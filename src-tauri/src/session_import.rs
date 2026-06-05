@@ -6,7 +6,7 @@
 //! → 行数/字段级上限校验 → 仅 SELECT `db::SESSION_SCOPED_TABLES` 白名单表 +
 //! sessions 1 行 → 在 main db 单事务内逐行 INSERT（FK 失败即 ROLLBACK）→
 //! 同事务写 `session_backfill_state = completed_walker`（导入会话不经历启动期
-//! pending 循环，对 walker 的 '{}' 分支语义变化免疫，plan 2026-06-05-002 R6）。
+//! pending 循环 —— 拓扑已随切片直接落 P0 表，无需 walker 重建，plan 2026-06-05-002 R6）。
 //!
 //! 与 plan v3 R19 "via ops whitelist" 的偏离（**追认现状**，收敛保留为 TODOS P2）：
 //! 当前 `topology_ops` 仅含 node/link 5 个 variant；其他子表直接 INSERT 而非走
@@ -30,6 +30,9 @@ const MAX_SMALL_TEXT_BYTES: usize = 4 * 1024; // styles_json / sync_type
 const MAX_JSON_TEXT_BYTES: usize = 64 * 1024; // ref_json / cfg_json / spec_json / entry_json
 const MAX_IDENT_TEXT_BYTES: usize = 64; // mac_address / ip
 const MAX_NAME_TEXT_BYTES: usize = 256; // sessions.title / project_name
+/// sessions.payload 字节上限：导出携带完整会话（已脱敏），主库实测 payload 在
+/// 数十 KB 量级；给 2MB 宽松上限防外部篡改文件单行灌爆（文件 10MB 是总闸）。
+const MAX_PAYLOAD_BYTES: usize = 2 * 1024 * 1024;
 /// 全部 scoped 表的总行数上限：行数守卫只盯 topology_nodes/links，子表
 /// （nodes_gcl_cfg 等）可在 10MB 内塞数十万小行造成单事务长锁 + 内存压力。
 const MAX_TOTAL_SCOPED_ROWS: usize = 50_000;
@@ -151,7 +154,7 @@ async fn perform_import_inner(
 
     // ---------- 读源 sessions 行 ----------
     let session_row = sqlx::query(
-        "SELECT id, title, created_at, updated_at, message_count, event_count, has_project, project_name, bundle_file_count FROM sessions LIMIT 2",
+        "SELECT id, title, created_at, updated_at, message_count, event_count, has_project, project_name, bundle_file_count, payload FROM sessions LIMIT 2",
     )
     .fetch_all(src_pool)
     .await
@@ -170,8 +173,7 @@ async fn perform_import_inner(
         .unwrap_or(src_session_id.clone());
 
     // sessions 行字段消毒（security review）：title/project_name 限长；payload
-    // 不读源值 —— 导出规格恒写 '{}'，非 '{}' 即非规格文件，导入端固定写 '{}'
-    // 防 memory bomb（view_session_payload 会全文 redact）。
+    // 携带源值但限 2MB + 必须合法 JSON object（导出携带完整会话，入库已脱敏）。
     let title: String = row.get("title");
     if title.len() > MAX_NAME_TEXT_BYTES {
         return Err(format!(
@@ -184,6 +186,21 @@ async fn perform_import_inner(
         return Err(format!(
             "sessions.project_name 超过上限 {MAX_NAME_TEXT_BYTES} 字节，拒绝导入"
         ));
+    }
+    let payload: String = row.get("payload");
+    if payload.len() > MAX_PAYLOAD_BYTES {
+        return Err(format!(
+            "sessions.payload 长度 {} 字节超过上限 {MAX_PAYLOAD_BYTES}，拒绝导入",
+            payload.len()
+        ));
+    }
+    // payload 必须是合法 JSON object —— 前端 storedSessionToSession 会 JSON.parse；
+    // 坏 payload 虽被前端 catch 兜底（过滤掉），导入时直接拒绝比静默消失更可读。
+    if !matches!(
+        serde_json::from_str::<serde_json::Value>(&payload),
+        Ok(serde_json::Value::Object(_))
+    ) {
+        return Err("sessions.payload 不是合法 JSON object，拒绝导入".to_string());
     }
 
     // 行数上限（与 compute 校验同一常量；按目标 session 过滤 —— 守卫范围必须
@@ -248,10 +265,10 @@ async fn perform_import_inner(
         return Err(format!("目标 session 已存在：{target_session_id}"));
     }
 
-    // Insert sessions（payload 固定 '{}'：见上方消毒注释）
+    // Insert sessions（payload 携带源值：见上方消毒注释）
     sqlx::query(
         r#"INSERT INTO sessions (id, title, created_at, updated_at, message_count, event_count, has_project, project_name, bundle_file_count, payload)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')"#,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&target_session_id)
     .bind(&title)
@@ -262,6 +279,7 @@ async fn perform_import_inner(
     .bind(row.get::<i64, _>("has_project"))
     .bind(&project_name)
     .bind(row.get::<i64, _>("bundle_file_count"))
+    .bind(&payload)
     .execute(&mut *tx)
     .await
     .map_err(|e| format!("INSERT sessions 失败：{e}"))?;
@@ -658,21 +676,33 @@ mod tests {
             let err = perform_import(&main_pool, &export_path, Some("mac")).await.unwrap_err();
             assert!(err.contains("mac_address"), "err={err}");
 
-            // 恶意 payload 不被照搬：手工构造带非 '{}' payload 的切片 → 导入后
-            // payload 固定 '{}'（memory bomb 消毒）。
-            let evil_path = dir.path().join("evil.db");
+            // 合法 JSON object payload 原样保留（导出携带完整会话，入库已脱敏）。
+            let keep_path = dir.path().join("keep.db");
             let opts = sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&evil_path).create_if_missing(true);
-            let evil_pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
-            sqlx::query(&crate::db::safety_net_schema_sql()).execute(&evil_pool).await.unwrap();
+                .filename(&keep_path).create_if_missing(true);
+            let keep_pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql()).execute(&keep_pool).await.unwrap();
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', 't', 'now', 'now', ?)")
-                .bind("{\"huge\":\"not-our-spec\"}")
-                .execute(&evil_pool).await.unwrap();
-            evil_pool.close().await;
-            perform_import(&main_pool, &evil_path, Some("clean")).await.unwrap();
+                .bind(r#"{"messages":[{"role":"user"}]}"#)
+                .execute(&keep_pool).await.unwrap();
+            keep_pool.close().await;
+            perform_import(&main_pool, &keep_path, Some("clean")).await.unwrap();
             let payload: String = sqlx::query_scalar("SELECT payload FROM sessions WHERE id='clean'")
                 .fetch_one(&main_pool).await.unwrap();
-            assert_eq!(payload, "{}");
+            assert_eq!(payload, r#"{"messages":[{"role":"user"}]}"#);
+
+            // 非法 JSON payload 被拒（前端 JSON.parse 有 catch 兜底，导入端显式拒绝更可读）。
+            let bad_path = dir.path().join("bad.db");
+            let opts = sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&bad_path).create_if_missing(true);
+            let bad_pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql()).execute(&bad_pool).await.unwrap();
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', 't', 'now', 'now', ?)")
+                .bind("not-json")
+                .execute(&bad_pool).await.unwrap();
+            bad_pool.close().await;
+            let err = perform_import(&main_pool, &bad_path, Some("badjson")).await.unwrap_err();
+            assert!(err.contains("JSON object"), "err={err}");
 
             // title 超 256B → 拒。
             let long_title_path = dir.path().join("title.db");

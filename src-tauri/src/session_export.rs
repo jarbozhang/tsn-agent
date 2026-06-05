@@ -6,9 +6,9 @@
 //!   - 导出文件天然只含目标会话行，能被 `import_session` 的单 session 校验接受；
 //!   - 主库全程只读 —— 旧版 scrub/restore 三步及其竞态（restore 失败永久丢
 //!     payload）整体删除；
-//!   - `sessions.payload` 在 SELECT 列清单用字面量 `'{}'` 替换（导出不含聊天
-//!     记录/canonical blob，延续 plan v3 U8 防泄漏决策）；`title`/`project_name`
-//!     有意保留 —— 导入后用户需要识别会话，字段无机密内容；
+//!   - `sessions.payload` 携带源值（入库时已 redactSessionForStorage 脱敏）——
+//!     导出完整会话切片含对话/workflow 进度/拓扑，让导入方从原进度续走
+//!     （boss 拍板推翻 plan v3 U8 '{}' 决策，入库 redaction 已是脱敏闸）；
 //!   - 覆盖语义：OS save 对话框已是用户确认点，Rust 端经 tmp+rename 接受覆盖，
 //!     失败只删 `.tmp`，用户既有备份文件全程不动；target 为 symlink 时拒绝
 //!     （镜像 project_writer 的 guard）。
@@ -175,10 +175,10 @@ async fn copy_slice_into(
         .await
         .map_err(|e| format!("读取事务开启失败：{e}"))?;
 
-    // session 存在性 + sessions 行读取（payload 不读 —— 导出固定写 '{}'）。
+    // session 存在性 + sessions 行读取（含 payload —— 导出携带完整会话切片）。
     let session_row = sqlx::query(
         r#"SELECT id, title, created_at, updated_at, message_count, event_count,
-                  has_project, project_name, bundle_file_count
+                  has_project, project_name, bundle_file_count, payload
            FROM sessions WHERE id = ?"#,
     )
     .bind(session_id)
@@ -189,12 +189,13 @@ async fn copy_slice_into(
         return Err(format!("会话不存在：{session_id}"));
     };
 
-    // sessions 行：payload 固定 '{}'（防泄漏）；title/project_name 有意保留。
+    // sessions 行：携带源 payload —— 入库时已 redactSessionForStorage 脱敏，
+    // 导出完整会话切片（对话 + workflow 进度 + 拓扑），让导入方能从原进度续走。
     sqlx::query(
         r#"INSERT INTO sessions
            (id, title, created_at, updated_at, message_count, event_count,
             has_project, project_name, bundle_file_count, payload)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')"#,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(session_row.get::<String, _>("id"))
     .bind(session_row.get::<String, _>("title"))
@@ -205,6 +206,7 @@ async fn copy_slice_into(
     .bind(session_row.get::<i64, _>("has_project"))
     .bind(session_row.get::<Option<String>, _>("project_name"))
     .bind(session_row.get::<i64, _>("bundle_file_count"))
+    .bind(session_row.get::<String, _>("payload"))
     .execute(export_pool)
     .await
     .map_err(|e| format!("写入会话行失败：{e}"))?;
@@ -328,7 +330,7 @@ mod tests {
                 .expect("export ok");
 
             let export_pool = open_export(&target).await;
-            // 仅 1 行 sessions 且为 s1；payload 已置 '{}'；title 保留。
+            // 仅 1 行 sessions 且为 s1；payload 携带源值（导出完整切片）；title 保留。
             let sessions: Vec<(String, String, String)> = sqlx::query_as(
                 "SELECT id, title, payload FROM sessions",
             )
@@ -338,7 +340,7 @@ mod tests {
             assert_eq!(sessions.len(), 1);
             assert_eq!(sessions[0].0, "s1");
             assert_eq!(sessions[0].1, "title-s1");
-            assert_eq!(sessions[0].2, "{}");
+            assert_eq!(sessions[0].2, r#"{"project":{"sensitive":"secret-blob"}}"#);
 
             // s1 的 P0 行齐全，s2 的不存在。
             let node_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes")
