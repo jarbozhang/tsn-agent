@@ -326,8 +326,7 @@ describe("claude-agent-worker", () => {
               id: "toolu-1",
               name: "Bash",
               input: {
-                command:
-                  'node "$TSN_AGENT_STAGE_RUNNER_PATH" --stage flow-template --input \'{"userIntent":"加三条视频流"}\' --result-path "$TSN_AGENT_STAGE_RESULT_PATH"',
+                command: "ls \"$TSN_AGENT_SKILL_OUTPUT_DIR\"",
               },
             },
           ],
@@ -352,9 +351,9 @@ describe("claude-agent-worker", () => {
     const result = await runClaude("加三条视频流", { onEvent: (event) => events.push(event) }, query);
 
     const streamed = events.map((event) => event.text ?? "").join("");
-    expect(streamed).toContain("[工具] Bash: node tsn-stage-runner --stage flow-template");
+    expect(streamed).toContain("[工具] Bash: ls");
     expect(streamed).toContain("[工具结果] Bash 已返回");
-    expect(result.assistantText).toContain("[工具] Bash: node tsn-stage-runner --stage flow-template");
+    expect(result.assistantText).toContain("[工具] Bash: ls");
     expect(result.assistantText).toContain("[工具结果] Bash 已返回");
     expect(result.assistantText).toContain("已更新流量规划");
   });
@@ -632,14 +631,9 @@ describe("claude-agent-worker", () => {
       "/tmp/skill-output",
       {
         userIntent: "再加个视频流",
-        stage: "flow-template",
-        project: {
-          topology: {
-            nodes: Array.from({ length: 20 }, (_, index) => ({ id: `node-${index}` })),
-          },
-        },
+        stage: "topology",
+        fallbackDetails: Array.from({ length: 20 }, (_, index) => ({ id: `node-${index}` })),
       },
-      "/tmp/runner.mjs",
       "/tmp/stage-runner-input.json",
     );
 
