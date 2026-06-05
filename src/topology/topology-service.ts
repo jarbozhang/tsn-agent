@@ -1,10 +1,3 @@
-import { buildTopologyArtifacts, describeTopologyArtifacts, validateTopologyArtifacts } from "./artifacts";
-import { initializeTopology } from "./initialize";
-import { inspectTopology } from "./inspect";
-import { applyTopologyOperations } from "./operations";
-import { describeTemplates } from "./templates";
-import { validateIntermediateTopology } from "./validate";
-
 export type TopologyRuntimeStatus = "unknown" | "available" | "unavailable" | "call_failed";
 
 export interface TopologyRuntimeSummary {
@@ -37,14 +30,3 @@ export function getTopologyRuntimeSummary(status: TopologyRuntimeStatus = "avail
     toolNames: [...TOPOLOGY_TOOL_NAMES],
   };
 }
-
-export const topologyDomainService = {
-  describeTemplates,
-  initializeTopology,
-  inspectTopology,
-  describeTopologyArtifacts,
-  validateIntermediateTopology,
-  buildTopologyArtifacts,
-  validateTopologyArtifacts,
-  applyTopologyOperations,
-};

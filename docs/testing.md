@@ -18,18 +18,16 @@ npm run cargo:test
 
 ## Topology MCP 测试
 
-拓扑 MCP 的 P0 测试不依赖网络、模型、真实 Agent 会话或 Tauri：
+拓扑 MCP 的 P0 测试不依赖网络、模型、真实 Agent 会话或 Tauri（拓扑 compute 逻辑的测试在 Rust 端 `src-tauri`，随 `npm run cargo:test` 运行）：
 
 ```bash
-npx vitest run src/topology src-node/mcp/topology-tools.test.ts
+npx vitest run src-node/mcp/topology-tools.test.ts
 ```
 
-- `src/topology/*.test.ts`：覆盖 `IntermediateTopology` 契约、模板目录、初始化、校验、legacy JSON artifact、inspect、P0 operations 和 project bridge。
 - `src-node/mcp/topology-tools.test.ts`：覆盖 MCP tool registry、allowedTools 映射、handler 转发到 sidecar（`fetchSidecar` mock）、`SIDECAR_UNAVAILABLE` / `FORBIDDEN_OPERATION` 等 structured errors 和无 HTML artifact。
-- `src-node/claude-agent-worker.test.mjs`：覆盖 worker 的 `tsn_topology` MCP server 配置、allowedTools、dev host fail-closed 和 stage runner fallback。
-- `src-node/stage-skills/tsn-stage-runner.test.mjs`：验证 stage runner 已 stub 化（拓扑走 MCP、流量规划 Phase B 回归），调用即 fail-closed 报下线提示。
+- `src-node/claude-agent-worker.test.mjs`：覆盖 worker 的 `tsn_topology` MCP server 配置、allowedTools、dev host fail-closed 与 mutationId trusted 提取。
 
-完整回归仍使用 `npm test` 和 `npm run build`。
+完整回归仍使用 `npm test` 和 `npm run build`；legacy 类型回流由 `scripts/check-no-legacy-types.sh`（CI 默认 fail）拦截。
 
 ## 当前不进默认测试
 

@@ -1,10 +1,13 @@
-//! Plan v3 U5：backfill state 跟踪 + walker（CanonicalTsnProjectV0 JSON → P0 表）。
+//! Plan v3 U5 → Phase B：内嵌的一次性 skip-A 迁移（升级前历史 session 的
+//! canonical payload JSON → P0 表）。TS 端 canonical 域已在 Phase B-β2 删除，
+//! 本模块是仓库内最后一个合法读取 canonical JSON 形态的地方（grep gate 豁免）；
+//! 存量 session 全部完成迁移后可整体移除。
 //!
 //! Walker 最小路径：只填 `topology_nodes` + `topology_links` + `topology_refs`。
 //! 13 张 nodes.* / topo_feature 子表保持空，由后续 MCP `apply_operations` 增量
-//! 注入（Phase A 边界：单 session 只承载基础拓扑，配置列在 UI 编辑时再落表）。
+//! 注入（单 session 只承载基础拓扑，配置列在 UI 编辑时再落表）。
 //!
-//! 字段映射沿用 `src/topology/artifacts.ts` 同步约定：
+//! 字段映射沿用已删除的 `src/topology/artifacts.ts` 同步约定：
 //!   - `imac` = 100 + nodes 按 numericId 排序后的位置
 //!   - `sync_name` = `String(numericId)`
 //!   - `sync_type` = `{"_classPath": legacyClassPath(type)}` JSON

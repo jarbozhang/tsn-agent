@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  legacy-types-gate:
+    name: Legacy types grep gate
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Plan v3 U9c：SCAN_MODE 默认 fail，命中 legacy 类型 / redact 漂移即失败。
+      - name: Run legacy-types scan
+        run: bash scripts/check-no-legacy-types.sh
