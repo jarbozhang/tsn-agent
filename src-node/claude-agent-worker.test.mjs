@@ -628,6 +628,9 @@ describe("claude-agent-worker", () => {
     expect(prompt).toContain("不要用 initialize 重建");
     expect(prompt).toContain("逐字节复用上一次的同一 batch");
     expect(prompt).toContain("不要把 inspect 返回的 rows");
+    // 显示名映射规则（v0.3.3 真机验收发现的 off-by-one：SW-1 被按序数折算成第 1 台）。
+    expect(prompt).toContain("按 syncName 精确等于");
+    expect(prompt).toContain("不要按列表顺序或第 N 台折算");
   });
 
   it("keeps large stage runner input out of the prompt when an input path is provided", () => {

@@ -59,7 +59,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.inspect",
       allowedToolName: "mcp__tsn_topology__topology_inspect",
       title: "Inspect topology",
-      description: "Return the session's full persisted topology rows: nodes (imac/syncName/nodeType/syncType/x/y/insertOrder) and links (linkSeq/name/srcImac/dstImac/stylesJson). No parameters. Call this first to locate existing imac/linkSeq values before building apply_operations batches.",
+      description: "Return the session's full persisted topology rows: nodes (imac/syncName/nodeType/syncType/x/y/insertOrder) and links (linkSeq/name/srcImac/dstImac/stylesJson). No parameters. Call this first to locate existing imac/linkSeq values before building apply_operations batches. UI 显示名 = 类型前缀 + syncName（SW-1 即 syncName=\"1\" 的交换机行，ES-4 即 syncName=\"4\" 的端系统行）；用户引用 SW-N/ES-N 时按 syncName 精确匹配，不要按序数折算。",
       inputSchema: {},
       handler: async (args) => callSidecarTool("/db/topology/inspect", args, {}),
     },

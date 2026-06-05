@@ -354,7 +354,8 @@ export function buildPrompt(
 5. 用户的简短确认（如"速率够用"）不需要调用工具，直接推进。
 6. 增量修改已确认的拓扑时，先 topology.inspect 查 rows 再用 topology.apply_operations 构造原子操作；不要用 initialize 重建（会重排节点命名）。
 7. 不要把 inspect 返回的 rows / stylesJson / syncType 原文复述进中文回复。
-8. apply_operations 超时重试时必须逐字节复用上一次的同一 batch（相同 imac/linkSeq），不要重新分配 —— 重新分配 linkSeq 会产生重复的平行链路。`;
+8. apply_operations 超时重试时必须逐字节复用上一次的同一 batch（相同 imac/linkSeq），不要重新分配 —— 重新分配 linkSeq 会产生重复的平行链路。
+9. 画布节点显示名 = 类型前缀 + syncName（交换机 SW-、端系统 ES-，如 SW-1 即 syncName="1" 的那一行）；用户提到 SW-N / ES-N 时按 syncName 精确等于 "N" 在 inspect rows 中匹配，不要按列表顺序或第 N 台折算。`;
   const failureInstruction = "8. 如果当前阶段是拓扑，不能只返回文字说明；没有 trusted topology result 就不要声称阶段已生成。";
   const fileInstruction = "5. 不要修改仓库文件；不要写 TSN_AGENT_STAGE_RESULT_PATH；不要输出 Markdown 表格。";
 
