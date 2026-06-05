@@ -542,6 +542,28 @@ mod tests {
     }
 
     #[test]
+    fn link_add_self_loop_requires_single_endpoint() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let mut tx = pool.begin().await.unwrap();
+            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                imac: 1, sync_name: "0".into(), x: 0.0, y: 0.0,
+                sync_type: "{}".into(), node_type: None, insert_order: 0,
+            })).await.unwrap();
+            // self-loop（src==dst）端点计数 expected=1：节点存在即通过悬空校验。
+            let s = apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
+                link_seq: 0, name: None, src_imac: 1, dst_imac: 1, styles_json: "{}".into(),
+            })).await.unwrap();
+            assert_eq!(s.rows_affected, 1);
+            // 节点不存在的 self-loop 仍被拦截。
+            let err = apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
+                link_seq: 1, name: None, src_imac: 9, dst_imac: 9, styles_json: "{}".into(),
+            })).await.unwrap_err();
+            assert!(matches!(err, OpError::UnknownNode(_)));
+        });
+    }
+
+    #[test]
     fn link_add_rejects_unknown_endpoints() {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
