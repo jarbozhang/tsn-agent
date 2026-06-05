@@ -542,11 +542,26 @@ const MAX_OPERATIONS_PER_REQUEST: usize = 32;
 
 pub async fn apply_operations(
     State(state): State<Arc<RouteState>>,
-    Json(raw): Json<Value>,
+    raw: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
-    // 两段式解析（纵深防御）：axum 只负责取 JSON，serde 失败时返回带合法 op
-    // 列表的结构化信封，而不是裸 422 "Unprocessable Entity"。正常路径模型在
-    // MCP zod 层已被拦截，这里兜底直连 sidecar 的非法 payload。
+    // 两段式解析（纵深防御）：语法级非法 JSON（extractor rejection）与形状级
+    // 非法 op（serde 失败）都返回带合法 op 列表的结构化信封，而不是裸 422
+    // "Unprocessable Entity"。正常路径模型在 MCP zod 层已被拦截，这里兜底
+    // 直连 sidecar 的非法 payload。
+    let raw = match raw {
+        Ok(Json(value)) => value,
+        Err(rejection) => {
+            return structured_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "INVALID_OPERATION",
+                &format!(
+                    "{} | 请求体必须是合法 JSON 对象，合法 op: node_add/node_update/node_delete/link_add/link_delete",
+                    rejection.body_text()
+                ),
+                false,
+            )
+        }
+    };
     let req: ApplyOpsRequest = match serde_json::from_value(raw) {
         Ok(req) => req,
         Err(e) => {
@@ -564,6 +579,15 @@ pub async fn apply_operations(
         return resp;
     }
 
+    // 空批次拒绝：空事务也会 mint mutationId 并触发 UI 无谓刷新（幽灵 mutation）。
+    if req.operations.is_empty() {
+        return structured_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "LIMIT_EXCEEDED",
+            "operations must not be empty; 先 inspect 再构造 batch",
+            false,
+        );
+    }
     if req.operations.len() > MAX_OPERATIONS_PER_REQUEST {
         return structured_error(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -597,7 +621,8 @@ pub async fn apply_operations(
                     err.http_status(),
                     err.code(),
                     &err.message(),
-                    false,
+                    // DATABASE_ERROR（SQLite 瞬时错误）可重试；业务错误不可。
+                    err.is_retryable(),
                 );
             }
         }

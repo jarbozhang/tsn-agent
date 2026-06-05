@@ -325,8 +325,9 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
         linkAddSchema,
         linkDeleteSchema,
       ]))
+      .min(1)
       .max(32)
-      .describe("原子操作 batch（≤32）。增量修改先 inspect 再构造；重试必须复用同一 batch 的 imac/linkSeq"),
+      .describe("原子操作 batch（1-32）。增量修改先 inspect 再构造；重试必须复用同一 batch 的 imac/linkSeq"),
     dryRun: z.boolean().optional(),
   };
 }

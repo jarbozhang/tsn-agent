@@ -501,4 +501,10 @@ describe("applyOperationsInputSchema", () => {
     const result = schema.safeParse({ operations });
     expect(result.success).toBe(false);
   });
+
+  it("rejects an empty operations batch via min(1)", () => {
+    // 空批次在 sidecar 也会被拒（空事务会白白 mint mutationId）。
+    const result = schema.safeParse({ operations: [] });
+    expect(result.success).toBe(false);
+  });
 });

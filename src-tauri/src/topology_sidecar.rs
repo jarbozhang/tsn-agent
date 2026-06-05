@@ -463,6 +463,46 @@ mod tests {
     }
 
     #[test]
+    fn apply_operations_rejects_empty_batch() {
+        tauri::async_runtime::block_on(async {
+            let (pool, buf) = test_state().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+                .execute(&pool).await.unwrap();
+            let (router, token) = build_test_router_with_pool(pool, buf.clone()).await;
+
+            let (status, parsed) = apply_ops(router, &token, "s1", serde_json::json!([])).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(parsed["code"], "LIMIT_EXCEEDED");
+            // 空批次不得 mint mutationId（幽灵 mutation 防护）。
+            assert_eq!(buf.since("s1", 0).latest, 0);
+        });
+    }
+
+    #[test]
+    fn apply_operations_rejects_syntactically_invalid_json_with_envelope() {
+        tauri::async_runtime::block_on(async {
+            let (pool, buf) = test_state().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+                .execute(&pool).await.unwrap();
+            let (router, token) = build_test_router_with_pool(pool, buf).await;
+
+            // 语法级非法 JSON（extractor rejection 路径，区别于形状级 serde 失败）。
+            let resp = router
+                .oneshot(Request::builder().method("POST").uri("/db/topology/apply_operations")
+                    .header("Authorization", format!("Bearer {}", token.expose()))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from("{not valid json")).unwrap())
+                .await.unwrap();
+            assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            let bytes = to_bytes(resp.into_body(), 8192).await.unwrap();
+            let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(parsed["ok"], false);
+            assert_eq!(parsed["code"], "INVALID_OPERATION");
+            assert!(parsed["message"].as_str().unwrap().contains("node_add"));
+        });
+    }
+
+    #[test]
     fn apply_operations_rejects_malformed_op_with_invalid_operation_envelope() {
         tauri::async_runtime::block_on(async {
             let (pool, buf) = test_state().await;

@@ -77,6 +77,22 @@ pub struct OpResultSummary {
     pub rows_affected: u64,
 }
 
+/// 三态写入的 JSON 字段同值判定：字符串相等最快路径；不等时退到 JSON 语义比较
+/// （LLM 重试时可能重新序列化 —— 键序/空白变化不应误报 IMAC_TAKEN/LINK_SEQ_TAKEN
+/// 阻断合法的幂等重放）。任一侧解析失败则按字符串不等处理。
+fn json_or_string_eq(stored: &str, provided: &str) -> bool {
+    if stored == provided {
+        return true;
+    }
+    match (
+        serde_json::from_str::<serde_json::Value>(stored),
+        serde_json::from_str::<serde_json::Value>(provided),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
 /// 执行单条 op 到 transaction；返回 summary 用于 changeSet。
 ///
 /// 幂等约定（数据可靠性包 + 三态写入碰撞防护）：sidecar 响应超时后客户端会把
@@ -131,7 +147,7 @@ pub async fn apply_op(
                 let same_provided = row.get::<String, _>("sync_name") == a.sync_name
                     && row.get::<f64, _>("x") == a.x
                     && row.get::<f64, _>("y") == a.y
-                    && row.get::<String, _>("sync_type") == a.sync_type
+                    && json_or_string_eq(&row.get::<String, _>("sync_type"), &a.sync_type)
                     && row.get::<i64, _>("insert_order") == a.insert_order
                     // optional 字段仅在请求提供时参与判定（防重试省略时假阳性）
                     && a.node_type.as_ref().is_none_or(|nt| {
@@ -254,7 +270,7 @@ pub async fn apply_op(
                 .map_err(|e| OpError::Database(e.to_string()))?;
                 let same_provided = row.get::<i64, _>("src_imac") == a.src_imac
                     && row.get::<i64, _>("dst_imac") == a.dst_imac
-                    && row.get::<String, _>("styles_json") == a.styles_json
+                    && json_or_string_eq(&row.get::<String, _>("styles_json"), &a.styles_json)
                     && a.name.as_ref().is_none_or(|n| {
                         row.get::<Option<String>, _>("name").as_deref() == Some(n.as_str())
                     });
@@ -303,6 +319,10 @@ pub enum OpError {
 }
 
 impl OpError {
+    /// SQLite 层错误（BUSY/IO/锁超时）是瞬时的，可重试；业务规则错误不可重试。
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, OpError::Database(_))
+    }
     pub fn http_status(&self) -> axum::http::StatusCode {
         match self {
             OpError::NotFound(_)
@@ -538,6 +558,46 @@ mod tests {
                 link_seq: 0, name: None, src_imac: 1, dst_imac: 2, styles_json: "{}".into(),
             })).await.unwrap();
             assert_eq!(s.rows_affected, 0);
+        });
+    }
+
+    #[test]
+    fn replay_with_reserialized_json_fields_is_still_noop() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let mut tx = pool.begin().await.unwrap();
+            for (imac, order) in [(1_i64, 0_i64), (2, 1)] {
+                apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                    imac, sync_name: imac.to_string(), x: 0.0, y: 0.0,
+                    sync_type: r#"{"_classPath":"Q.Graphs.exchanger2","rev":1}"#.into(),
+                    node_type: None, insert_order: order,
+                })).await.unwrap();
+            }
+            apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
+                link_seq: 0, name: None, src_imac: 1, dst_imac: 2,
+                styles_json: r#"{"leftLabel":"P1","speed":1000}"#.into(),
+            })).await.unwrap();
+
+            // LLM 重试时重新序列化 JSON（键序/空白变化）：语义同值必须仍判 no-op，
+            // 不得误报 IMAC_TAKEN / LINK_SEQ_TAKEN（adversarial 发现 3 回归）。
+            let s = apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                imac: 1, sync_name: "1".into(), x: 0.0, y: 0.0,
+                sync_type: r#"{ "rev": 1, "_classPath": "Q.Graphs.exchanger2" }"#.into(),
+                node_type: None, insert_order: 0,
+            })).await.unwrap();
+            assert_eq!(s.rows_affected, 0);
+            let s = apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
+                link_seq: 0, name: None, src_imac: 1, dst_imac: 2,
+                styles_json: r#"{ "speed": 1000, "leftLabel": "P1" }"#.into(),
+            })).await.unwrap();
+            assert_eq!(s.rows_affected, 0);
+
+            // 语义不同的 JSON 仍是异值碰撞。
+            let err = apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
+                link_seq: 0, name: None, src_imac: 1, dst_imac: 2,
+                styles_json: r#"{"leftLabel":"P1","speed":100}"#.into(),
+            })).await.unwrap_err();
+            assert!(matches!(err, OpError::LinkSeqTaken(_)));
         });
     }
 
