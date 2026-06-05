@@ -60,12 +60,12 @@ Plan 要求复用 ops 白名单，实际实现为独立 validator + 直接 INSER
 
 ## CI
 
-### check-no-legacy-types.sh 接入 CI workflow
-**Priority:** P1
-脚本存在但没有任何 workflow 调用，drift 检测 inert；PR-β2 翻 `SCAN_MODE=fail` 时一并接入 `.github/workflows/`。（plan audit PARTIAL）
-
 ### U4a-2 byte-equal 基线回归测试
 **Priority:** P2
 canonicalizer 移除后缺少 Spike A 基线 fixture 的字节级对照测试，「单一事实源 byte-equal」保证未在代码中强制。（plan audit PARTIAL）
 
 ## Completed
+
+### check-no-legacy-types.sh 接入 CI workflow
+**Completed:** v0.3.x PR-β2 (2026-06-05)
+`.github/workflows/ci.yml` 在 push/PR 时运行扫描；脚本默认 `SCAN_MODE=fail`。

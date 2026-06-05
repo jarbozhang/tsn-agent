@@ -34,7 +34,6 @@
 - `src/agent/agent-adapter.ts`：Tauri-only agent 适配层，负责 session/workflow 透传、stage result（仅携带 mutationId）和诊断日志；非 Tauri（Web）fail-closed 返回「需要桌面版」，无 fake-agent 兜底。
 - `src/agent/agent-types.ts`：`AgentEvent` / `TsnAgentRequest` / `TsnAgentResult` 类型（自已删除的 fake-agent.ts 移入）。
 - `src/domain/scenario-config.ts`：轻量场景配置。新增应用场景时优先扩展这里，不要复制核心 workflow。
-- `src/domain/topology-factory.ts`：（@deprecated Phase B）历史 in-process 创建 canonical TSN project 入口；新代码应通过 MCP `topology.initialize` + sidecar。
 - `src/project/project-state.ts`：workflow state、阶段状态、确认、请求修改、旧 session 归一化。
 - `src/sessions/session-repository.ts`、`src-tauri/src/session_store.rs`：Web localStorage 与 Tauri SQLite 会话保存。
 - `src/diagnostics/*`、`src/ui/diagnostics/DiagnosticsDrawer.tsx`：脱敏诊断日志和日志抽屉。
@@ -43,7 +42,7 @@
 ### Plan v3（topology MCP single-DB）Phase A 新增代码入口
 
 - `src-tauri/src/topology_sidecar.rs` / `topology_sidecar_routes.rs`：axum 127.0.0.1 sidecar + Bearer 中间件 + 8 个 `/db/topology/*` 路由。
-- `src-tauri/src/topology_compute.rs`：sidecar 内 topology compute（templates / initialize / inspect / validate / artifacts 4 件套 + BFS），1:1 镜像 `src/topology/*.ts`。
+- `src-tauri/src/topology_compute.rs`：sidecar 内 topology compute（templates / initialize / inspect / validate / artifacts 4 件套 + BFS）；Phase B-β2 起为唯一实现（TS 端 `src/topology/*` compute 已删除）。
 - `src-tauri/src/topology_intermediate.rs`：sidecar 内 IntermediateTopology DTO。
 - `src-tauri/src/topology_ops.rs`：apply_operations 白名单 enum + sqlx 写 P0 表。
 - `src-tauri/src/topology_mutation_buffer.rs` + `topology_mutations_command.rs`：mutationId ring buffer + `get_topology_mutations_since` Tauri command。
@@ -53,11 +52,12 @@
 - `src-node/mcp/sidecar-client.ts`：MCP handler 调用 sidecar 的 thin client（含 SIDECAR_UNAVAILABLE 错误映射）。
 - `src-node/mcp/topology-tools.ts`：8 个 MCP handler 全走 fetchSidecar；`responseMode` / `topologyFullAllowed` 字段已删除。
 
-### Deprecated（Phase B 后续 PR 删除）
+### Phase B-β2 已删除（不要再引用）
 
-- `src/topology/intermediate.ts` / `validate.ts` / `project-bridge.ts`：sidecar 已接管，TS 端等待 consumer 重写后整体删除。
-- `src/domain/canonical.ts` / `validation.ts`：作为 session payload 序列化 schema 暂保留；最终通过 `query_topology` 直读 P0 表替代。
-- `src/export/planner-exporter.ts` / `inet-traffic-exporter.ts` / `inet-gcl-exporter.ts` / `artifact-bundle.ts` 中 flow 部分：流量规划 P0 暂下线。
+- TS 端 canonical 域与拓扑 compute：`src/domain/canonical.ts` / `validation.ts` / `topology-factory.ts`、`src/topology/*`（仅保留 `limits.ts` 与 `topology-service.ts` 的工具名/runtime 摘要）。
+- 全部 TS exporters：`src/export/`（INET / planner / react-flow 导出随 Phase B 重建）。
+- stage runner：`src-node/stage-skills/` 与 worker 内 runner 引导、retry 路径、`TSN_AGENT_STAGE_RUNNER_PATH` env；worker 只服务拓扑阶段（其余阶段由 adapter 本地拦截）。
+- CI grep gate（`scripts/check-no-legacy-types.sh`，默认 `SCAN_MODE=fail`，经 `.github/workflows/ci.yml` 在 push/PR 运行）会拦截上述类型与字段的回流；`src-tauri/src/topology_backfill.rs` 是唯一豁免（一次性 skip-A 迁移读取方）。
 
 ## 分阶段工作流约束
 
