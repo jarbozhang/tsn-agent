@@ -77,6 +77,13 @@ pub struct OpResultSummary {
 }
 
 /// 执行单条 op 到 transaction；返回 summary 用于 changeSet。
+///
+/// 幂等约定（数据可靠性包）：sidecar 响应超时后客户端会把 apply_operations
+/// 标记为 retryable，而第一次调用可能已 commit。因此写操作必须重试安全：
+///   - node.add / link.add 使用 UPSERT（重放同值无害）
+///   - node.delete / link.delete 删除不存在的目标是 no-op（rows_affected=0）
+///   - link.add 前校验两端节点存在（悬空链路进不了 DB）
+///   - node.delete 拒绝仍有链路引用的节点（先 link.delete）
 pub async fn apply_op(
     tx: &mut sqlx::SqliteConnection,
     session_id: &str,
@@ -87,7 +94,14 @@ pub async fn apply_op(
             let res = sqlx::query(
                 r#"INSERT INTO topology_nodes
                    (session_id, imac, sync_name, x, y, sync_type, node_type, insert_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(session_id, imac) DO UPDATE SET
+                       sync_name = excluded.sync_name,
+                       x = excluded.x,
+                       y = excluded.y,
+                       sync_type = excluded.sync_type,
+                       node_type = excluded.node_type,
+                       insert_order = excluded.insert_order"#,
             )
             .bind(session_id)
             .bind(a.imac)
@@ -135,6 +149,21 @@ pub async fn apply_op(
             })
         }
         TopologyOp::NodeDelete(a) => {
+            let link_refs: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM topology_links WHERE session_id = ? AND (src_imac = ? OR dst_imac = ?)",
+            )
+            .bind(session_id)
+            .bind(a.imac)
+            .bind(a.imac)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| OpError::Database(e.to_string()))?;
+            if link_refs > 0 {
+                return Err(OpError::NodeHasLinks(format!(
+                    "topology_nodes(imac={}) still referenced by {} link(s); delete the links first",
+                    a.imac, link_refs
+                )));
+            }
             let res = sqlx::query(
                 "DELETE FROM topology_nodes WHERE session_id = ? AND imac = ?",
             )
@@ -143,19 +172,38 @@ pub async fn apply_op(
             .execute(&mut *tx)
             .await
             .map_err(|e| OpError::Database(e.to_string()))?;
-            if res.rows_affected() == 0 {
-                return Err(OpError::NotFound(format!("topology_nodes(imac={})", a.imac)));
-            }
+            // 幂等：目标不存在视为已删除（重试安全），rows_affected=0 自述 no-op。
             Ok(OpResultSummary {
                 op_kind: "node.delete",
                 rows_affected: res.rows_affected(),
             })
         }
         TopologyOp::LinkAdd(a) => {
+            let endpoint_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM topology_nodes WHERE session_id = ? AND imac IN (?, ?)",
+            )
+            .bind(session_id)
+            .bind(a.src_imac)
+            .bind(a.dst_imac)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| OpError::Database(e.to_string()))?;
+            let expected = if a.src_imac == a.dst_imac { 1 } else { 2 };
+            if endpoint_count < expected {
+                return Err(OpError::UnknownNode(format!(
+                    "link.add(link_seq={}) references missing node(s): src_imac={} dst_imac={}",
+                    a.link_seq, a.src_imac, a.dst_imac
+                )));
+            }
             let res = sqlx::query(
                 r#"INSERT INTO topology_links
                    (session_id, link_seq, name, src_imac, dst_imac, styles_json)
-                   VALUES (?, ?, ?, ?, ?, ?)"#,
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(session_id, link_seq) DO UPDATE SET
+                       name = excluded.name,
+                       src_imac = excluded.src_imac,
+                       dst_imac = excluded.dst_imac,
+                       styles_json = excluded.styles_json"#,
             )
             .bind(session_id)
             .bind(a.link_seq)
@@ -180,9 +228,7 @@ pub async fn apply_op(
             .execute(&mut *tx)
             .await
             .map_err(|e| OpError::Database(e.to_string()))?;
-            if res.rows_affected() == 0 {
-                return Err(OpError::NotFound(format!("topology_links(link_seq={})", a.link_seq)));
-            }
+            // 幂等：目标不存在视为已删除（重试安全），rows_affected=0 自述 no-op。
             Ok(OpResultSummary {
                 op_kind: "link.delete",
                 rows_affected: res.rows_affected(),
@@ -195,24 +241,35 @@ pub async fn apply_op(
 pub enum OpError {
     NotFound(String),
     Database(String),
+    /// link.add 引用了不存在的端点节点（悬空链路拦截）。
+    UnknownNode(String),
+    /// node.delete 的目标仍被链路引用（先 link.delete）。
+    NodeHasLinks(String),
 }
 
 impl OpError {
     pub fn http_status(&self) -> axum::http::StatusCode {
         match self {
-            OpError::NotFound(_) => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-            OpError::Database(_) => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            OpError::NotFound(_)
+            | OpError::Database(_)
+            | OpError::UnknownNode(_)
+            | OpError::NodeHasLinks(_) => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
         }
     }
     pub fn code(&self) -> &'static str {
         match self {
             OpError::NotFound(_) => "NOT_FOUND",
             OpError::Database(_) => "DATABASE_ERROR",
+            OpError::UnknownNode(_) => "UNKNOWN_NODE",
+            OpError::NodeHasLinks(_) => "NODE_HAS_LINKS",
         }
     }
     pub fn message(&self) -> String {
         match self {
-            OpError::NotFound(m) | OpError::Database(m) => m.clone(),
+            OpError::NotFound(m)
+            | OpError::Database(m)
+            | OpError::UnknownNode(m)
+            | OpError::NodeHasLinks(m) => m.clone(),
         }
     }
 }
@@ -271,18 +328,113 @@ mod tests {
     }
 
     #[test]
-    fn node_delete_missing_returns_not_found_and_rolls_back() {
+    fn node_delete_missing_is_idempotent_noop() {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
-            let err = apply_op(
+            // 幂等：删除不存在的节点 = no-op 成功（重试安全），rows_affected=0。
+            let s = apply_op(
                 &mut *tx,
                 "s1",
                 &TopologyOp::NodeDelete(NodeDeleteArgs { imac: 999 }),
             )
             .await
-            .unwrap_err();
-            assert!(matches!(err, OpError::NotFound(_)));
+            .unwrap();
+            assert_eq!(s.op_kind, "node.delete");
+            assert_eq!(s.rows_affected, 0);
+        });
+    }
+
+    #[test]
+    fn insert_switch_batch_replay_is_retry_safe() {
+        // 模拟 timeout-after-commit 重试：同一 tracer batch（link.delete +
+        // node.add + link.add×2）跑两遍，第二遍必须整批成功且数据一致。
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let mut seed = pool.begin().await.unwrap();
+            for (imac, order) in [(1_i64, 0_i64), (2, 1)] {
+                apply_op(&mut *seed, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                    imac, sync_name: imac.to_string(), x: 0.0, y: 0.0,
+                    sync_type: "{}".into(), node_type: None, insert_order: order,
+                })).await.unwrap();
+            }
+            apply_op(&mut *seed, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
+                link_seq: 0, name: None, src_imac: 1, dst_imac: 2, styles_json: "{}".into(),
+            })).await.unwrap();
+            seed.commit().await.unwrap();
+
+            let batch = vec![
+                TopologyOp::LinkDelete(LinkDeleteArgs { link_seq: 0 }),
+                TopologyOp::NodeAdd(NodeAddArgs {
+                    imac: 3, sync_name: "3".into(), x: 0.5, y: 0.5,
+                    sync_type: "{}".into(), node_type: Some("switch".into()), insert_order: 2,
+                }),
+                TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 1, name: None, src_imac: 1, dst_imac: 3, styles_json: "{}".into(),
+                }),
+                TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 2, name: None, src_imac: 3, dst_imac: 2, styles_json: "{}".into(),
+                }),
+            ];
+
+            for round in 0..2 {
+                let mut tx = pool.begin().await.unwrap();
+                for op in &batch {
+                    apply_op(&mut *tx, "s1", op)
+                        .await
+                        .unwrap_or_else(|e| panic!("round {round} failed: {e:?}"));
+                }
+                tx.commit().await.unwrap();
+            }
+
+            let node_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
+                .fetch_one(&pool).await.unwrap();
+            let link_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_links WHERE session_id='s1'")
+                .fetch_one(&pool).await.unwrap();
+            assert_eq!(node_count, 3);
+            assert_eq!(link_count, 2);
+        });
+    }
+
+    #[test]
+    fn link_add_rejects_unknown_endpoints() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let mut tx = pool.begin().await.unwrap();
+            let err = apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
+                link_seq: 0, name: None, src_imac: 7, dst_imac: 8, styles_json: "{}".into(),
+            })).await.unwrap_err();
+            assert!(matches!(err, OpError::UnknownNode(_)));
+            assert_eq!(err.code(), "UNKNOWN_NODE");
+        });
+    }
+
+    #[test]
+    fn node_delete_rejects_when_links_reference_it() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let mut tx = pool.begin().await.unwrap();
+            for (imac, order) in [(1_i64, 0_i64), (2, 1)] {
+                apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                    imac, sync_name: imac.to_string(), x: 0.0, y: 0.0,
+                    sync_type: "{}".into(), node_type: None, insert_order: order,
+                })).await.unwrap();
+            }
+            apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
+                link_seq: 0, name: None, src_imac: 1, dst_imac: 2, styles_json: "{}".into(),
+            })).await.unwrap();
+
+            let err = apply_op(&mut *tx, "s1", &TopologyOp::NodeDelete(NodeDeleteArgs { imac: 1 }))
+                .await.unwrap_err();
+            assert!(matches!(err, OpError::NodeHasLinks(_)));
+            assert_eq!(err.code(), "NODE_HAS_LINKS");
+
+            // 先删链路再删节点 → 成功。
+            apply_op(&mut *tx, "s1", &TopologyOp::LinkDelete(LinkDeleteArgs { link_seq: 0 }))
+                .await.unwrap();
+            let s = apply_op(&mut *tx, "s1", &TopologyOp::NodeDelete(NodeDeleteArgs { imac: 1 }))
+                .await.unwrap();
+            assert_eq!(s.rows_affected, 1);
         });
     }
 
@@ -343,5 +495,7 @@ mod tests {
         assert_eq!(OpError::Database("y".into()).http_status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(OpError::NotFound("x".into()).code(), "NOT_FOUND");
         assert_eq!(OpError::Database("y".into()).code(), "DATABASE_ERROR");
+        assert_eq!(OpError::UnknownNode("z".into()).code(), "UNKNOWN_NODE");
+        assert_eq!(OpError::NodeHasLinks("w".into()).code(), "NODE_HAS_LINKS");
     }
 }

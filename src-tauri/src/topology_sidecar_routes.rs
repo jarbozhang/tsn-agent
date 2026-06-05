@@ -481,12 +481,29 @@ pub struct ApplyOpsSummary {
     mutation_id: Option<u64>,
 }
 
+/// 与 MCP 层 `src/topology/limits.ts` 的 `maxOperations` 对齐；
+/// sidecar 端兜底，防止绕过 MCP 的本机调用方提交超大批次占住写事务。
+const MAX_OPERATIONS_PER_REQUEST: usize = 32;
+
 pub async fn apply_operations(
     State(state): State<Arc<RouteState>>,
     Json(req): Json<ApplyOpsRequest>,
 ) -> Response {
     if let Err(resp) = require_session(&state.pool, &req.session_id).await {
         return resp;
+    }
+
+    if req.operations.len() > MAX_OPERATIONS_PER_REQUEST {
+        return structured_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "LIMIT_EXCEEDED",
+            &format!(
+                "operations count {} exceeds the per-request maximum {}",
+                req.operations.len(),
+                MAX_OPERATIONS_PER_REQUEST
+            ),
+            false,
+        );
     }
 
     let mut tx = match state.pool.begin().await {
