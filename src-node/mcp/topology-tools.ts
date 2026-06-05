@@ -24,7 +24,7 @@ export interface TopologyMcpToolDefinition {
 
 /**
  * Plan v3 U4b complete: 所有 8 个 topology MCP handler 走 sidecar HTTP fetch；
- * 完全删除 in-process compute path 与 responseMode/topologyFullAllowed 字段。
+ * 完全删除 in-process compute path 与旧 response-mode 协商字段。
  *
  * 上游 invariant：sidecar URL/token/sessionId 由 Tauri 在 worker spawn env 中注入。
  * sidecar 不可达时（启动 panic 已 fail-closed），各 handler 返回 SIDECAR_UNAVAILABLE
@@ -93,7 +93,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.validate",
       allowedToolName: "mcp__tsn_topology__topology_validate",
       title: "Validate intermediate topology",
-      description: "Validate an IntermediateTopology and return structured errors.",
+      description: "Validate a topology snapshot and return structured errors.",
       inputSchema: {
         topology: z.unknown().optional(),
       },
@@ -107,7 +107,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.build_artifacts",
       allowedToolName: "mcp__tsn_topology__topology_build_artifacts",
       title: "Build topology artifacts",
-      description: "Build four legacy JSON topology artifacts from an IntermediateTopology.",
+      description: "Build the four legacy JSON topology artifacts from a topology snapshot.",
       inputSchema: {
         topology: z.unknown().optional(),
       },

@@ -7,7 +7,7 @@ import {
 /**
  * Plan v3 Phase B-β：trusted signal 是 sidecar apply_operations 响应里的
  * `summary.mutationId`。worker 在捕获 MCP tool_result 后调用本 builder，
- * 不再经过 IntermediateTopology → canonical project 转换。
+ * 不再经过任何中间拓扑表示转换。
  */
 export interface TrustedTopologyMutation {
   sessionId: string;
