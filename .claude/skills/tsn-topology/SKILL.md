@@ -31,7 +31,7 @@ description: TSN Agent 拓扑阶段指引。拓扑固定规则通过 tsn_topolog
 当当前 project 已经有拓扑，且用户要插入交换机或调整连接时：
 
 1. 调用 `mcp__tsn_topology__topology_inspect`（无参数）获取该会话全部拓扑 rows：nodes（imac/syncName/nodeType/syncType/x/y/insertOrder）+ links（linkSeq/name/srcImac/dstImac/stylesJson）。
-2. 在 rows 中按 syncName/nodeType/连接关系定位目标节点与链路，得到精确的 imac / linkSeq；如用户引用不唯一，先用中文数字编号选项向用户澄清。
+2. 在 rows 中按 syncName/nodeType/连接关系定位目标节点与链路，得到精确的 imac / linkSeq；如用户引用不唯一，先用中文数字编号选项向用户澄清。**显示名映射**：画布显示名 = 类型前缀 + syncName（SW-1 即 syncName="1" 的交换机，ES-4 即 syncName="4" 的端系统），用户提到 SW-N/ES-N 时按 syncName 精确等于 "N" 匹配，不要按列表顺序或「第 N 台」折算。
 3. 构造原子 operations（如插入交换机 = `[link_delete, node_add, link_add, link_add]`）：新节点的 `syncType`/`nodeType` 复制 inspect 返回的同类节点原文，新链路的 `stylesJson` 参照既有链路；新 `imac`/`linkSeq` 必须避开 rows 中已占用的值。
 4. 调用 `mcp__tsn_topology__topology_apply_operations`；worker 从响应的 `summary.mutationId` 合成 `WorkflowStageResult`，不把 rows 或 changeSet 写进对话。
 5. 超时重试时逐字节复用上一次的同一 operations（相同 imac/linkSeq），不要重新分配 —— 重新分配 linkSeq 会产生重复的平行链路。
