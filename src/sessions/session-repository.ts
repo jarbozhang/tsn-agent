@@ -292,7 +292,18 @@ function storedSessionToSession(session: StoredSession | undefined): TsnSession 
   }
 
   try {
-    return normalizeSession(JSON.parse(session.payload) as TsnSession);
+    const parsed = JSON.parse(session.payload) as Partial<TsnSession>;
+    // DB 列兜底：导入切片的 payload 是 '{}'（导出规格不带对话），核心字段从
+    // sessions 列恢复，缺它们会让列表渲染 `.messages.at(-1)` 直接崩。
+    // 合法 payload 含全部字段，spread 覆盖兜底 → 行为零变化。
+    return normalizeSession({
+      id: session.id,
+      title: session.title,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messages: [],
+      ...parsed,
+    } as TsnSession);
   } catch {
     return undefined;
   }

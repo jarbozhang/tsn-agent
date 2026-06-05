@@ -83,20 +83,6 @@ pub(crate) async fn perform_single_session_export(
     session_id: &str,
     target_path: &str,
 ) -> Result<(), String> {
-    // session 存在性 + sessions 行读取（payload 不读 —— 导出固定写 '{}'）。
-    let session_row = sqlx::query(
-        r#"SELECT id, title, created_at, updated_at, message_count, event_count,
-                  has_project, project_name, bundle_file_count
-           FROM sessions WHERE id = ?"#,
-    )
-    .bind(session_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("读取会话失败：{e}"))?;
-    let Some(session_row) = session_row else {
-        return Err(format!("会话不存在：{session_id}"));
-    };
-
     // symlink guard：rename 会替换 symlink 本身，但 guard 防御「目标被换成
     // 指向他处的链接」的混淆场景（镜像 project_writer 既有模式）。
     let target = Path::new(target_path);
@@ -106,9 +92,13 @@ pub(crate) async fn perform_single_session_export(
         }
     }
 
-    let tmp_path = format!("{target_path}.tmp");
-    // 清理上次中断可能残留的 tmp。
-    let _ = std::fs::remove_file(&tmp_path);
+    // 随机后缀临时文件（codex review）：固定 `{target}.tmp` 会误删用户恰好
+    // 同名的既有文件，且并发导出同 target 时两个任务互踩。
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_path = format!("{target_path}.{nanos}.export-tmp");
 
     // 预创建 0600 空文件（security review：SQLite 经 umask 创建通常是 0644，
     // 写入期间存在可读窗口；预创建后 SQLite 直接复用既有文件与其权限位）。
@@ -123,7 +113,7 @@ pub(crate) async fn perform_single_session_export(
             .map_err(|e| format!("创建导出临时文件失败：{e}"))?;
     }
 
-    if let Err(e) = write_export_slice(pool, session_id, &session_row, &tmp_path).await {
+    if let Err(e) = write_export_slice(pool, session_id, &tmp_path).await {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(e);
     }
@@ -143,10 +133,10 @@ pub(crate) async fn perform_single_session_export(
 }
 
 /// 把目标会话切片写入 tmp 文件（独立连接；journal=DELETE 保证单文件落盘）。
+/// 错误路径也 close 导出连接（Windows 上句柄未释放会让调用方删 tmp 失败）。
 async fn write_export_slice(
     pool: &sqlx::Pool<sqlx::Sqlite>,
     session_id: &str,
-    session_row: &sqlx::sqlite::SqliteRow,
     tmp_path: &str,
 ) -> Result<(), String> {
     let export_options = sqlx::sqlite::SqliteConnectOptions::new()
@@ -160,11 +150,44 @@ async fn write_export_slice(
         .await
         .map_err(|e| format!("创建导出文件失败：{e}"))?;
 
+    let result = copy_slice_into(pool, session_id, &export_pool).await;
+    // 无论成败都关闭：成功路径保证落盘无 journal 残留；失败路径释放句柄
+    // 让调用方能删 tmp。
+    export_pool.close().await;
+    result
+}
+
+/// 在主库单一只读事务内读取 session 行 + 全部 scoped 表（一致性快照 ——
+/// 并发 apply_operations 在表间提交不会让导出文件混合新旧拓扑），写入导出库。
+async fn copy_slice_into(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+    session_id: &str,
+    export_pool: &sqlx::Pool<sqlx::Sqlite>,
+) -> Result<(), String> {
     // 完整 schema（含 PRAGMA application_id，import 端校验它）。
     sqlx::query(&crate::db::safety_net_schema_sql())
-        .execute(&export_pool)
+        .execute(export_pool)
         .await
         .map_err(|e| format!("导出文件建表失败：{e}"))?;
+
+    let mut read_tx = pool
+        .begin()
+        .await
+        .map_err(|e| format!("读取事务开启失败：{e}"))?;
+
+    // session 存在性 + sessions 行读取（payload 不读 —— 导出固定写 '{}'）。
+    let session_row = sqlx::query(
+        r#"SELECT id, title, created_at, updated_at, message_count, event_count,
+                  has_project, project_name, bundle_file_count
+           FROM sessions WHERE id = ?"#,
+    )
+    .bind(session_id)
+    .fetch_optional(&mut *read_tx)
+    .await
+    .map_err(|e| format!("读取会话失败：{e}"))?;
+    let Some(session_row) = session_row else {
+        return Err(format!("会话不存在：{session_id}"));
+    };
 
     // sessions 行：payload 固定 '{}'（防泄漏）；title/project_name 有意保留。
     sqlx::query(
@@ -182,16 +205,16 @@ async fn write_export_slice(
     .bind(session_row.get::<i64, _>("has_project"))
     .bind(session_row.get::<Option<String>, _>("project_name"))
     .bind(session_row.get::<i64, _>("bundle_file_count"))
-    .execute(&export_pool)
+    .execute(export_pool)
     .await
     .map_err(|e| format!("写入会话行失败：{e}"))?;
 
-    // 共享表清单逐表切片复制（主库只读 SELECT）。
+    // 共享表清单逐表切片复制（同一只读事务 = 一致性快照）。
     for (table, cols) in crate::db::SESSION_SCOPED_TABLES {
         let select_sql = format!("SELECT {} FROM {} WHERE session_id = ?", cols.join(", "), table);
         let rows = sqlx::query(&select_sql)
             .bind(session_id)
-            .fetch_all(pool)
+            .fetch_all(&mut *read_tx)
             .await
             .map_err(|e| format!("读取 {table} 失败：{e}"))?;
         if rows.is_empty() {
@@ -209,14 +232,14 @@ async fn write_export_slice(
             for col in cols.iter() {
                 q = bind_dynamic(q, row, col);
             }
-            q.execute(&export_pool)
+            q.execute(export_pool)
                 .await
                 .map_err(|e| format!("写入 {table} 失败：{e}"))?;
         }
     }
 
-    // rename 前必须关闭连接：确保数据完整落盘且无 journal 残留。
-    export_pool.close().await;
+    // 只读事务，commit 仅释放快照。
+    let _ = read_tx.commit().await;
     Ok(())
 }
 
@@ -397,9 +420,13 @@ mod tests {
                 .unwrap_err();
             assert!(err.contains("会话不存在"));
 
-            // 旧备份原样保留，无 .tmp 残留（tmp+rename 的备份安全性质）。
+            // 旧备份原样保留，无临时文件残留（tmp+rename 的备份安全性质）。
             assert_eq!(std::fs::read(&target).unwrap(), b"precious old backup");
-            assert!(!out.path().join("export.db.tmp").exists());
+            let leftovers: Vec<_> = std::fs::read_dir(out.path()).unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().contains("export-tmp"))
+                .collect();
+            assert!(leftovers.is_empty(), "tmp 残留: {leftovers:?}");
         });
     }
 

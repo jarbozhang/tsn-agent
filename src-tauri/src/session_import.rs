@@ -71,6 +71,13 @@ pub async fn import_session(
     if !source.exists() {
         return Err(format!("源文件不存在：{}", source.display()));
     }
+    // symlink 拒绝（codex review：metadata 检查与后续 SQLite open 是两次路径
+    // 解析，symlink 是最廉价的混淆面；剩余 TOCTOU 窗口在单用户桌面下接受）。
+    if let Ok(meta) = std::fs::symlink_metadata(&source) {
+        if meta.file_type().is_symlink() {
+            return Err(format!("源路径是符号链接，拒绝导入：{}", source.display()));
+        }
+    }
     let metadata = std::fs::metadata(&source)
         .map_err(|e| format!("无法读取源文件元数据：{e}"))?;
     if metadata.len() > MAX_IMPORT_FILE_BYTES {
@@ -204,6 +211,26 @@ async fn perform_import_inner(
         ));
     }
 
+    // 总行数预检（codex review：原先在 fetch_all 物化之后才累计，且 main 事务
+    // 已开 —— 恶意文件仍可造成大量内存物化 + 长时间持有写事务）。COUNT 预检
+    // 在源库完成，超限即拒，main 事务尚未开启。
+    let mut total_scoped_rows: i64 = 0;
+    for (table, _) in crate::db::SESSION_SCOPED_TABLES {
+        let count: i64 = sqlx::query_scalar(&format!(
+            "SELECT COUNT(*) FROM {table} WHERE session_id = ?"
+        ))
+        .bind(&src_session_id)
+        .fetch_one(src_pool)
+        .await
+        .map_err(|e| format!("源 {table} 计数失败：{e}"))?;
+        total_scoped_rows += count;
+        if total_scoped_rows as usize > MAX_TOTAL_SCOPED_ROWS {
+            return Err(format!(
+                "源数据总行数超过上限 {MAX_TOTAL_SCOPED_ROWS}，拒绝导入"
+            ));
+        }
+    }
+
     // ---------- main db 事务：seed sessions + insert 子表 ----------
     let mut tx = main_pool
         .begin()
@@ -240,10 +267,10 @@ async fn perform_import_inner(
     .map_err(|e| format!("INSERT sessions 失败：{e}"))?;
 
     let mut summary = ImportSummary::default();
-    let mut total_scoped_rows: usize = 0;
 
     // 共享表清单统一复制（与 export 切片同一事实源，防两端漂移）。
     // 首列 session_id 改写为 target；其余列经字段级校验后动态 bind。
+    // 行数已由 main 事务前的 COUNT 预检约束。
     for (table, cols) in crate::db::SESSION_SCOPED_TABLES {
         let select_sql = format!("SELECT {} FROM {} WHERE session_id = ?", cols.join(", "), table);
         let rows = sqlx::query(&select_sql)
@@ -251,13 +278,6 @@ async fn perform_import_inner(
             .fetch_all(src_pool)
             .await
             .map_err(|e| format!("源 SELECT {table} 失败：{e}"))?;
-        total_scoped_rows += rows.len();
-        if total_scoped_rows > MAX_TOTAL_SCOPED_ROWS {
-            let _ = tx.rollback().await;
-            return Err(format!(
-                "源数据总行数超过上限 {MAX_TOTAL_SCOPED_ROWS}，拒绝导入"
-            ));
-        }
         let placeholders: Vec<&str> = cols.iter().map(|_| "?").collect();
         let insert_sql = format!(
             "INSERT INTO {} ({}) VALUES ({})",
@@ -319,12 +339,14 @@ async fn perform_import_inner(
 
 /// 字段级校验：长度上限按列名分级；styles_json 额外要求 JSON object 结构
 /// （非 object 的 styles_json 是 trivially crafted 的毒数据，UI/agent 端无消费语义）。
+/// 未点名的 TEXT 列（sync_name/name/node_id/node_name/operation_name 等会流向
+/// UI label 与 agent inspect）统一吃 4KB 兜底上限 —— 不再有无限大的口子。
 fn validate_text_field(table: &str, col: &str, row: &sqlx::sqlite::SqliteRow) -> Result<(), String> {
     let limit = match col {
         "styles_json" | "sync_type" => MAX_SMALL_TEXT_BYTES,
         "ref_json" | "cfg_json" | "spec_json" | "entry_json" => MAX_JSON_TEXT_BYTES,
         "mac_address" | "ip" => MAX_IDENT_TEXT_BYTES,
-        _ => return Ok(()),
+        _ => MAX_SMALL_TEXT_BYTES,
     };
     let Ok(Some(value)) = row.try_get::<Option<String>, _>(col) else {
         return Ok(());

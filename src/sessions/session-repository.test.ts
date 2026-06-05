@@ -183,6 +183,35 @@ describe("SqliteSessionRepository", () => {
     expect(database.rows.get(session.id)?.messageCount).toBe(1);
   });
 
+  it("recovers an imported session whose payload is the export-spec '{}'", async () => {
+    // 导入切片的 payload 固定为 '{}'（导出规格不带对话）；核心字段必须从
+    // sessions 列兜底恢复，否则列表渲染 .messages.at(-1) 直接崩（codex P1）。
+    const database = new MemoryDatabase();
+    database.rows.set("session-imported", {
+      id: "session-imported",
+      title: "导入的会话",
+      createdAt: "2026-06-05T00:00:00.000Z",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+      messageCount: 0,
+      eventCount: 0,
+      hasProject: false,
+      projectName: undefined,
+      bundleFileCount: 0,
+      payload: "{}",
+    });
+    const repository = new SqliteSessionRepository(Promise.resolve(database));
+
+    const sessions = await repository.list();
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].id).toBe("session-imported");
+    expect(sessions[0].title).toBe("导入的会话");
+    expect(sessions[0].messages).toEqual([]);
+    expect(sessions[0].agentEvents).toEqual([]);
+    // 列表渲染的关键访问路径不抛。
+    expect(sessions[0].messages.at(-1)).toBeUndefined();
+  });
+
   it("maps topologyMutationId onto the stored hasProject column", async () => {
     const database = new MemoryDatabase();
     const repository = new SqliteSessionRepository(Promise.resolve(database));
