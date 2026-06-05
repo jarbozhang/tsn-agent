@@ -433,6 +433,36 @@ mod tests {
     }
 
     #[test]
+    fn apply_operations_rejects_oversized_batch() {
+        tauri::async_runtime::block_on(async {
+            let (pool, buf) = test_state().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+                .execute(&pool).await.unwrap();
+            let (router, token) = build_test_router_with_pool(pool, buf).await;
+
+            let operations: Vec<serde_json::Value> = (0..33)
+                .map(|i| serde_json::json!({
+                    "op": "node_add", "imac": i, "syncName": i.to_string(),
+                    "x": 0.0, "y": 0.0, "syncType": "{}", "insertOrder": i
+                }))
+                .collect();
+            let body = serde_json::json!({ "sessionId": "s1", "operations": operations }).to_string();
+            let resp = router
+                .oneshot(Request::builder().method("POST").uri("/db/topology/apply_operations")
+                    .header("Authorization", format!("Bearer {}", token.expose()))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body)).unwrap())
+                .await.unwrap();
+            assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            let bytes = to_bytes(resp.into_body(), 8192).await.unwrap();
+            let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(parsed["ok"], false);
+            assert_eq!(parsed["code"], "LIMIT_EXCEEDED");
+            assert_eq!(parsed["retryable"], false);
+        });
+    }
+
+    #[test]
     fn apply_operations_inserts_and_mints_mutation_id() {
         tauri::async_runtime::block_on(async {
             let (pool, buf) = test_state().await;
