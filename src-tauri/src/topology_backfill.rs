@@ -413,6 +413,10 @@ async fn mark_failed(pool: &SqlitePool, session_id: &str, code: &str) -> Result<
     Ok(())
 }
 
+/// view_session_payload 的返回上限（plan 2026-06-05-002 U5）：redaction 先看完整
+/// 文本（截断后再 redact 可能把 token 切半逃过模式匹配），随后截断保证 IPC 有界。
+const MAX_PAYLOAD_VIEW_BYTES: usize = 64 * 1024;
+
 #[tauri::command]
 pub async fn view_session_payload(
     app: tauri::AppHandle,
@@ -426,7 +430,24 @@ pub async fn view_session_payload(
         .await
         .map_err(|e| format!("查询 payload 失败：{e}"))?;
     let payload = payload.ok_or_else(|| format!("会话不存在：{}", request.session_id))?;
-    Ok(redact_secrets(&payload))
+    Ok(redact_then_truncate(&payload))
+}
+
+/// redact 全文 → 按字符边界截断到上限，超限追加截断说明。
+fn redact_then_truncate(payload: &str) -> String {
+    let redacted = redact_secrets(payload);
+    if redacted.len() <= MAX_PAYLOAD_VIEW_BYTES {
+        return redacted;
+    }
+    let mut cut = MAX_PAYLOAD_VIEW_BYTES;
+    while !redacted.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!(
+        "{}\n…（已截断，原文 {} 字节）",
+        &redacted[..cut],
+        redacted.len()
+    )
 }
 
 #[cfg(test)]
@@ -462,6 +483,47 @@ mod tests {
                 .fetch_one(&pool).await.unwrap();
             assert_eq!(s2_state, "failed_parse"); // 不被覆盖
         });
+    }
+
+    #[test]
+    fn failed_sessions_have_zero_p0_rows() {
+        // U5 弹窗采用固定强警告（无 P0 行数条件分支）的前提固化：失败会话的
+        // P0 行恒为 0（failed_parse 不进 DELETE；failed_constraint 事务回滚）。
+        // 若未来出现带非空 P0 行的 failed 路径，此测试先红，提示重审弹窗文案策略。
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('bad', 't', 'now', 'now', 'not-json-at-all')")
+                .execute(&pool).await.unwrap();
+            mark_pending_for_all_sessions(&pool).await.unwrap();
+            run_walker_for_pending_sessions(&pool).await.unwrap();
+
+            let state: String = sqlx::query_scalar(
+                "SELECT state FROM session_backfill_state WHERE session_id='bad'",
+            )
+            .fetch_one(&pool).await.unwrap();
+            assert!(state.starts_with("failed_"), "state={state}");
+            let p0_rows: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM topology_nodes WHERE session_id='bad'",
+            )
+            .fetch_one(&pool).await.unwrap();
+            assert_eq!(p0_rows, 0);
+        });
+    }
+
+    #[test]
+    fn payload_view_redacts_before_truncating() {
+        // secret 在截断点之内 → 已打码；超长部分 → 不出现且带截断说明。
+        let secret_part = "api_key=sk-ant-super-secret-token";
+        let long_tail = "x".repeat(80 * 1024);
+        let payload = format!("{secret_part} {long_tail}");
+        let viewed = redact_then_truncate(&payload);
+        assert!(!viewed.contains("sk-ant-super-secret-token"), "secret 必须被打码");
+        assert!(viewed.len() < payload.len());
+        assert!(viewed.contains("已截断"));
+
+        // 不超限的 payload 原样（仅 redact）返回，无截断说明。
+        let short = redact_then_truncate("{\"plain\":true}");
+        assert!(!short.contains("已截断"));
     }
 
     #[test]

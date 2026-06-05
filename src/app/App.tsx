@@ -45,6 +45,13 @@ import {
   type TopologyNodeRow,
   type TopologyRowSnapshot,
 } from "../sessions/topology-snapshot";
+import { invoke } from "@tauri-apps/api/core";
+import { ConfirmDialog } from "../ui/confirm-dialog";
+import {
+  describeBackfillError,
+  useBackfillFailures,
+  type BackfillFailureRow,
+} from "./hooks/use-backfill-failures";
 import { useTopologySnapshot } from "./hooks/use-topology-snapshot";
 import {
   exportCurrentSession,
@@ -101,7 +108,10 @@ export function App() {
   const [transferNotice, setTransferNotice] = useState<
     { kind: "success" | "error"; text: string; path?: string } | undefined
   >();
-  const { snapshot: topologySnapshot } = useTopologySnapshot(currentSession.id);
+  const [retryTargetId, setRetryTargetId] = useState<string | undefined>();
+  const [payloadView, setPayloadView] = useState<{ sessionId: string; text: string } | undefined>();
+  const { snapshot: topologySnapshot, refetch: refetchTopology } = useTopologySnapshot(currentSession.id);
+  const { failures: backfillFailures, refresh: refreshBackfillFailures } = useBackfillFailures();
 
   useEffect(() => {
     let cancelled = false;
@@ -504,6 +514,41 @@ export function App() {
     }
   }
 
+  async function handleViewBackfillPayload(sessionId: string) {
+    try {
+      const text = await invoke<string>("view_session_payload", { request: { sessionId } });
+      setPayloadView({ sessionId, text });
+    } catch (err) {
+      setTransferNotice({ kind: "error", text: `读取原始数据失败：${String(err)}` });
+    }
+  }
+
+  async function handleRetryBackfill() {
+    const sessionId = retryTargetId;
+    if (!sessionId) {
+      return;
+    }
+    setRetryTargetId(undefined);
+    try {
+      await invoke("retry_backfill", { request: { sessionId } });
+      // 三处同步：失败列表、会话列表 badge、当前会话画布（walker 不走 mutation buffer）。
+      await refreshBackfillFailures();
+      setSessions(await repository.list());
+      if (sessionId === currentSession.id) {
+        await refetchTopology();
+      }
+      setTransferNotice({ kind: "success", text: "拓扑已从原始数据重建" });
+      logDiagnostic(diagnosticsRepository, {
+        sessionId,
+        category: "session",
+        message: "重试 backfill 重建",
+        details: { sessionId },
+      });
+    } catch (err) {
+      setTransferNotice({ kind: "error", text: `重建失败：${String(err)}` });
+    }
+  }
+
   function handleNodeSelect(_event: unknown, node: Node) {
     setSelectedTopologyItem({ kind: "node", id: node.id });
     setActiveConfigTab("node-detail");
@@ -539,19 +584,24 @@ export function App() {
         {activeWorkspacePanel && (
           <WorkspaceToolDrawer
             activePanel={activeWorkspacePanel}
+            backfillFailures={backfillFailures}
             currentSession={currentSession}
             diagnosticsRepository={diagnosticsRepository}
+            payloadView={payloadView}
             sessions={sessions}
             transferBusy={isAgentRunning}
             transferNotice={transferNotice}
             onClose={() => setActiveWorkspacePanel(undefined)}
+            onClosePayloadView={() => setPayloadView(undefined)}
             onDeleteSession={handleDeleteSession}
             onDuplicateSession={handleDuplicateSession}
             onExportSession={handleExportSession}
             onImportSession={handleImportSession}
             onNewSession={handleNewSession}
+            onRequestRetry={(sessionId) => setRetryTargetId(sessionId)}
             onRevealExport={(path) => void revealExportedFile(path)}
             onSelectSession={handleSelectSession}
+            onViewPayload={(sessionId) => void handleViewBackfillPayload(sessionId)}
           />
         )}
         <section className="chat-pane" aria-label="对话区">
@@ -778,6 +828,16 @@ export function App() {
           </div>
         </section>
       </main>
+
+      <ConfirmDialog
+        open={retryTargetId !== undefined}
+        title="重建拓扑"
+        body="将从原始数据重建，该会话现有拓扑数据将被替换（包括对话中做过的增量修改）。"
+        confirmLabel="重建"
+        danger
+        onConfirm={() => void handleRetryBackfill()}
+        onCancel={() => setRetryTargetId(undefined)}
+      />
     </div>
   );
 }
@@ -851,34 +911,44 @@ function WorkspaceToolRail({
 
 function WorkspaceToolDrawer({
   activePanel,
+  backfillFailures,
   currentSession,
   diagnosticsRepository,
+  payloadView,
   sessions,
   transferBusy,
   transferNotice,
   onClose,
+  onClosePayloadView,
   onDeleteSession,
   onDuplicateSession,
   onExportSession,
   onImportSession,
   onNewSession,
+  onRequestRetry,
   onRevealExport,
   onSelectSession,
+  onViewPayload,
 }: {
   activePanel: WorkspaceToolPanel;
+  backfillFailures: BackfillFailureRow[];
   currentSession: TsnSession;
   diagnosticsRepository: DiagnosticLogRepository;
+  payloadView: { sessionId: string; text: string } | undefined;
   sessions: TsnSession[];
   transferBusy: boolean;
   transferNotice: { kind: "success" | "error"; text: string; path?: string } | undefined;
   onClose: () => void;
+  onClosePayloadView: () => void;
   onDeleteSession: () => void;
   onDuplicateSession: () => void;
   onExportSession: () => void;
   onImportSession: () => void;
   onNewSession: () => void;
+  onRequestRetry: (sessionId: string) => void;
   onRevealExport: (path: string) => void;
   onSelectSession: (session: TsnSession) => void;
+  onViewPayload: (sessionId: string) => void;
 }) {
   return (
     <aside className="workspace-tool-drawer" aria-label={workspacePanelLabel(activePanel)}>
@@ -894,17 +964,22 @@ function WorkspaceToolDrawer({
 
       {activePanel === "sessions" && (
         <SessionToolPanel
+          backfillFailures={backfillFailures}
           currentSession={currentSession}
+          payloadView={payloadView}
           sessions={sessions}
           transferBusy={transferBusy}
           transferNotice={transferNotice}
+          onClosePayloadView={onClosePayloadView}
           onDeleteSession={onDeleteSession}
           onDuplicateSession={onDuplicateSession}
           onExportSession={onExportSession}
           onImportSession={onImportSession}
           onNewSession={onNewSession}
+          onRequestRetry={onRequestRetry}
           onRevealExport={onRevealExport}
           onSelectSession={onSelectSession}
+          onViewPayload={onViewPayload}
         />
       )}
       {activePanel === "diagnostics" && (
@@ -917,30 +992,41 @@ function WorkspaceToolDrawer({
 }
 
 function SessionToolPanel({
+  backfillFailures,
   currentSession,
+  payloadView,
   sessions,
   transferBusy,
   transferNotice,
+  onClosePayloadView,
   onDeleteSession,
   onDuplicateSession,
   onExportSession,
   onImportSession,
   onNewSession,
+  onRequestRetry,
   onRevealExport,
   onSelectSession,
+  onViewPayload,
 }: {
+  backfillFailures: BackfillFailureRow[];
   currentSession: TsnSession;
+  payloadView: { sessionId: string; text: string } | undefined;
   sessions: TsnSession[];
   transferBusy: boolean;
   transferNotice: { kind: "success" | "error"; text: string; path?: string } | undefined;
+  onClosePayloadView: () => void;
   onDeleteSession: () => void;
   onDuplicateSession: () => void;
   onExportSession: () => void;
   onImportSession: () => void;
   onNewSession: () => void;
+  onRequestRetry: (sessionId: string) => void;
   onRevealExport: (path: string) => void;
   onSelectSession: (session: TsnSession) => void;
+  onViewPayload: (sessionId: string) => void;
 }) {
+  const failedSessionIds = new Set(backfillFailures.map((failure) => failure.sessionId));
   return (
     <>
       <button className="new-session-button" type="button" onClick={onNewSession}>
@@ -961,10 +1047,17 @@ function SessionToolPanel({
               <span className="session-time">{formatTime(session.updatedAt)}</span>
             </div>
             <p className="session-desc">{session.messages.at(-1)?.content ?? "暂无对话"}</p>
-            <span className={session.topologyMutationId ? "badge planned" : "badge draft"}>
-              <span className="badge-dot" />
-              {session.topologyMutationId ? "配置草案" : "空会话"}
-            </span>
+            {failedSessionIds.has(session.id) ? (
+              <span className="badge failed">
+                <span className="badge-dot" />
+                迁移失败
+              </span>
+            ) : (
+              <span className={session.topologyMutationId ? "badge planned" : "badge draft"}>
+                <span className="badge-dot" />
+                {session.topologyMutationId ? "配置草案" : "空会话"}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -1016,6 +1109,59 @@ function SessionToolPanel({
             </button>
           )}
         </p>
+      )}
+
+      {backfillFailures.length > 0 && (
+        <div className="backfill-failures" aria-label="待恢复会话">
+          <p className="drawer-kicker">待恢复会话</p>
+          {backfillFailures.map((failure) => (
+            <div className="backfill-failure-item" key={failure.sessionId}>
+              <div className="failure-row1">
+                <span className="failure-desc">{describeBackfillError(failure.errorCode)}</span>
+                <span className="failure-session mono">{failure.sessionId.slice(0, 18)}</span>
+              </div>
+              <div className="failure-actions">
+                <button
+                  className="link-button"
+                  type="button"
+                  onClick={() => onViewPayload(failure.sessionId)}
+                >
+                  查看原始数据
+                </button>
+                <button
+                  className="btn danger"
+                  type="button"
+                  disabled={transferBusy}
+                  title={transferBusy ? "智能助手运行中，暂不可重建" : "从原始数据重建该会话的拓扑"}
+                  onClick={() => onRequestRetry(failure.sessionId)}
+                >
+                  重建
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {payloadView && (
+        <div className="payload-view" aria-label="原始数据预览">
+          <div className="payload-view-header">
+            <span className="mono">{payloadView.sessionId.slice(0, 18)}</span>
+            <div className="failure-actions">
+              <button
+                className="link-button"
+                type="button"
+                onClick={() => void navigator.clipboard?.writeText(payloadView.text)}
+              >
+                复制全部
+              </button>
+              <button className="link-button" type="button" onClick={onClosePayloadView}>
+                关闭
+              </button>
+            </div>
+          </div>
+          <pre className="payload-view-body">{payloadView.text}</pre>
+        </div>
       )}
     </>
   );

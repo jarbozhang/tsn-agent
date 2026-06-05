@@ -2392,3 +2392,75 @@ textarea:focus-visible {
   text-align: left;
   text-decoration: underline;
 }
+
+/* Backfill 失败恢复（plan 2026-06-05-002 U5） */
+.badge.failed {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.backfill-failures {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.backfill-failure-item {
+  border: 1px solid #fecaca;
+  background: #fff7f7;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.failure-row1 {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.failure-desc {
+  color: #b91c1c;
+}
+
+.failure-session {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.failure-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.payload-view {
+  margin-top: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.payload-view-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  background: #f8fafc;
+  font-size: 11px;
+}
+
+.payload-view-body {
+  margin: 0;
+  padding: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
