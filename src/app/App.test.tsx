@@ -9,6 +9,13 @@ import { App } from "./App";
 const runTsnAgentMock = vi.hoisted(() => vi.fn());
 const invokeMock = vi.hoisted(() => vi.fn());
 const listenMock = vi.hoisted(() => vi.fn());
+const dialogSaveMock = vi.hoisted(() => vi.fn());
+const dialogOpenMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  save: dialogSaveMock,
+  open: dialogOpenMock,
+}));
 
 vi.mock("@xyflow/react", () => ({
   Background: () => null,
@@ -163,6 +170,8 @@ describe("App", () => {
     runTsnAgentMock.mockReset();
     invokeMock.mockReset();
     listenMock.mockReset();
+    dialogSaveMock.mockReset();
+    dialogOpenMock.mockReset();
     listenMock.mockResolvedValue(vi.fn());
     Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
     runTsnAgentMock.mockImplementation(async () => topologyAgentResult());
@@ -223,6 +232,65 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "会话" }));
     const sessionList = screen.getByLabelText("最近会话");
     expect(within(sessionList).getAllByText("我需要4个交换机，每个交换机连接5个端系统").length).toBeGreaterThan(0);
+  });
+
+  it("renders export/import entries in the session panel", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "会话" }));
+
+    expect(screen.getByRole("button", { name: "导出当前" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "导入会话" })).toBeEnabled();
+  });
+
+  it("stays silent when the export save dialog is dismissed", async () => {
+    const user = userEvent.setup();
+    dialogSaveMock.mockResolvedValue(null);
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "会话" }));
+    await user.click(screen.getByRole("button", { name: "导出当前" }));
+
+    expect(dialogSaveMock).toHaveBeenCalled();
+    expect(invokeMock).not.toHaveBeenCalledWith("export_session", expect.anything());
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("imports a session file and surfaces the success notice", async () => {
+    const user = userEvent.setup();
+    dialogOpenMock.mockResolvedValue("/tmp/in.db");
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "import_session") {
+        return { sessionId: "session-imported" };
+      }
+      return undefined;
+    });
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "会话" }));
+    await user.click(screen.getByRole("button", { name: "导入会话" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("会话已导入")).toBeInTheDocument();
+    });
+    expect(invokeMock).toHaveBeenCalledWith("import_session", {
+      request: { sourcePath: "/tmp/in.db" },
+    });
+  });
+
+  it("disables export/import while the agent is running", async () => {
+    const user = userEvent.setup();
+    // pending promise 模拟 agent 运行中。
+    runTsnAgentMock.mockImplementation(() => new Promise(() => {}));
+    render(<App />);
+
+    await typeDefaultIntent(user);
+    await user.click(screen.getByRole("button", { name: "生成规划草案" }));
+
+    await user.click(screen.getByRole("button", { name: "会话" }));
+    expect(screen.getByRole("button", { name: "导出当前" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "导入会话" })).toBeDisabled();
   });
 
   it("submits a continuation when the user confirms the waiting stage", async () => {

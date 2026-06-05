@@ -3,11 +3,13 @@ import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node
 import "@xyflow/react/dist/style.css";
 import {
   Copy,
+  Download,
   FolderOpen,
   Plus,
   ScrollText,
   Settings,
   Trash2,
+  Upload,
   Wrench,
   X,
 } from "lucide-react";
@@ -44,6 +46,11 @@ import {
   type TopologyRowSnapshot,
 } from "../sessions/topology-snapshot";
 import { useTopologySnapshot } from "./hooks/use-topology-snapshot";
+import {
+  exportCurrentSession,
+  importSessionFromFile,
+  revealExportedFile,
+} from "./session-transfer";
 import {
   SKILL_CATALOG,
   type SkillCatalogItem,
@@ -91,6 +98,9 @@ export function App() {
   const [activeConfigTab, setActiveConfigTab] = useState<ConfigTabId>("node-detail");
   const [selectedTopologyItem, setSelectedTopologyItem] = useState<SelectedTopologyItem | undefined>();
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const [transferNotice, setTransferNotice] = useState<
+    { kind: "success" | "error"; text: string; path?: string } | undefined
+  >();
   const { snapshot: topologySnapshot } = useTopologySnapshot(currentSession.id);
 
   useEffect(() => {
@@ -450,6 +460,50 @@ export function App() {
     setActiveWorkspacePanel(undefined);
   }
 
+  async function handleExportSession() {
+    if (isAgentRunning) {
+      return;
+    }
+    const outcome = await exportCurrentSession(currentSession.id, currentSession.title);
+    if (outcome.status === "done") {
+      setTransferNotice({ kind: "success", text: `已导出到 ${outcome.path}`, path: outcome.path });
+      logDiagnostic(diagnosticsRepository, {
+        sessionId: currentSession.id,
+        category: "session",
+        message: "导出会话",
+        details: { targetPath: outcome.path },
+      });
+    } else if (outcome.status === "error") {
+      setTransferNotice({ kind: "error", text: outcome.message });
+    }
+    // cancelled → 静默（用户主动关闭对话框）。
+  }
+
+  async function handleImportSession() {
+    if (isAgentRunning) {
+      return;
+    }
+    const outcome = await importSessionFromFile();
+    if (outcome.status === "done") {
+      const list = await repository.list();
+      setSessions(list);
+      const imported = list.find((session) => session.id === outcome.sessionId);
+      if (imported) {
+        await repository.setCurrent(imported.id);
+        setCurrentSession(imported);
+      }
+      setTransferNotice({ kind: "success", text: "会话已导入" });
+      logDiagnostic(diagnosticsRepository, {
+        sessionId: outcome.sessionId,
+        category: "session",
+        message: "导入会话",
+        details: { sessionId: outcome.sessionId },
+      });
+    } else if (outcome.status === "error") {
+      setTransferNotice({ kind: "error", text: outcome.message });
+    }
+  }
+
   function handleNodeSelect(_event: unknown, node: Node) {
     setSelectedTopologyItem({ kind: "node", id: node.id });
     setActiveConfigTab("node-detail");
@@ -488,10 +542,15 @@ export function App() {
             currentSession={currentSession}
             diagnosticsRepository={diagnosticsRepository}
             sessions={sessions}
+            transferBusy={isAgentRunning}
+            transferNotice={transferNotice}
             onClose={() => setActiveWorkspacePanel(undefined)}
             onDeleteSession={handleDeleteSession}
             onDuplicateSession={handleDuplicateSession}
+            onExportSession={handleExportSession}
+            onImportSession={handleImportSession}
             onNewSession={handleNewSession}
+            onRevealExport={(path) => void revealExportedFile(path)}
             onSelectSession={handleSelectSession}
           />
         )}
@@ -795,20 +854,30 @@ function WorkspaceToolDrawer({
   currentSession,
   diagnosticsRepository,
   sessions,
+  transferBusy,
+  transferNotice,
   onClose,
   onDeleteSession,
   onDuplicateSession,
+  onExportSession,
+  onImportSession,
   onNewSession,
+  onRevealExport,
   onSelectSession,
 }: {
   activePanel: WorkspaceToolPanel;
   currentSession: TsnSession;
   diagnosticsRepository: DiagnosticLogRepository;
   sessions: TsnSession[];
+  transferBusy: boolean;
+  transferNotice: { kind: "success" | "error"; text: string; path?: string } | undefined;
   onClose: () => void;
   onDeleteSession: () => void;
   onDuplicateSession: () => void;
+  onExportSession: () => void;
+  onImportSession: () => void;
   onNewSession: () => void;
+  onRevealExport: (path: string) => void;
   onSelectSession: (session: TsnSession) => void;
 }) {
   return (
@@ -827,9 +896,14 @@ function WorkspaceToolDrawer({
         <SessionToolPanel
           currentSession={currentSession}
           sessions={sessions}
+          transferBusy={transferBusy}
+          transferNotice={transferNotice}
           onDeleteSession={onDeleteSession}
           onDuplicateSession={onDuplicateSession}
+          onExportSession={onExportSession}
+          onImportSession={onImportSession}
           onNewSession={onNewSession}
+          onRevealExport={onRevealExport}
           onSelectSession={onSelectSession}
         />
       )}
@@ -845,16 +919,26 @@ function WorkspaceToolDrawer({
 function SessionToolPanel({
   currentSession,
   sessions,
+  transferBusy,
+  transferNotice,
   onDeleteSession,
   onDuplicateSession,
+  onExportSession,
+  onImportSession,
   onNewSession,
+  onRevealExport,
   onSelectSession,
 }: {
   currentSession: TsnSession;
   sessions: TsnSession[];
+  transferBusy: boolean;
+  transferNotice: { kind: "success" | "error"; text: string; path?: string } | undefined;
   onDeleteSession: () => void;
   onDuplicateSession: () => void;
+  onExportSession: () => void;
+  onImportSession: () => void;
   onNewSession: () => void;
+  onRevealExport: (path: string) => void;
   onSelectSession: (session: TsnSession) => void;
 }) {
   return (
@@ -895,6 +979,44 @@ function SessionToolPanel({
           删除当前
         </button>
       </div>
+
+      <div className="drawer-actions">
+        <button
+          className="btn"
+          type="button"
+          disabled={transferBusy}
+          title={transferBusy ? "智能助手运行中，暂不可导出" : "把当前会话的拓扑数据导出为文件"}
+          onClick={onExportSession}
+        >
+          <Download size={15} aria-hidden="true" />
+          导出当前
+        </button>
+        <button
+          className="btn"
+          type="button"
+          disabled={transferBusy}
+          title={transferBusy ? "智能助手运行中，暂不可导入" : "从导出文件导入会话"}
+          onClick={onImportSession}
+        >
+          <Upload size={15} aria-hidden="true" />
+          导入会话
+        </button>
+      </div>
+
+      {transferNotice && (
+        <p className={`transfer-notice ${transferNotice.kind}`} role="status">
+          <span>{transferNotice.text}</span>
+          {transferNotice.path && (
+            <button
+              className="link-button"
+              type="button"
+              onClick={() => onRevealExport(transferNotice.path!)}
+            >
+              在 Finder 中显示
+            </button>
+          )}
+        </p>
+      )}
     </>
   );
 }

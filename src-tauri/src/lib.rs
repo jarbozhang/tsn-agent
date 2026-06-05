@@ -100,6 +100,7 @@ pub fn run() {
             project_writer::suggest_project_export_dir,
             project_writer::write_project_artifacts,
             session_export::export_session,
+            session_export::reveal_in_dir,
             session_import::import_session,
             topology_backfill::list_backfill_failures,
             topology_backfill::retry_backfill,

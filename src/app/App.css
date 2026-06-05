@@ -2359,3 +2359,36 @@ textarea:focus-visible {
   background: #dc2626;
   color: #fff;
 }
+
+/* 会话导出/导入反馈（plan 2026-06-05-002 U4） */
+.transfer-notice {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.transfer-notice.success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.transfer-notice.error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: #2563eb;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+}

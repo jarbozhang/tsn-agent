@@ -29,6 +29,20 @@ pub struct ExportSessionRequest {
     target_path: String,
 }
 
+/// 在系统文件管理器中显示导出文件（U4 成功反馈的「在 Finder 中显示」）。
+/// 走 Rust 端 opener 插件（既有依赖），不引入 @tauri-apps/plugin-opener JS 包。
+#[tauri::command]
+pub fn reveal_in_dir(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let target = PathBuf::from(&path);
+    if !target.is_absolute() || !target.exists() {
+        return Err(format!("路径不存在：{path}"));
+    }
+    app.opener()
+        .reveal_item_in_dir(&target)
+        .map_err(|e| format!("无法打开文件位置：{e}"))
+}
+
 #[tauri::command]
 pub async fn export_session(
     app: tauri::AppHandle,
