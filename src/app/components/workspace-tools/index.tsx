@@ -1,11 +1,13 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import {
   Copy,
+  Download,
   FolderOpen,
   Plus,
   ScrollText,
   Settings,
   Trash2,
+  Upload,
   Wrench,
   X,
 } from "lucide-react";
@@ -18,6 +20,8 @@ import { appVersion, releaseNotes, type ReleaseNote } from "../../../release/rel
 import type { TsnSession } from "../../../sessions/session-repository";
 import { SKILL_CATALOG, type SkillCatalogItem } from "../../../skills/skill-catalog";
 import { DetailRow, formatTime } from "../shared";
+import { describeBackfillError, type BackfillFailureRow } from "../../hooks/use-backfill-failures";
+import type { TransferNotice } from "../../session-transfer";
 
 export type WorkspaceToolPanel = "sessions" | "diagnostics" | "skills" | "settings";
 
@@ -27,10 +31,20 @@ export interface WorkspaceToolsProps {
   currentSession: TsnSession;
   sessions: TsnSession[];
   diagnosticsRepository: DiagnosticLogRepository;
+  backfillFailures: BackfillFailureRow[];
+  transferNotice: TransferNotice | undefined;
+  transferBusy: boolean;
+  payloadView: { sessionId: string; text: string } | undefined;
   onNewSession: () => void;
   onSelectSession: (session: TsnSession) => void;
   onDuplicateSession: () => void;
   onDeleteSession: () => void;
+  onExportSession: () => void;
+  onImportSession: () => void;
+  onViewPayload: (sessionId: string) => void;
+  onRequestRetry: (sessionId: string) => void;
+  onRevealExport: (path: string) => void;
+  onClosePayloadView: () => void;
 }
 
 export function WorkspaceTools({
@@ -39,10 +53,20 @@ export function WorkspaceTools({
   currentSession,
   sessions,
   diagnosticsRepository,
+  backfillFailures,
+  transferNotice,
+  transferBusy,
+  payloadView,
   onNewSession,
   onSelectSession,
   onDuplicateSession,
   onDeleteSession,
+  onExportSession,
+  onImportSession,
+  onViewPayload,
+  onRequestRetry,
+  onRevealExport,
+  onClosePayloadView,
 }: WorkspaceToolsProps) {
   return (
     <>
@@ -56,11 +80,21 @@ export function WorkspaceTools({
           currentSession={currentSession}
           diagnosticsRepository={diagnosticsRepository}
           sessions={sessions}
+          backfillFailures={backfillFailures}
+          transferNotice={transferNotice}
+          transferBusy={transferBusy}
+          payloadView={payloadView}
           onClose={() => setActivePanel(undefined)}
           onDeleteSession={onDeleteSession}
           onDuplicateSession={onDuplicateSession}
           onNewSession={onNewSession}
           onSelectSession={onSelectSession}
+          onExportSession={onExportSession}
+          onImportSession={onImportSession}
+          onViewPayload={onViewPayload}
+          onRequestRetry={onRequestRetry}
+          onRevealExport={onRevealExport}
+          onClosePayloadView={onClosePayloadView}
         />
       )}
     </>
@@ -108,21 +142,41 @@ function WorkspaceToolDrawer({
   currentSession,
   diagnosticsRepository,
   sessions,
+  backfillFailures,
+  transferNotice,
+  transferBusy,
+  payloadView,
   onClose,
   onDeleteSession,
   onDuplicateSession,
   onNewSession,
   onSelectSession,
+  onExportSession,
+  onImportSession,
+  onViewPayload,
+  onRequestRetry,
+  onRevealExport,
+  onClosePayloadView,
 }: {
   activePanel: WorkspaceToolPanel;
   currentSession: TsnSession;
   diagnosticsRepository: DiagnosticLogRepository;
   sessions: TsnSession[];
+  backfillFailures: BackfillFailureRow[];
+  transferNotice: TransferNotice | undefined;
+  transferBusy: boolean;
+  payloadView: { sessionId: string; text: string } | undefined;
   onClose: () => void;
   onDeleteSession: () => void;
   onDuplicateSession: () => void;
   onNewSession: () => void;
   onSelectSession: (session: TsnSession) => void;
+  onExportSession: () => void;
+  onImportSession: () => void;
+  onViewPayload: (sessionId: string) => void;
+  onRequestRetry: (sessionId: string) => void;
+  onRevealExport: (path: string) => void;
+  onClosePayloadView: () => void;
 }) {
   return (
     <aside className="workspace-tool-drawer" aria-label={workspacePanelLabel(activePanel)}>
@@ -140,10 +194,20 @@ function WorkspaceToolDrawer({
         <SessionToolPanel
           currentSession={currentSession}
           sessions={sessions}
+          backfillFailures={backfillFailures}
+          transferNotice={transferNotice}
+          transferBusy={transferBusy}
+          payloadView={payloadView}
           onDeleteSession={onDeleteSession}
           onDuplicateSession={onDuplicateSession}
           onNewSession={onNewSession}
           onSelectSession={onSelectSession}
+          onExportSession={onExportSession}
+          onImportSession={onImportSession}
+          onViewPayload={onViewPayload}
+          onRequestRetry={onRequestRetry}
+          onRevealExport={onRevealExport}
+          onClosePayloadView={onClosePayloadView}
         />
       )}
       {activePanel === "diagnostics" && (
@@ -158,18 +222,39 @@ function WorkspaceToolDrawer({
 function SessionToolPanel({
   currentSession,
   sessions,
+  backfillFailures,
+  transferNotice,
+  transferBusy,
+  payloadView,
   onDeleteSession,
   onDuplicateSession,
   onNewSession,
   onSelectSession,
+  onExportSession,
+  onImportSession,
+  onViewPayload,
+  onRequestRetry,
+  onRevealExport,
+  onClosePayloadView,
 }: {
   currentSession: TsnSession;
   sessions: TsnSession[];
+  backfillFailures: BackfillFailureRow[];
+  transferNotice: TransferNotice | undefined;
+  transferBusy: boolean;
+  payloadView: { sessionId: string; text: string } | undefined;
   onDeleteSession: () => void;
   onDuplicateSession: () => void;
   onNewSession: () => void;
   onSelectSession: (session: TsnSession) => void;
+  onExportSession: () => void;
+  onImportSession: () => void;
+  onViewPayload: (sessionId: string) => void;
+  onRequestRetry: (sessionId: string) => void;
+  onRevealExport: (path: string) => void;
+  onClosePayloadView: () => void;
 }) {
+  const failedSessionIds = new Set(backfillFailures.map((failure) => failure.sessionId));
   return (
     <>
       <button className="new-session-button" type="button" onClick={onNewSession}>
@@ -190,10 +275,17 @@ function SessionToolPanel({
               <span className="session-time">{formatTime(session.updatedAt)}</span>
             </div>
             <p className="session-desc">{session.messages.at(-1)?.content ?? "暂无对话"}</p>
-            <span className={session.topologyMutationId ? "badge planned" : "badge draft"}>
-              <span className="badge-dot" />
-              {session.topologyMutationId ? "配置草案" : "空会话"}
-            </span>
+            {failedSessionIds.has(session.id) ? (
+              <span className="badge failed">
+                <span className="badge-dot" />
+                迁移失败
+              </span>
+            ) : (
+              <span className={session.topologyMutationId ? "badge planned" : "badge draft"}>
+                <span className="badge-dot" />
+                {session.topologyMutationId ? "配置草案" : "空会话"}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -208,6 +300,97 @@ function SessionToolPanel({
           删除当前
         </button>
       </div>
+
+      <div className="drawer-actions">
+        <button
+          className="btn"
+          type="button"
+          disabled={transferBusy}
+          title={transferBusy ? "智能助手运行中，暂不可导出" : "把当前会话的拓扑数据导出为文件"}
+          onClick={onExportSession}
+        >
+          <Download size={15} aria-hidden="true" />
+          导出当前
+        </button>
+        <button
+          className="btn"
+          type="button"
+          disabled={transferBusy}
+          title={transferBusy ? "智能助手运行中，暂不可导入" : "从导出文件导入会话"}
+          onClick={onImportSession}
+        >
+          <Upload size={15} aria-hidden="true" />
+          导入会话
+        </button>
+      </div>
+
+      {transferNotice && (
+        <p className={`transfer-notice ${transferNotice.kind}`} role="status">
+          <span>{transferNotice.text}</span>
+          {transferNotice.path && (
+            <button
+              className="link-button"
+              type="button"
+              onClick={() => transferNotice.path && onRevealExport(transferNotice.path)}
+            >
+              在 Finder 中显示
+            </button>
+          )}
+        </p>
+      )}
+
+      {backfillFailures.length > 0 && (
+        <div className="backfill-failures" aria-label="待恢复会话">
+          <p className="drawer-kicker">待恢复会话</p>
+          {backfillFailures.map((failure) => (
+            <div className="backfill-failure-item" key={failure.sessionId}>
+              <div className="failure-row1">
+                <span className="failure-desc">{describeBackfillError(failure.errorCode)}</span>
+                <span className="failure-session mono">{failure.sessionId.slice(0, 18)}</span>
+              </div>
+              <div className="failure-actions">
+                <button
+                  className="link-button"
+                  type="button"
+                  onClick={() => onViewPayload(failure.sessionId)}
+                >
+                  查看原始数据
+                </button>
+                <button
+                  className="btn danger"
+                  type="button"
+                  disabled={transferBusy}
+                  title={transferBusy ? "智能助手运行中，暂不可重建" : "从原始数据重建该会话的拓扑"}
+                  onClick={() => onRequestRetry(failure.sessionId)}
+                >
+                  重建
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {payloadView && (
+        <div className="payload-view" aria-label="原始数据预览">
+          <div className="payload-view-header">
+            <span className="mono">{payloadView.sessionId.slice(0, 18)}</span>
+            <div className="failure-actions">
+              <button
+                className="link-button"
+                type="button"
+                onClick={() => void navigator.clipboard?.writeText(payloadView.text)}
+              >
+                复制全部
+              </button>
+              <button className="link-button" type="button" onClick={onClosePayloadView}>
+                关闭
+              </button>
+            </div>
+          </div>
+          <pre className="payload-view-body">{payloadView.text}</pre>
+        </div>
+      )}
     </>
   );
 }

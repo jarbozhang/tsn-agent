@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { runTsnAgent } from "../agent/agent-adapter";
@@ -25,6 +26,9 @@ import { isEmptyTopologySnapshot } from "../sessions/topology-snapshot";
 import { useTopologySnapshot } from "./hooks/use-topology-snapshot";
 import { useSessionRepository } from "./hooks/use-session-repository";
 import { useAgentRunController } from "./hooks/use-agent-run-controller";
+import { useBackfillFailures } from "./hooks/use-backfill-failures";
+import { exportCurrentSession, importSessionFromFile, revealExportedFile, type TransferNotice } from "./session-transfer";
+import { ConfirmDialog } from "../ui/confirm-dialog";
 import { ChatPane, AgentRunStatusBar } from "./components/chat-pane";
 import {
   WorkspacePane,
@@ -64,7 +68,11 @@ export function App() {
   } = useAgentRunController({ scrollDeps: [currentSession.id, currentSession.messages] });
   const [activeConfigTab, setActiveConfigTab] = useState<ConfigTabId>("node-detail");
   const [selectedTopologyItem, setSelectedTopologyItem] = useState<SelectedTopologyItem | undefined>();
-  const topologySnapshot = useTopologySnapshot(currentSession.id);
+  const { snapshot: topologySnapshot, refetch: refetchTopology } = useTopologySnapshot(currentSession.id);
+  const [transferNotice, setTransferNotice] = useState<TransferNotice | undefined>();
+  const [retryTargetId, setRetryTargetId] = useState<string | undefined>();
+  const [payloadView, setPayloadView] = useState<{ sessionId: string; text: string } | undefined>();
+  const { failures: backfillFailures, refresh: refreshBackfillFailures } = useBackfillFailures();
 
   useEffect(() => {
     setActiveConfigTab("node-detail");
@@ -258,6 +266,83 @@ export function App() {
     setActiveConfigTab("link-detail");
   }
 
+  async function handleExportSession() {
+    if (isAgentRunning) {
+      return;
+    }
+    const outcome = await exportCurrentSession(currentSession.id, currentSession.title);
+    if (outcome.status === "done") {
+      setTransferNotice({ kind: "success", text: `已导出到 ${outcome.path}`, path: outcome.path });
+      logDiagnostic(diagnosticsRepository, {
+        sessionId: currentSession.id,
+        category: "session",
+        message: "导出会话",
+        details: { targetPath: outcome.path },
+      });
+    } else if (outcome.status === "error") {
+      setTransferNotice({ kind: "error", text: outcome.message });
+    }
+  }
+
+  async function handleImportSession() {
+    if (isAgentRunning) {
+      return;
+    }
+    const outcome = await importSessionFromFile();
+    if (outcome.status === "done") {
+      await reloadSessionsList();
+      const imported = (await repository.list()).find((session) => session.id === outcome.sessionId);
+      if (imported) {
+        await repository.setCurrent(imported.id);
+        setCurrentSession(imported);
+      }
+      setTransferNotice({ kind: "success", text: "会话已导入" });
+      logDiagnostic(diagnosticsRepository, {
+        sessionId: outcome.sessionId,
+        category: "session",
+        message: "导入会话",
+        details: { sessionId: outcome.sessionId },
+      });
+    } else if (outcome.status === "error") {
+      setTransferNotice({ kind: "error", text: outcome.message });
+    }
+  }
+
+  async function handleViewBackfillPayload(sessionId: string) {
+    try {
+      const text = await invoke<string>("view_session_payload", { request: { sessionId } });
+      setPayloadView({ sessionId, text });
+    } catch (err) {
+      setTransferNotice({ kind: "error", text: `读取原始数据失败：${String(err)}` });
+    }
+  }
+
+  async function handleRetryBackfill() {
+    const sessionId = retryTargetId;
+    if (!sessionId) {
+      return;
+    }
+    setRetryTargetId(undefined);
+    try {
+      await invoke("retry_backfill", { request: { sessionId } });
+      if (sessionId === currentSession.id) {
+        await refetchTopology();
+      }
+      setTransferNotice({ kind: "success", text: "拓扑已从原始数据重建" });
+      logDiagnostic(diagnosticsRepository, {
+        sessionId,
+        category: "session",
+        message: "重试 backfill 重建",
+        details: { sessionId },
+      });
+    } catch (err) {
+      setTransferNotice({ kind: "error", text: `重建失败：${String(err)}` });
+    } finally {
+      await refreshBackfillFailures();
+      await reloadSessionsList();
+    }
+  }
+
   return (
     <div className="app-shell" aria-busy={isAgentRunning}>
       <header className="brand-header">
@@ -282,10 +367,20 @@ export function App() {
           currentSession={currentSession}
           sessions={sessions}
           diagnosticsRepository={diagnosticsRepository}
+          backfillFailures={backfillFailures}
+          transferNotice={transferNotice}
+          transferBusy={isAgentRunning}
+          payloadView={payloadView}
           onNewSession={handleNewSession}
           onSelectSession={handleSelectSession}
           onDuplicateSession={handleDuplicateSession}
           onDeleteSession={handleDeleteSession}
+          onExportSession={handleExportSession}
+          onImportSession={handleImportSession}
+          onViewPayload={(sessionId) => void handleViewBackfillPayload(sessionId)}
+          onRequestRetry={(sessionId) => setRetryTargetId(sessionId)}
+          onRevealExport={(path) => void revealExportedFile(path)}
+          onClosePayloadView={() => setPayloadView(undefined)}
         />
         <ChatPane
           scenarioConfig={scenarioConfig}
@@ -312,6 +407,16 @@ export function App() {
           onLinkSelect={handleLinkSelect}
         />
       </main>
+
+      <ConfirmDialog
+        open={retryTargetId !== undefined}
+        title="重建拓扑"
+        body="将从原始数据重建，该会话现有拓扑数据将被替换（包括对话中做过的增量修改）。"
+        confirmLabel="重建"
+        danger
+        onConfirm={() => void handleRetryBackfill()}
+        onCancel={() => setRetryTargetId(undefined)}
+      />
     </div>
   );
 }
