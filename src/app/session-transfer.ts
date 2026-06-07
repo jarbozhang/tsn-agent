@@ -12,6 +12,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { createId } from "../sessions/session-repository";
 
+export type TransferNotice = { kind: "success" | "error"; text: string; path?: string };
+
 export type ExportOutcome =
   | { status: "done"; path: string }
   | { status: "cancelled" }
