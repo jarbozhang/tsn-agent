@@ -219,6 +219,21 @@ function WorkspaceToolDrawer({
   );
 }
 
+/**
+ * 会话列表预览取最后一条自然语言消息。
+ * 工具调用/结果以 `[工具]` 开头存进 assistant 消息（agent 渲染层约定），
+ * 列表不展示这类内部 trace，回退到最近的对话内容。
+ */
+function sessionPreview(messages: TsnSession["messages"]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const content = messages[i]?.content ?? "";
+    if (!content.startsWith("[工具]")) {
+      return content;
+    }
+  }
+  return "暂无对话";
+}
+
 function SessionToolPanel({
   currentSession,
   sessions,
@@ -274,7 +289,7 @@ function SessionToolPanel({
               <span className="session-title">{session.title}</span>
               <span className="session-time">{formatTime(session.updatedAt)}</span>
             </div>
-            <p className="session-desc">{session.messages.at(-1)?.content ?? "暂无对话"}</p>
+            <p className="session-desc">{sessionPreview(session.messages)}</p>
             {failedSessionIds.has(session.id) ? (
               <span className="badge failed">
                 <span className="badge-dot" />
