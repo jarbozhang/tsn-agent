@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -150,6 +151,9 @@ fn run_claude_agent_blocking(
         .env("TSN_AGENT_SESSION_ID", &app_session_id_for_env)
         // CLAUDECODE=1 在 Claude Code 进程下会被 SDK 拒绝（Spike B + plan v3 KTD）。
         .env_remove("CLAUDECODE")
+        // 审计 P1#3：worker 独立进程组（pgid = worker pid），超时可 kill(-pgid)
+        // 连根端掉 SDK 拉起的 MCP child，避免孤儿进程继续持有 DB_RPC_TOKEN。
+        .process_group(0)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -177,6 +181,8 @@ fn run_claude_agent_blocking(
         None,
         serde_json::json!({ "workerPath": worker_path.display().to_string() }),
     );
+    // process_group(0) 后 worker 是组长，pgid 等于其 pid。
+    let worker_pgid = child.id() as i32;
     let started_at = Instant::now();
     let stdout = child
         .stdout
@@ -206,7 +212,11 @@ fn run_claude_agent_blocking(
         match child.try_wait() {
             Ok(Some(_status)) => break,
             Ok(None) if started_at.elapsed() > CLAUDE_BRIDGE_SYNC_TIMEOUT => {
-                let _ = child.kill();
+                // 向整个进程组发 SIGKILL：worker + SDK 拉起的 MCP child 一并端掉，
+                // 避免孤儿进程继续持有 sidecar 的 DB_RPC_TOKEN（审计 P1#3）。
+                unsafe {
+                    libc::kill(-worker_pgid, libc::SIGKILL);
+                }
                 let _ = child.wait();
                 log_worker_event(
                     &app,
@@ -731,5 +741,61 @@ mod tests {
         let error = validate_prompt(&long_prompt).expect_err("long prompt fails");
 
         assert!(error.contains("输入过长"));
+    }
+
+    /// 审计 P1#3：验证 process_group(0) + libc::kill(-pgid) 能连根端掉组长
+    /// 之外的组成员——模拟 worker 超时时一并杀掉 SDK 拉起的 MCP child，
+    /// 不让其成为继续持有 DB_RPC_TOKEN 的孤儿进程。
+    #[test]
+    fn process_group_kill_terminates_member_process() {
+        // 组长 shell 后台起一个长命 sleep（模拟 MCP child），打印其 pid 后阻塞。
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("sleep 120 & echo $!; wait")
+            .process_group(0)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn group leader");
+        // process_group(0) 后组长即组员，pgid 等于其 pid。
+        let pgid = child.id() as i32;
+
+        // 读出组员 pid（read_line 读到换行即返回，不等 EOF）。
+        let stdout = child.stdout.take().expect("stdout");
+        let mut first_line = String::new();
+        BufReader::new(stdout)
+            .read_line(&mut first_line)
+            .expect("read member pid");
+        let member_pid: i32 = first_line.trim().parse().expect("member pid");
+
+        // kill 前组员应存活（signal 0 探活：0 = 存在且有权限）。
+        assert_eq!(
+            unsafe { libc::kill(member_pid, 0) },
+            0,
+            "member should be alive before group kill"
+        );
+
+        // 向整个进程组发 SIGKILL：组长 + 组员一并端掉。
+        unsafe {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
+        let _ = child.wait();
+
+        // 轮询确认组员被回收（kill(pid,0) == -1 / ESRCH）。
+        let mut dead = false;
+        for _ in 0..100 {
+            if unsafe { libc::kill(member_pid, 0) } == -1 {
+                dead = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // 防御性收尾，避免极端情况下残留。
+        unsafe {
+            libc::kill(member_pid, libc::SIGKILL);
+        }
+        assert!(
+            dead,
+            "member ({member_pid}) must be killed via process-group SIGKILL"
+        );
     }
 }
