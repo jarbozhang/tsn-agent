@@ -132,4 +132,20 @@ describe("WorkspaceTools", () => {
     await user.click(screen.getByRole("button", { name: /重建/ }));
     expect(onRequestRetry).toHaveBeenCalledWith(session.id);
   });
+
+  it("会话预览跳过工具消息，回退到最近的自然语言对话", () => {
+    const session = createEmptySession();
+    session.messages = [
+      { id: "m1", role: "user", content: "在最右边添加一个交换机", createdAt: "2026-06-08T00:00:00Z" },
+      {
+        id: "m2",
+        role: "assistant",
+        content: '[工具] mcp__tsn_topology__topology_inspect: {}\n[工具结果] mcp__tsn_topology__topology_inspect 已返回: { "ok": true }',
+        createdAt: "2026-06-08T00:00:01Z",
+      },
+    ];
+    render(<WorkspaceTools {...baseProps({ activePanel: "sessions", currentSession: session, sessions: [session] })} />);
+    expect(screen.getByText("在最右边添加一个交换机")).toBeInTheDocument();
+    expect(screen.queryByText(/\[工具\]/)).not.toBeInTheDocument();
+  });
 });

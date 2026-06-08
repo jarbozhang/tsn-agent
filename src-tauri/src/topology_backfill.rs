@@ -15,7 +15,8 @@
 //!
 //! 失败状态码：
 //!   - `PAYLOAD_NOT_JSON`：payload 不是合法 JSON
-//!   - `CANONICAL_SCHEMA_INVALID`：schemaVersion 缺失或 topology 字段不规范
+//!   - `CANONICAL_SCHEMA_INVALID`：schemaVersion 为 canonical.v0 但 topology 字段不规范
+//!     （schemaVersion 缺失/非 canonical.v0 = 新格式 session，视为无需迁移 → completed_walker）
 //!   - `CONSTRAINT_VIOLATION:<col>`：SQLite 写入失败（一般是引用未知 imac）
 //!
 //! 当前 unit 提供：
@@ -44,6 +45,9 @@ pub async fn mark_pending_for_all_sessions(pool: &SqlitePool) -> Result<u64, Str
              FROM sessions s
             WHERE NOT EXISTS (
                   SELECT 1 FROM session_backfill_state b WHERE b.session_id = s.id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM topology_nodes n WHERE n.session_id = s.id
               )"#,
     )
     .bind(&now)
@@ -158,7 +162,8 @@ pub async fn run_walker_for_pending_sessions(pool: &SqlitePool) -> Result<usize,
 /// 跑一个 session 的 walker：
 ///   1. 读 sessions.payload；空 → 直接标 completed_walker
 ///   2. 解析为 JSON；失败 → failed_parse + PAYLOAD_NOT_JSON
-///   3. 校验 schemaVersion = "tsn-agent.canonical.v0"；失败 → CANONICAL_SCHEMA_INVALID
+///   3. 抽 canonical：非 canonical.v0（新格式 session，无内嵌拓扑）→ 无需迁移标 completed_walker；
+///      schemaVersion 为 canonical.v0 但 topology 结构坏 → CANONICAL_SCHEMA_INVALID
 ///   4. 单事务清空旧行 + 重新 INSERT topology_nodes/_links/_refs
 ///   5. 提交 → completed_walker；INSERT 失败 → CONSTRAINT_VIOLATION:<col>
 pub async fn walker_run_session(pool: &SqlitePool, session_id: &str) -> Result<(), String> {
@@ -182,7 +187,15 @@ pub async fn walker_run_session(pool: &SqlitePool, session_id: &str) -> Result<(
 
     let canonical = match extract_canonical(&json) {
         Some(c) => c,
-        None => return mark_failed(pool, session_id, "CANONICAL_SCHEMA_INVALID").await,
+        // schemaVersion 为 canonical.v0 但 topology 结构损坏 → 真损坏的旧 payload，保留失败检测；
+        // 否则（Phase B-β 之后的新格式 session：拓扑由 sidecar 直接落 P0 表，payload 无 canonical
+        // 内嵌）→ 无需迁移，标 completed，不进失败列表。
+        None => {
+            if json.get("schemaVersion").and_then(Value::as_str) == Some("tsn-agent.canonical.v0") {
+                return mark_failed(pool, session_id, "CANONICAL_SCHEMA_INVALID").await;
+            }
+            return mark_completed(pool, session_id).await;
+        }
     };
 
     if let Err(code) = apply_canonical_to_db(pool, session_id, &canonical).await {
@@ -491,6 +504,26 @@ mod tests {
     }
 
     #[test]
+    fn mark_pending_skips_sessions_that_already_have_p0_topology() {
+        // 已有 topology_nodes 行的 session（sidecar 直接写入的新会话）拓扑已落 P0，无需 backfill，
+        // 不标 pending，避免 walker 用旧 canonical schema 把正常会话误判为迁移失败。
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('with_p0', 't', 'now', 'now', '{\"title\":\"x\"}'), ('no_p0', 't', 'now', 'now', '{\"title\":\"x\"}')")
+                .execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, node_type, insert_order) VALUES ('with_p0', 100, '1', 0, 0, '{}', 'switch', 0)")
+                .execute(&pool).await.unwrap();
+
+            let marked = mark_pending_for_all_sessions(&pool).await.unwrap();
+            assert_eq!(marked, 1); // 只 no_p0 被标 pending
+
+            let with_p0_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM session_backfill_state WHERE session_id='with_p0'")
+                .fetch_one(&pool).await.unwrap();
+            assert_eq!(with_p0_rows, 0); // 有 P0 拓扑 → 不标 pending
+        });
+    }
+
+    #[test]
     fn failed_sessions_have_zero_p0_rows() {
         // U5 弹窗采用固定强警告（无 P0 行数条件分支）的前提固化：失败会话的
         // P0 行恒为 0（failed_parse 不进 DELETE；failed_constraint 事务回滚）。
@@ -665,10 +698,32 @@ mod tests {
     }
 
     #[test]
-    fn walker_marks_canonical_schema_invalid_when_schema_version_mismatches() {
+    fn walker_completes_when_payload_is_not_canonical_format() {
+        // Phase B-β 之后的新格式 session：payload 无 canonical 内嵌（schemaVersion 缺失或非
+        // canonical.v0），拓扑由 sidecar 直接落 P0 表，walker 视为无需迁移 → completed，不进失败列表。
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
-            let payload = r#"{"schemaVersion":"foo","topology":{"nodes":[],"links":[]}}"#;
+            let payload = r#"{"title":"新会话","messages":[],"workflow":{"currentStep":"topology"}}"#;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1', 't', 'now', 'now', ?)")
+                .bind(payload).execute(&pool).await.unwrap();
+            walker_run_session(&pool, "s1").await.unwrap();
+
+            let (state, code): (String, Option<String>) = sqlx::query_as(
+                "SELECT state, error_code FROM session_backfill_state WHERE session_id = 's1'",
+            )
+            .fetch_one(&pool).await.unwrap();
+            assert_eq!(state, "completed_walker");
+            assert!(code.is_none());
+        });
+    }
+
+    #[test]
+    fn walker_marks_canonical_schema_invalid_when_canonical_topology_malformed() {
+        // schemaVersion 为 canonical.v0 但 topology 结构损坏（缺 links 数组）→ 真损坏的旧 payload，
+        // 保留 CANONICAL_SCHEMA_INVALID 失败检测，不与新格式 session 混淆。
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let payload = r#"{"schemaVersion":"tsn-agent.canonical.v0","topology":{"nodes":[]}}"#;
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1', 't', 'now', 'now', ?)")
                 .bind(payload).execute(&pool).await.unwrap();
             walker_run_session(&pool, "s1").await.unwrap();
