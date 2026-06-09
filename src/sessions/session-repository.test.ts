@@ -167,6 +167,112 @@ describe("redactSessionForStorage", () => {
     expect(payload).not.toContain("json-secret");
     expect(payload).toContain("[redacted]");
   });
+
+  it("redacts secrets inside tool call args/result (U5/KTD7)", () => {
+    const session: TsnSession = {
+      ...createEmptySession(),
+      messages: [
+        {
+          id: "message-with-tools",
+          role: "assistant",
+          createdAt: "2026-05-20T00:00:00.000Z",
+          content: "已执行。",
+          toolCalls: [
+            {
+              id: "toolu-1",
+              name: "Bash",
+              friendlyName: "Bash",
+              status: "success",
+              summary: "curl",
+              args: { command: "curl -H 'Authorization: Bearer bearer-secret'" },
+              result: { stdout: 'token: abc123 "accessToken":"json-secret"' },
+            },
+          ],
+        },
+      ],
+    };
+
+    const payload = JSON.stringify(redactSessionForStorage(session));
+
+    expect(payload).not.toContain("bearer-secret");
+    expect(payload).not.toContain("json-secret");
+    expect(payload).toContain("[redacted]");
+  });
+
+  it("truncates oversized tool call results before persistence (U5/KTD3)", () => {
+    const big = "x".repeat(40_000);
+    const session: TsnSession = {
+      ...createEmptySession(),
+      messages: [
+        {
+          id: "message-big-tool",
+          role: "assistant",
+          createdAt: "2026-05-20T00:00:00.000Z",
+          content: "已构建。",
+          toolCalls: [
+            {
+              id: "toolu-big",
+              name: "mcp__tsn_topology__topology_build_artifacts",
+              friendlyName: "topology.build_artifacts",
+              status: "success",
+              summary: "artifact",
+              args: {},
+              result: { table: big },
+            },
+          ],
+        },
+      ],
+    };
+
+    const redacted = redactSessionForStorage(session);
+    const storedCall = redacted.messages[0].toolCalls?.[0];
+
+    expect(storedCall?.resultTruncated).toBe(true);
+    expect(typeof storedCall?.result).toBe("string");
+    expect((storedCall?.result as string).length).toBeLessThan(big.length);
+  });
+});
+
+describe("BrowserSessionRepository tool calls", () => {
+  it("round-trips tool calls and stays backward compatible with old payloads (U5)", async () => {
+    const repository = new BrowserSessionRepository(window.localStorage);
+    await repository.save({
+      ...createEmptySession(),
+      id: "session-tools",
+      messages: [
+        {
+          id: "m-tools",
+          role: "assistant",
+          createdAt: "2026-05-20T00:00:00.000Z",
+          content: "已执行。",
+          toolCalls: [
+            {
+              id: "toolu-1",
+              name: "Read",
+              friendlyName: "Read",
+              status: "success",
+              summary: "src/app/App.tsx",
+              args: { file_path: "src/app/App.tsx" },
+              result: { ok: true },
+            },
+          ],
+        },
+        {
+          id: "m-legacy",
+          role: "assistant",
+          createdAt: "2026-05-20T00:00:01.000Z",
+          content: "[工具] 旧文本 trace",
+        },
+      ],
+    });
+
+    const [restored] = await repository.list();
+    expect(restored.messages[0].toolCalls?.[0]).toMatchObject({
+      friendlyName: "Read",
+      result: { ok: true },
+    });
+    expect(restored.messages[1].toolCalls).toBeUndefined();
+  });
 });
 
 describe("SqliteSessionRepository", () => {

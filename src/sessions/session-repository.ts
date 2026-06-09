@@ -1,4 +1,5 @@
 import type { AgentEvent } from "../agent/agent-types";
+import { truncateResultForStorage, type ToolCallRecord } from "../agent/tool-call-record";
 import { normalizePlannerRunState, type PlannerRunState } from "../planner/planner-contract";
 import { normalizeWorkflowState, type WorkflowState } from "../project/project-state";
 import { invoke } from "@tauri-apps/api/core";
@@ -12,6 +13,8 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  /** Plan 2026-06-09-003：本条 assistant 消息的工具调用记录，渲染成卡片。老消息无此字段。 */
+  toolCalls?: ToolCallRecord[];
 }
 
 /**
@@ -264,6 +267,7 @@ export function redactSessionForStorage(session: TsnSession): TsnSession {
     messages: session.messages.map((message) => ({
       ...message,
       content: redactSecrets(message.content),
+      ...(message.toolCalls ? { toolCalls: message.toolCalls.map(redactToolCallForStorage) } : {}),
     })),
     agentEvents: session.agentEvents.map((event) => ({
       ...event,
@@ -333,6 +337,37 @@ export function redactSecrets(value: string): string {
     .replace(/((?:api[_-]?key|token|secret|password|claude_api_key)\s*[:=]\s*)([^\s,;]+)/gi, "$1[redacted]")
     .replace(/("(?:accessToken|refreshToken|authToken|apiKey|api_key|token|secret|password)"\s*:\s*")([^"]+)(")/gi, "$1[redacted]$3")
     .replace(/(Authorization\s*:\s*Bearer\s+)([^\s,;]+)/gi, "$1[redacted]");
+}
+
+/**
+ * Plan 2026-06-09-003 KTD3/KTD7：落盘前给工具记录的 result 截断兜底，再整条红 action。
+ * redactSecrets 只吃 string，且对整段序列化 JSON 跑正则会越界破坏结构 —— 故递归到
+ * 字符串叶子逐个红 action（与既有 redactProviderNamesInValue 同款）。
+ */
+function redactToolCallForStorage(record: ToolCallRecord): ToolCallRecord {
+  const { value, truncated } = truncateResultForStorage(record.result);
+  return redactSecretsInValue({ ...record, result: value, resultTruncated: truncated }) as ToolCallRecord;
+}
+
+function redactSecretsInValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return redactSecrets(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(redactSecretsInValue);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, inner]) => [
+        redactSecrets(key),
+        redactSecretsInValue(inner),
+      ]),
+    );
+  }
+
+  return value;
 }
 
 function sessionToStoredSession(session: TsnSession): StoredSession {
