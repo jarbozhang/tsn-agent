@@ -30,6 +30,8 @@ pub struct ClaudeAgentResponse {
     assistant_text: String,
     session_id: Option<String>,
     stage_results: Vec<serde_json::Value>,
+    // Plan 2026-06-09-003：结构化工具调用记录，前端富化成卡片。与 stage_results 同构透传。
+    tool_calls: Vec<serde_json::Value>,
     audit_path: Option<String>,
 }
 
@@ -40,6 +42,8 @@ struct ClaudeWorkerResponse {
     session_id: Option<String>,
     #[serde(default)]
     stage_results: Vec<serde_json::Value>,
+    #[serde(default)]
+    tool_calls: Vec<serde_json::Value>,
     audit_path: Option<String>,
 }
 
@@ -53,6 +57,8 @@ struct ClaudeWorkerEvent {
     assistant_text: Option<String>,
     #[serde(default)]
     stage_results: Vec<serde_json::Value>,
+    #[serde(default)]
+    tool_calls: Vec<serde_json::Value>,
     audit_path: Option<String>,
 }
 
@@ -339,6 +345,7 @@ fn parse_worker_output(stdout: &str) -> Result<ClaudeAgentResponse, String> {
         assistant_text,
         session_id: parsed.session_id,
         stage_results: parsed.stage_results,
+        tool_calls: parsed.tool_calls,
         audit_path: parsed.audit_path,
     })
 }
@@ -471,6 +478,7 @@ fn handle_worker_line(
                 assistant_text,
                 session_id: parsed.session_id,
                 stage_results: parsed.stage_results,
+                tool_calls: parsed.tool_calls,
                 audit_path: parsed.audit_path,
             });
         }
