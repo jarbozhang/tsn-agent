@@ -65,6 +65,13 @@ struct ClaudeAgentEventPayload {
     session_id: Option<String>,
 }
 
+/// 暴露拓扑模板参数合法域（类型/上下限/枚举）给前端只读展示。
+/// 数据源为 `topology_compute::describe_templates_catalog`，与 MCP `describe_templates` 同一事实源。
+#[tauri::command]
+pub fn describe_topology_templates() -> serde_json::Value {
+    crate::topology_compute::describe_templates_catalog()
+}
+
 #[tauri::command]
 pub async fn run_claude_agent(
     app: tauri::AppHandle,
@@ -732,6 +739,16 @@ mod tests {
             "../.claude/skills/tsn-topology/tools/render-mac-forwarding-html.js"
         ));
         assert!(!tauri_config.contains("../src-node/dist/tsn-topology-server.mjs"));
+    }
+
+    #[test]
+    fn describe_topology_templates_returns_catalog() {
+        let via_command = describe_topology_templates();
+        assert_eq!(
+            via_command,
+            crate::topology_compute::describe_templates_catalog()
+        );
+        assert_eq!(via_command["templateCount"], 3);
     }
 
     #[test]

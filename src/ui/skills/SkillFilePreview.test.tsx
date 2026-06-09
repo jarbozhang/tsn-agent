@@ -39,6 +39,11 @@ function createService(overrides: Partial<SkillFileService> = {}): SkillFileServ
       content,
       editable: true,
     })),
+    describeTopologyTemplates: vi.fn().mockResolvedValue({
+      templateCount: 3,
+      templateIds: ["generic-line", "generic-ring", "dual-plane-redundant"],
+      templates: [],
+    }),
     ...overrides,
   };
 }
