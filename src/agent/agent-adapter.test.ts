@@ -185,6 +185,31 @@ describe("runTsnAgent", () => {
     expect(result.toolCalls?.[0].summary).toBeTruthy();
   });
 
+  it("filters legacy [工具] trace lines out of the conversation context (U8)", async () => {
+    enableTauriRuntime();
+    mockTauriCommands({ claude: { assistantText: "好的。", sessionId: "claude-session-1" } });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const session = sessionWithWorkflow(createInitialWorkflowState(), {
+      messages: [
+        { id: "u0", role: "user", content: "上一轮需求", createdAt: "2026-06-08T00:00:00Z" },
+        {
+          id: "a0",
+          role: "assistant",
+          content: "[工具] Bash: ls\n[工具结果] Bash 已返回\n真实自然语言回复。",
+          createdAt: "2026-06-08T00:00:01Z",
+        },
+      ],
+    });
+
+    await runTsnAgent({ userIntent: "继续优化拓扑", session });
+
+    const call = invokeMock.mock.calls.find(([command]) => command === "run_claude_agent");
+    const context = (call?.[1] as { request: { conversationContext: string } }).request.conversationContext;
+    expect(context).toContain("真实自然语言回复。");
+    expect(context).not.toContain("[工具]");
+  });
+
   it("returns empty toolCalls on the local boundary path (U4)", async () => {
     enableTauriRuntime();
     const { runTsnAgent } = await import("./agent-adapter");

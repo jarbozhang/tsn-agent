@@ -148,4 +148,32 @@ describe("WorkspaceTools", () => {
     expect(screen.getByText("在最右边添加一个交换机")).toBeInTheDocument();
     expect(screen.queryByText(/\[工具\]/)).not.toBeInTheDocument();
   });
+
+  it("新会话预览直接展示干净的自然语言（U8/R11）", () => {
+    const session = createEmptySession();
+    session.messages = [
+      { id: "u1", role: "user", content: "我需要4个交换机", createdAt: "2026-06-09T00:00:00Z" },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "已为你生成 4 个交换机的拓扑草案。",
+        createdAt: "2026-06-09T00:00:01Z",
+        toolCalls: [
+          {
+            id: "toolu-1",
+            name: "mcp__tsn_topology__topology_initialize",
+            friendlyName: "topology.initialize",
+            status: "success",
+            summary: "template=line",
+            args: { template: "line" },
+            result: { ok: true },
+          },
+        ],
+      },
+    ];
+    render(<WorkspaceTools {...baseProps({ activePanel: "sessions", currentSession: session, sessions: [session] })} />);
+    // 预览取自然语言；不读 toolCalls、不展示卡片内容。
+    expect(screen.getByText("已为你生成 4 个交换机的拓扑草案。")).toBeInTheDocument();
+    expect(screen.queryByText("topology.initialize")).not.toBeInTheDocument();
+  });
 });
