@@ -7,11 +7,11 @@ date: 2026-06-09
 
 # refactor: topology 参数事实源收口 + skill 兼容清理
 
-## Summary
+## 摘要
 
 确立 Rust 确定性 compute（`src-tauri/src/topology_compute.rs` 的 `describe_templates`）为 topology 模板/参数的唯一文档化事实源，把 `.claude/skills/tsn-topology/` 收窄成「场景选择指引 + 指向 MCP 的指针」，删除与之重复或已失效的 legacy builder 脚本闭包和 `rules.md` 兼容遗留段。
 
-## Problem Frame
+## 问题背景
 
 同一套 topology 参数知识（节点类型枚举、速率白名单、MAC/IP 派生、坐标布局、四份 JSON 契约）当前在三处各存一份：Rust `topology_compute.rs`（权威实现）、skill `docs/rules.md`（15.9KB 规则参考）、`tools/topology-builder.js`（20.5KB legacy 脚本，含自带的 `NODE_TYPES`/`SPEED_ENUM` 常量）。`rules.md` 顶部自述"供 `topology-builder.js`/`validate-topology.js`/`validate-mac-forwarding-table.js` 与 `SKILL.md` 参照"——其中三个 builder/validator 脚本在 Phase B 后已不在生产工作流（拓扑由 MCP 8 个工具驱动），它们承载的规则随之变死，且与 `topology_compute.rs` 的实现构成 drift 风险。同时 `SKILL.md` 缺少「何时选 line/ring/dual-plane」的场景决策指引——这正是 skill 该承担、却缺位的部分。
 
@@ -19,7 +19,7 @@ date: 2026-06-09
 
 ---
 
-## Requirements
+## 需求
 
 **事实源收口**
 
@@ -43,7 +43,7 @@ R7. 本轮不改 MCP 生成逻辑：`describe_templates`（含 `dual-plane-redun
 
 ---
 
-## Key Technical Decisions
+## 关键技术决策
 
 KTD1. **dual-plane 口径 = 保留 `describe_templates` 返回 + 决策树标 Phase B。** 不改 MCP 的 describe/initialize：`describe_templates` 继续列出 `dual-plane-redundant`，`initialize` 继续在 Phase A 拒绝它，矛盾在 `SKILL.md` 决策树用文案消化（标注"暂不可选"）。理由：用户决定；最小改动，不雪藏已实现的 descriptor。
 
@@ -55,7 +55,7 @@ KTD4. **不动会话 topology 数据路径。** ce-ideate grounding 确认数据
 
 ---
 
-## High-Level Technical Design
+## 高层技术设计
 
 收口后的事实源职责边界——参数与生成归 MCP，场景与领域语义归 skill：
 
@@ -81,7 +81,7 @@ flowchart TB
 
 ---
 
-## Implementation Units
+## 实现单元
 
 ### U1. 删除 legacy builder 脚本闭包并同步打包配置与断言
 
@@ -127,7 +127,7 @@ flowchart TB
 - **Files:** 修改 `.claude/skills/tsn-topology/SKILL.md`
 - **Approach:**
   - 删"兼容脚本"段（含 `run-topology-skill.js` 与四份 JSON 列表）。
-  - 在初始化路径补决策树（形态见 High-Level Technical Design）：
+  - 在初始化路径补决策树（形态见 高层技术设计）：
     - `generic-line`（默认）：用户描述"N 台交换机线型/串联，每台接 M 端系统"或未指定形态 → `switchCount=N`, `endSystemsPerSwitch=M`, `dataRateMbps=速率`。
     - `generic-ring`：用户明确要环形/交换机环网/环形冗余 → 同参数。
     - `dual-plane-redundant`：Phase B 暂不可选——`describe_templates` 会列出它但 `initialize` 当前拒绝；用户要 A/B 双平面双归属冗余时，说明暂未开放，引导用 `generic-ring` 近似或记录需求待 Phase B。
@@ -139,7 +139,7 @@ flowchart TB
 
 ---
 
-## Scope Boundaries
+## 范围边界
 
 **不动（本轮明确不碰）：**
 
@@ -155,7 +155,7 @@ flowchart TB
 
 ---
 
-## Risks & Dependencies
+## 风险与依赖
 
 - **rules.md 误删 Agent 仍需的领域语义**（中）：若重写时删掉显示名 `SW-N`/`ES-N` 映射，Agent 在"已有拓扑编辑"路径定位节点会错。缓解：U2 明确保留该约定；`SKILL.md:34` 已有一份显示名映射作双保险。
 - **.DS_Store 回归**（低）：macOS 可能重新生成。缓解：U1 追加 `.gitignore`。
@@ -163,7 +163,7 @@ flowchart TB
 
 ---
 
-## Sources / Research
+## 来源 / 研究
 
 - `src-tauri/src/topology_compute.rs:92-196` — `describe_templates` 三模板 descriptor 与参数（`generic_distributed_params`: `switchCount` 1-12 / `endSystemsPerSwitch` 1-24 / `dataRateMbps`）。
 - `src-tauri/src/commands.rs:712-735` — `tauri_bundle_includes_all_stage_skill_resources` 断言测试。
