@@ -163,11 +163,11 @@ fn dual_plane_descriptor() -> Value {
                   }
               } },
             { "name": "backbone", "type": "object", "required": true,
-              "description": "平面内骨干连接策略，P0 支持 line/ring。",
-              "itemShape": { "mode": "line | ring", "withinPlane": "boolean" } },
+              "description": "平面内骨干连接策略，当前仅支持 line（ring 待实现）。",
+              "itemShape": { "mode": "line", "withinPlane": "true (fixed)" } },
             { "name": "crossPlaneLinks", "type": "object", "required": true,
-              "description": "跨平面桥接策略，none 表示隔离平面，paired 表示每个 group 内 A/B 成对互联。",
-              "itemShape": { "mode": "none | paired" } },
+              "description": "跨平面桥接策略，当前仅支持 none（隔离平面，端系统双归属；paired 待实现）。",
+              "itemShape": { "mode": "none" } },
             data_rate_param(),
         ],
         "example": {
