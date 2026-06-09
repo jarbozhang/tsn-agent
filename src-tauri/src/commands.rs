@@ -717,8 +717,9 @@ mod tests {
 
         assert!(tauri_config.contains("../.claude/skills/tsn-topology/SKILL.md"));
         assert!(tauri_config.contains("../.claude/skills/tsn-topology/package.json"));
-        assert!(tauri_config.contains("../.claude/skills/tsn-topology/docs/rules.md"));
         assert!(tauri_config.contains("../.claude/skills/tsn-flow-planning/SKILL.md"));
+        // rules.md 已并入 SKILL.md 并删除，不应再打包。
+        assert!(!tauri_config.contains("../.claude/skills/tsn-topology/docs/rules.md"));
         // legacy builder 脚本闭包已下线，不应再打包（topology 参数事实源收口）。
         assert!(!tauri_config.contains("../.claude/skills/tsn-topology/tools/topology-builder.js"));
         assert!(
