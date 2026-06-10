@@ -1,6 +1,6 @@
 ---
 name: tsn-topology
-description: TSN Agent 拓扑阶段指引。拓扑固定规则通过 tsn_topology MCP 工具或项目本地 topology domain 落地；本 skill 不维护独立 builder/validator 语义，也不导出 HTML。
+description: TSN Agent 拓扑阶段指引。拓扑固定规则由 tsn_topology MCP 工具（Rust sidecar）落地；本 skill 不维护独立 builder/validator 语义。
 ---
 
 # TSN 拓扑 Skill 指引
@@ -14,7 +14,7 @@ description: TSN Agent 拓扑阶段指引。拓扑固定规则通过 tsn_topolog
 
 ## 当前边界
 
-- 拓扑模板、初始化、校验、artifact 构建、inspect 和 P0 `apply_operations` 由 `tsn_topology` MCP 工具或项目本地 topology domain 执行。
+- 拓扑模板、初始化、校验、artifact 构建、inspect 和 P0 `apply_operations` 由 `tsn_topology` MCP 工具（Rust sidecar）执行。
 - 自然语言理解、模板选择、在 inspect rows 中定位目标、用户澄清和阶段推进仍由 Agent / Project 层负责。
 - `generate_project`、time sync、flow planning、simulation、export 不属于 topology MCP。
 - MCP tool 返回值已是 sidecar 结构化领域响应；`topology.initialize`（整表重建）与 `topology.apply_operations`（增量编辑）落 P0 表后响应携带 `summary.mutationId`，worker 据此合成 `WorkflowStageResult`。
@@ -25,14 +25,14 @@ description: TSN Agent 拓扑阶段指引。拓扑固定规则通过 tsn_topolog
 
 ### 节点类型与显示名映射
 
-| `node_type` | 中文名 | 缩写前缀 | 语义说明 |
+| 领域概念 | 库值 `node_type` | 缩写前缀 | 语义说明 |
 |---|---|---|---|
-| `switch` | 交换机 | `SW` | |
-| `networkcard` | 端系统 | `ES` | 用户说的"网卡""端系统""端"都映射为 `networkcard`；"网卡8/网卡9"是新增的端系统节点，不是交换机端口或网卡接口 |
-| `server` | 控制器 | `PC` | |
+| 交换机 | `switch` | `SW` | |
+| 端系统 | `networkcard` | `ES` | `networkcard` 是持久层遗留枚举值（旧系统借"网卡"一词当节点类型），**不是**交换机端口或物理网卡——交换机同样有网卡接口但与此无关。用户说的"端系统""端""网卡8/网卡9"都指端系统节点。inspect rows 与 op 构造照抄该库值原文即可 |
+| 控制器 | `server` | - | 当前模板不生成 server，画布对非 switch 一律按端系统显示 |
 
 - 首期**排除** `T10` 类型。
-- **显示名映射**：画布显示名 = 类型前缀 + `syncName`。`SW-1` 即 `syncName="1"` 的交换机，`ES-4` 即 `syncName="4"` 的端系统。用户提到 `SW-N`/`ES-N` 时按 `syncName` 精确等于 `"N"` 匹配，不要按列表顺序或"第 N 台"折算。
+- **显示名映射**：画布显示名**优先用节点的 `name`**（initialize 落库的逻辑名，如 `SW-1`/`ES-1`）；`name` 缺失（增量添加/历史数据）时回退为 类型前缀 + `syncName`。用户提到 `SW-N`/`ES-N` 时，先按 rows 的 `name` 精确匹配，无 `name` 的节点再按 前缀+`syncName` 派生名匹配；不要按列表顺序或"第 N 台"折算。
 
 ### 链路速率参考
 
@@ -71,8 +71,8 @@ description: TSN Agent 拓扑阶段指引。拓扑固定规则通过 tsn_topolog
 
 当当前 project 已经有拓扑，且用户要插入交换机或调整连接时：
 
-1. 调用 `mcp__tsn_topology__topology_inspect`（无参数）获取该会话全部拓扑 rows：nodes（imac/syncName/nodeType/syncType/x/y/insertOrder）+ links（linkSeq/name/srcImac/dstImac/stylesJson）。
-2. 在 rows 中按 syncName/nodeType/连接关系定位目标节点与链路，得到精确的 imac / linkSeq；如用户引用不唯一，先用中文数字编号选项向用户澄清。定位时按上文「显示名映射」匹配 `SW-N`/`ES-N`（`syncName` 精确等于 `"N"`）。
+1. 调用 `mcp__tsn_topology__topology_inspect`（无参数）获取该会话全部拓扑 rows：nodes（imac/syncName/name/nodeType/syncType/x/y/insertOrder）+ links（linkSeq/name/srcImac/dstImac/stylesJson）。
+2. 在 rows 中按 name/nodeType/连接关系定位目标节点与链路，得到精确的 imac / linkSeq；如用户引用不唯一，先用中文数字编号选项向用户澄清。定位时按上文「显示名映射」匹配 `SW-N`/`ES-N`（优先 `name` 精确匹配，无 `name` 再按 前缀+`syncName`）。
 3. 构造原子 operations（如插入交换机 = `[link_delete, node_add, link_add, link_add]`）：新节点的 `syncType`/`nodeType` 复制 inspect 返回的同类节点原文，新链路的 `stylesJson` 参照既有链路；新 `imac`/`linkSeq` 必须避开 rows 中已占用的值。
 4. 调用 `mcp__tsn_topology__topology_apply_operations`；worker 从响应的 `summary.mutationId` 合成 `WorkflowStageResult`，不把 rows 或 changeSet 写进对话。
 5. 超时重试时逐字节复用上一次的同一 operations（相同 imac/linkSeq），不要重新分配 —— 重新分配 linkSeq 会产生重复的平行链路。
