@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { FileText, Pencil } from "lucide-react";
 import type { StageSkillName } from "../../agent/stage-skill-contract";
 import {
@@ -293,6 +295,8 @@ export function SkillFilePreview({
                     aria-label="Skill 文件内容"
                     onChange={(event) => setDraft(event.target.value)}
                   />
+                ) : content.path.endsWith(".md") ? (
+                  <MarkdownFileView text={content.content} />
                 ) : (
                   <pre className="skill-file-content">{content.content}</pre>
                 )}
@@ -311,6 +315,27 @@ export function SkillFilePreview({
       {isTopologySkill && <TopologyLegalDomain state={catalogState} />}
     </section>
   );
+}
+
+/** .md 预览：frontmatter 折成顶部 meta 块，正文走 react-markdown（GFM）。 */
+function MarkdownFileView({ text }: { text: string }) {
+  const { frontmatter, body } = splitFrontmatter(text);
+
+  return (
+    <div className="skill-file-markdown">
+      {frontmatter && <pre className="skill-file-frontmatter mono">{frontmatter}</pre>}
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+    </div>
+  );
+}
+
+function splitFrontmatter(text: string): { frontmatter?: string; body: string } {
+  const match = /^---\n([\s\S]*?)\n---\n?/.exec(text);
+  if (!match) {
+    return { body: text };
+  }
+
+  return { frontmatter: match[1], body: text.slice(match[0].length) };
 }
 
 function TopologyLegalDomain({ state }: { state: CatalogState }) {

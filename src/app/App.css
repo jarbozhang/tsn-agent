@@ -722,6 +722,138 @@ textarea:focus-visible {
   background: #ffffff;
 }
 
+/* .md 预览：渲染后的 markdown 正文（容器外观与 pre 预览一致）。 */
+.skill-file-markdown {
+  min-width: 0;
+  min-height: 240px;
+  max-height: 440px;
+  padding: 12px 14px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.skill-file-frontmatter {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border-strong);
+  border-radius: 3px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.skill-file-markdown h1,
+.skill-file-markdown h2,
+.skill-file-markdown h3,
+.skill-file-markdown h4 {
+  margin: 14px 0 6px;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.skill-file-markdown h1 {
+  margin-top: 2px;
+  font-size: 15px;
+}
+
+.skill-file-markdown h2 {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.skill-file-markdown h3 {
+  font-size: 13px;
+}
+
+.skill-file-markdown h4 {
+  font-size: 12.5px;
+}
+
+.skill-file-markdown p {
+  margin: 6px 0;
+}
+
+.skill-file-markdown ul,
+.skill-file-markdown ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.skill-file-markdown li {
+  margin: 2px 0;
+}
+
+.skill-file-markdown li > ul,
+.skill-file-markdown li > ol {
+  margin: 2px 0;
+}
+
+.skill-file-markdown code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+}
+
+.skill-file-markdown pre {
+  margin: 8px 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.skill-file-markdown pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.skill-file-markdown blockquote {
+  margin: 8px 0;
+  padding: 4px 10px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.skill-file-markdown blockquote p {
+  margin: 3px 0;
+}
+
+.skill-file-markdown table {
+  margin: 8px 0;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.skill-file-markdown th,
+.skill-file-markdown td {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.skill-file-markdown th {
+  background: var(--bg-tertiary);
+}
+
+.skill-file-markdown hr {
+  margin: 12px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
 .skill-file-error {
   padding: 8px 10px;
   border: 1px solid var(--danger);
