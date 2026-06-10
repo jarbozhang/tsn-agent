@@ -722,13 +722,11 @@ textarea:focus-visible {
   background: #ffffff;
 }
 
-/* .md 预览：渲染后的 markdown 正文（容器外观与 pre 预览一致）。 */
+/* .md 预览：渲染后的 markdown 正文随内容伸展、无内部滚动条（抽屉自身滚动）；
+   编辑模式的 textarea 仍保持固定窗口大小。 */
 .skill-file-markdown {
   min-width: 0;
-  min-height: 240px;
-  max-height: 440px;
   padding: 12px 14px;
-  overflow: auto;
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text-primary);
