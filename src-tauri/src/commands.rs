@@ -431,7 +431,11 @@ fn drain_stdout_lines(
         }
 
         handle_worker_line(&trimmed, app, fallback_run_id, app_session_id, response)?;
-        stdout_lines.push(trimmed);
+        // tool_call 行携带原始工具入参/出参，不进 stdout 缓冲——无 done 兜底错误
+        // 会把该缓冲经弱红 action（redact_error）嵌入用户可见错误与诊断。
+        if !trimmed.contains("\"event\":\"tool_call\"") {
+            stdout_lines.push(trimmed);
+        }
     }
 
     Ok(())

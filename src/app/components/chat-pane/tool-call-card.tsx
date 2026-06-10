@@ -36,10 +36,7 @@ export function ToolCallCard({ record }: { record: ToolCallRecord }) {
         <div className="tool-call-detail">
           <ToolCallSection label="入参" value={record.args} />
           {running ? (
-            <div className="tool-call-section">
-              <div className="tool-call-section-label">出参</div>
-              <pre className="tool-call-body mono">执行中…</pre>
-            </div>
+            <ToolCallSection label="出参" placeholder="执行中…" />
           ) : (
             <ToolCallSection label="出参" value={record.result} truncated={record.resultTruncated} />
           )}
@@ -49,11 +46,21 @@ export function ToolCallCard({ record }: { record: ToolCallRecord }) {
   );
 }
 
-function ToolCallSection({ label, value, truncated }: { label: string; value: unknown; truncated?: boolean }) {
+function ToolCallSection({
+  label,
+  value,
+  truncated,
+  placeholder,
+}: {
+  label: string;
+  value?: unknown;
+  truncated?: boolean;
+  placeholder?: string;
+}) {
   return (
     <div className="tool-call-section">
       <div className="tool-call-section-label">{truncated ? `${label} · 结果已截断` : label}</div>
-      <pre className="tool-call-body mono">{formatValue(value)}</pre>
+      <pre className="tool-call-body mono">{placeholder ?? formatValue(value)}</pre>
     </div>
   );
 }

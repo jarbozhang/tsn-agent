@@ -121,6 +121,9 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
     // R13：工具事件诊断只记计数，不进原始 args/result。
     toolCallEvents: 0,
   };
+  // 竞态守卫：invoke 返回后仍可能有 IPC 在途的 tool_call 事件在 done 对账的
+  // await 间隙送达——run 收尾后丢弃，防止 running 残卡覆盖权威列表。
+  let runFinished = false;
   const unlisten = await listenToClaudeEvents(runId, {
     onChunk: (chunk) => {
       streamStats.chunkCount += 1;
@@ -131,6 +134,9 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
     },
     onToolCall: request.onToolCall
       ? (payload) => {
+          if (runFinished) {
+            return;
+          }
           const record = toStreamedToolCallRecord(payload);
           if (record) {
             streamStats.toolCallEvents += 1;
@@ -155,6 +161,7 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
         },
       },
     });
+    runFinished = true;
     const application = applyStageResults({
       stageResults: claude.stageResults ?? [],
       workflow: effectiveWorkflow,
@@ -187,7 +194,8 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
       mode: "claude",
       claudeSessionId: claude.sessionId,
       topologyMutationId: application.topologyMutationId,
-      toolCalls: (claude.toolCalls ?? []).map((raw) => enrichToolCall(raw as RawToolCall)),
+      // done 列表与流式路径走同一脱敏（R8）：避免已脱敏的流式卡片在对账后翻回原文。
+      toolCalls: (claude.toolCalls ?? []).map((raw) => enrichToolCall(redactSecretsInValue(raw) as RawToolCall)),
     };
   } catch (error) {
     logAgent(request.diagnostics, {

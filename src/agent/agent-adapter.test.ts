@@ -113,9 +113,10 @@ describe("runTsnAgent", () => {
   it("delivers redacted, enriched streaming tool_call events to onToolCall (U3/AE4)", async () => {
     enableTauriRuntime();
     let listenHandler: ((event: { payload: Record<string, unknown> }) => void) | undefined;
+    const unlistenMock = vi.fn();
     listenMock.mockImplementation(async (_name: string, handler: (event: { payload: Record<string, unknown> }) => void) => {
       listenHandler = handler;
-      return vi.fn();
+      return unlistenMock;
     });
     invokeMock.mockImplementation(async (command: string) => {
       if (command === "query_topology") {
@@ -172,6 +173,8 @@ describe("runTsnAgent", () => {
     expect(args.command).not.toContain("tok-secret-xyz");
     expect(records[0].summary).not.toContain("tok-secret-xyz");
     expect(records[1]).toMatchObject({ id: "toolu-1", status: "success", result: { ok: true } });
+    // run 结束后监听器必须解绑（finally 路径是防泄漏的负载承重点）。
+    expect(unlistenMock).toHaveBeenCalledTimes(1);
   });
 
   it("ignores malformed or unknown-phase tool_call payloads without throwing (U3)", async () => {

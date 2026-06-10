@@ -172,8 +172,14 @@ export function App() {
         },
         onToolCall: (record) => {
           const previous = streamedToolCalls.get(record.id);
-          // result 事件不带 args：spread 不覆盖缺席键，previous.args 自然保留。
-          streamedToolCalls.set(record.id, previous ? { ...previous, ...record } : record);
+          // result 事件不带 args：spread 不覆盖缺席键，previous.args 自然保留；
+          // 非失败时保留 start 相的 args 摘要，避免 result→done 间摘要闪变。
+          streamedToolCalls.set(
+            record.id,
+            previous
+              ? { ...previous, ...record, summary: record.status === "error" ? record.summary : previous.summary }
+              : record,
+          );
           agentRun.markStreaming();
           updateAssistantToolCalls(pendingSession.id, assistantMessage.id, [...streamedToolCalls.values()]);
         },
