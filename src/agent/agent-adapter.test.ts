@@ -110,6 +110,103 @@ describe("runTsnAgent", () => {
     );
   });
 
+  it("delivers redacted, enriched streaming tool_call events to onToolCall (U3/AE4)", async () => {
+    enableTauriRuntime();
+    let listenHandler: ((event: { payload: Record<string, unknown> }) => void) | undefined;
+    listenMock.mockImplementation(async (_name: string, handler: (event: { payload: Record<string, unknown> }) => void) => {
+      listenHandler = handler;
+      return vi.fn();
+    });
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "query_topology") {
+        return { sessionId: "session-1", nodes: [], links: [] };
+      }
+      if (command === "run_claude_agent") {
+        // run 中途：start（含敏感入参）→ 异 runId 噪声 → result
+        listenHandler?.({
+          payload: {
+            runId: "run-x",
+            kind: "tool_call",
+            toolCall: {
+              id: "toolu-1",
+              name: "Bash",
+              phase: "start",
+              args: { command: "curl -H Authorization: Bearer tok-secret-xyz" },
+            },
+          },
+        });
+        listenHandler?.({
+          payload: {
+            runId: "other-run",
+            kind: "tool_call",
+            toolCall: { id: "noise", name: "Bash", phase: "start", args: {} },
+          },
+        });
+        listenHandler?.({
+          payload: {
+            runId: "run-x",
+            kind: "tool_call",
+            toolCall: { id: "toolu-1", name: "Bash", phase: "result", status: "success", result: { ok: true } },
+          },
+        });
+        return { assistantText: "完成。", sessionId: "claude-session-1" };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const records: import("./tool-call-record").ToolCallRecord[] = [];
+    // 不传 onChunk：仅 onToolCall 也要建立监听并送达（守卫放宽）。
+    await runTsnAgent({
+      userIntent: "执行一个命令",
+      session: sessionWithWorkflow(createInitialWorkflowState()),
+      runId: "run-x",
+      onToolCall: (record) => records.push(record),
+    });
+
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({ id: "toolu-1", status: "running", friendlyName: "Bash" });
+    // R8：到达即脱敏——args 与派生 summary 都不得携带原始 token。
+    const args = records[0].args as { command: string };
+    expect(args.command).toContain("[redacted]");
+    expect(args.command).not.toContain("tok-secret-xyz");
+    expect(records[0].summary).not.toContain("tok-secret-xyz");
+    expect(records[1]).toMatchObject({ id: "toolu-1", status: "success", result: { ok: true } });
+  });
+
+  it("ignores malformed or unknown-phase tool_call payloads without throwing (U3)", async () => {
+    enableTauriRuntime();
+    let listenHandler: ((event: { payload: Record<string, unknown> }) => void) | undefined;
+    listenMock.mockImplementation(async (_name: string, handler: (event: { payload: Record<string, unknown> }) => void) => {
+      listenHandler = handler;
+      return vi.fn();
+    });
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "query_topology") {
+        return { sessionId: "session-1", nodes: [], links: [] };
+      }
+      if (command === "run_claude_agent") {
+        listenHandler?.({ payload: { runId: "run-x", kind: "tool_call", toolCall: { name: "Bash", phase: "start" } } });
+        listenHandler?.({ payload: { runId: "run-x", kind: "tool_call", toolCall: "not-an-object" } });
+        listenHandler?.({ payload: { runId: "run-x", kind: "tool_call", toolCall: { id: "toolu-2", name: "Bash", phase: "later" } } });
+        return { assistantText: "完成。", sessionId: "claude-session-1" };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const records: unknown[] = [];
+    const result = await runTsnAgent({
+      userIntent: "执行一个命令",
+      session: sessionWithWorkflow(createInitialWorkflowState()),
+      runId: "run-x",
+      onToolCall: (record) => records.push(record),
+    });
+
+    expect(records).toHaveLength(0);
+    expect(result.mode).toBe("claude");
+  });
+
   it("returns plain chat when a topology run produces no structured stage result", async () => {
     enableTauriRuntime();
     mockTauriCommands({

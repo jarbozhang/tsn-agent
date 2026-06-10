@@ -7,7 +7,11 @@
  * 抽取注册表 —— 摘要走通用探测。
  */
 
-export type ToolCallStatus = "success" | "error";
+/**
+ * Plan 2026-06-10-001：`running` 是流式展示期的 UI 瞬态值——done 对账整体覆盖后
+ * 不会出现在落库记录里（存储层另有 backstop 过滤）。
+ */
+export type ToolCallStatus = "running" | "success" | "error";
 
 /** worker 累积、随 `done` 返回的原始记录。 */
 export interface RawToolCall {

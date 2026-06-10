@@ -20,7 +20,8 @@ import {
 } from "../project/project-state";
 import { getTopologyRuntimeSummary } from "../topology/topology-service";
 import type { AgentEvent, TsnAgentRequest, TsnAgentResult } from "./agent-types";
-import { enrichToolCall, type RawToolCall } from "./tool-call-record";
+import { redactSecretsInValue } from "../sessions/session-repository";
+import { enrichToolCall, type RawToolCall, type ToolCallRecord } from "./tool-call-record";
 import {
   parseWorkflowStageResult,
   summarizeWorkflowStageResult,
@@ -41,9 +42,11 @@ interface ClaudeAgentResponse {
 
 interface ClaudeAgentEvent {
   runId: string;
-  kind: "chunk" | "session" | "done" | "error";
+  kind: "chunk" | "session" | "tool_call" | "done" | "error";
   text?: string;
   sessionId?: string;
+  /** Plan 2026-06-10-001：客户端无关工具事件，整体透传（脱敏在前端到达时做）。 */
+  toolCall?: unknown;
 }
 
 /**
@@ -115,13 +118,26 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
     totalChars: 0,
     firstChunkAtMs: undefined as number | undefined,
     lastPreview: "",
+    // R13：工具事件诊断只记计数，不进原始 args/result。
+    toolCallEvents: 0,
   };
-  const unlisten = await listenToClaudeChunks(runId, (chunk) => {
-    streamStats.chunkCount += 1;
-    streamStats.totalChars += chunk.length;
-    streamStats.firstChunkAtMs ??= Date.now() - startedAt;
-    streamStats.lastPreview = chunk.slice(-120);
-    request.onChunk?.(chunk);
+  const unlisten = await listenToClaudeEvents(runId, {
+    onChunk: (chunk) => {
+      streamStats.chunkCount += 1;
+      streamStats.totalChars += chunk.length;
+      streamStats.firstChunkAtMs ??= Date.now() - startedAt;
+      streamStats.lastPreview = chunk.slice(-120);
+      request.onChunk?.(chunk);
+    },
+    onToolCall: request.onToolCall
+      ? (payload) => {
+          const record = toStreamedToolCallRecord(payload);
+          if (record) {
+            streamStats.toolCallEvents += 1;
+            request.onToolCall?.(record);
+          }
+        }
+      : undefined,
   });
 
   try {
@@ -680,22 +696,70 @@ function normalizeError(error: unknown): string {
   return "未知错误";
 }
 
-async function listenToClaudeChunks(runId: string, onChunk?: (chunk: string) => void): Promise<UnlistenFn | undefined> {
-  if (!onChunk) {
+async function listenToClaudeEvents(
+  runId: string,
+  handlers: {
+    onChunk?: (chunk: string) => void;
+    onToolCall?: (payload: unknown) => void;
+  },
+): Promise<UnlistenFn | undefined> {
+  if (!handlers.onChunk && !handlers.onToolCall) {
     return undefined;
   }
 
   try {
     return await listen<ClaudeAgentEvent>("claude-agent-event", (event) => {
-      if (event.payload.runId !== runId || event.payload.kind !== "chunk" || !event.payload.text) {
+      if (event.payload.runId !== runId) {
         return;
       }
 
-      onChunk(event.payload.text);
+      if (event.payload.kind === "chunk" && event.payload.text) {
+        handlers.onChunk?.(event.payload.text);
+        return;
+      }
+
+      if (event.payload.kind === "tool_call" && event.payload.toolCall !== undefined) {
+        handlers.onToolCall?.(event.payload.toolCall);
+      }
     });
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Plan 2026-06-10-001 U3：流式工具事件 → 卡片记录。顺序是硬约束：先对事件 payload
+ * 整体递归脱敏，再构造 RawToolCall，再 enrich —— enrich 的摘要从 args 派生，顺序
+ * 倒置会让 summary 携带未脱敏值且不再被任何 redact 覆盖。
+ */
+function toStreamedToolCallRecord(payload: unknown): ToolCallRecord | undefined {
+  const redacted = redactSecretsInValue(payload);
+  if (!redacted || typeof redacted !== "object" || Array.isArray(redacted)) {
+    return undefined;
+  }
+
+  const event = redacted as { id?: unknown; name?: unknown; phase?: unknown; args?: unknown; status?: unknown; result?: unknown };
+  if (typeof event.id !== "string" || !event.id || typeof event.name !== "string") {
+    return undefined;
+  }
+
+  if (event.phase === "start") {
+    return enrichToolCall({ id: event.id, name: event.name, status: "running", args: event.args });
+  }
+
+  if (event.phase === "result") {
+    const raw: RawToolCall = {
+      id: event.id,
+      name: event.name,
+      status: event.status === "error" ? "error" : "success",
+    };
+    if (event.result !== undefined) {
+      raw.result = event.result;
+    }
+    return enrichToolCall(raw);
+  }
+
+  return undefined;
 }
 
 function summarizeMessageForContext(content: string): string {

@@ -50,5 +50,7 @@ export interface TsnAgentRequest {
   session?: TsnSession;
   runId?: string;
   onChunk?: (chunk: string) => void;
+  /** Plan 2026-06-10-001：流式工具事件（已脱敏+富化），run 期间按 id upsert 驱动卡片。 */
+  onToolCall?: (record: ToolCallRecord) => void;
   diagnostics?: DiagnosticLogRepository;
 }

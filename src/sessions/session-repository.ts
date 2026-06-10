@@ -349,7 +349,11 @@ function redactToolCallForStorage(record: ToolCallRecord): ToolCallRecord {
   return redactSecretsInValue({ ...record, result: value, resultTruncated: truncated }) as ToolCallRecord;
 }
 
-function redactSecretsInValue(value: unknown): unknown {
+/**
+ * Plan 2026-06-10-001 U3：导出给 adapter 在流式工具事件到达时先脱敏再入内存态
+ * （R8：redact-on-arrival，与落库同一机制）。
+ */
+export function redactSecretsInValue(value: unknown): unknown {
   if (typeof value === "string") {
     return redactSecrets(value);
   }
