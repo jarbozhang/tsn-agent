@@ -47,6 +47,7 @@ import {
   type TsnLinkEdgeData,
   type WorkspacePaneProps,
 } from "./index";
+import { buildTsnLinkPath, portLabelPoint } from "./tsn-link-edge";
 import type { TopologyNodeRow, TopologyRowSnapshot } from "../../../sessions/topology-snapshot";
 
 function sampleSnapshot(): TopologyRowSnapshot {
@@ -170,6 +171,10 @@ describe("parseLinkStyles（R7 容错）", () => {
       rightLabel: "p2",
     });
   });
+
+  it("空字符串标签按缺失处理（不渲染空标签）", () => {
+    expect(parseLinkStyles('{"leftLabel":"","rightLabel":""}')).toEqual({});
+  });
 });
 
 describe("planeClassName（R9）", () => {
@@ -235,23 +240,29 @@ describe("topologySnapshotToReactFlow（U4/U5）", () => {
     expect(data0.rightLabel).toBe("P0");
   });
 
-  it("同 handle 多边 offset 互异且确定性（R12）", () => {
+  it("跨行边同走廊序数互异且两次映射相同（R12 确定性）", () => {
     const snapshot: TopologyRowSnapshot = {
       sessionId: "s1",
-      nodes: [node(1, 120, 300), node(10, 90, 60), node(11, 270, 60)],
+      nodes: [node(1, 120, 300), node(2, 420, 300), node(10, 90, 60), node(11, 270, 60)],
       links: [
         { linkSeq: 0, name: null, srcImac: 10, dstImac: 1, stylesJson: "{}" },
-        { linkSeq: 1, name: null, srcImac: 11, dstImac: 1, stylesJson: "{}" },
+        { linkSeq: 1, name: null, srcImac: 10, dstImac: 2, stylesJson: "{}" },
+        { linkSeq: 2, name: null, srcImac: 11, dstImac: 1, stylesJson: "{}" },
       ],
     };
-    const offsets = () =>
-      topologySnapshotToReactFlow(snapshot).edges.map((e) => (e.data as TsnLinkEdgeData).offset);
-    const first = offsets();
-    expect(new Set(first).size).toBe(2);
-    expect(offsets()).toEqual(first);
+    const read = () =>
+      topologySnapshotToReactFlow(snapshot).edges.map((e) => {
+        const data = e.data as TsnLinkEdgeData;
+        return [data.geometry, data.corridorOrd];
+      });
+    const first = read();
+    expect(first.every(([g]) => g === "cross")).toBe(true);
+    // 同一对行（60↔300）内走廊序数两两互异 → 横段高度互异。
+    expect(new Set(first.map(([, ord]) => ord)).size).toBe(3);
+    expect(read()).toEqual(first);
   });
 
-  it("同行共走廊堆叠边带非零 centerYShift 绕行，内侧边直连（KTD）", () => {
+  it("同行边几何：被遮挡/堆叠走 detour，内侧首条直连（KTD）", () => {
     // 双跳左外端堆叠：e-inner(x=-100) 与 e-outer(x=-280) 同行连 SW(x=120)。
     const snapshot: TopologyRowSnapshot = {
       sessionId: "s1",
@@ -264,7 +275,86 @@ describe("topologySnapshotToReactFlow（U4/U5）", () => {
     const { edges } = topologySnapshotToReactFlow(snapshot);
     const inner = edges[0].data as TsnLinkEdgeData;
     const outer = edges[1].data as TsnLinkEdgeData;
-    expect(inner.centerYShift).toBe(0);
-    expect(outer.centerYShift).toBeGreaterThan(0);
+    expect(inner.geometry).toBe("flat");
+    // 外侧边路径上有 e-inner 节点遮挡 → 绕行，方向确定。
+    expect(outer.geometry).toBe("detour");
+    expect([1, -1]).toContain(outer.rowDir);
+  });
+
+  it("标签锚点用各端自身 handle 序数（同 handle 双标签不重叠）", () => {
+    // 单跳 es2 双上联：两条边在 es2 bottom handle 的序数为 0/1，标签锚点必须互异。
+    const snapshot: TopologyRowSnapshot = {
+      sessionId: "s1",
+      nodes: [node(1, 120, 300), node(2, 420, 300), node(10, 90, 60)],
+      links: [
+        { linkSeq: 0, name: null, srcImac: 10, dstImac: 1, stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}' },
+        { linkSeq: 1, name: null, srcImac: 10, dstImac: 2, stylesJson: '{"leftLabel":"P1","rightLabel":"P0"}' },
+      ],
+    };
+    const { edges } = topologySnapshotToReactFlow(snapshot);
+    const first = edges[0].data as TsnLinkEdgeData;
+    const second = edges[1].data as TsnLinkEdgeData;
+    expect(first.srcOrd).toBe(0);
+    expect(second.srcOrd).toBe(1);
+    const a = portLabelPoint(100, 80, "bottom" as never, first.srcOrd);
+    const b = portLabelPoint(100, 80, "bottom" as never, second.srcOrd);
+    expect(a).not.toEqual(b);
+  });
+});
+
+describe("buildTsnLinkPath（正交路径构造，真实路径无 mock 盲区）", () => {
+  it("cross：走廊高度随 corridorOrd 位移，路径互异", () => {
+    const base = {
+      sourceX: 100,
+      sourceY: 100,
+      targetX: 300,
+      targetY: 340,
+      sourcePosition: "bottom" as never,
+      targetPosition: "top" as never,
+      geometry: "cross" as const,
+      detourOrd: 0,
+      rowDir: 1 as const,
+    };
+    const p0 = buildTsnLinkPath({ ...base, corridorOrd: 0 });
+    const p1 = buildTsnLinkPath({ ...base, corridorOrd: 1 });
+    expect(p0).toContain("L 100,220");
+    expect(p1).toContain("L 100,232");
+    expect(p0).not.toBe(p1);
+  });
+
+  it("detour：向行外绕行且深度随序数递增", () => {
+    const base = {
+      sourceX: -100,
+      sourceY: 360,
+      targetX: 120,
+      targetY: 360,
+      sourcePosition: "right" as never,
+      targetPosition: "left" as never,
+      geometry: "detour" as const,
+      corridorOrd: 0,
+      rowDir: 1 as const,
+    };
+    const d0 = buildTsnLinkPath({ ...base, detourOrd: 0 });
+    const d1 = buildTsnLinkPath({ ...base, detourOrd: 1 });
+    expect(d0).toContain("404"); // 360 + 44
+    expect(d1).toContain("418"); // 360 + 44 + 14
+    expect(buildTsnLinkPath({ ...base, detourOrd: 0, rowDir: -1 })).toContain("316"); // 360 - 44
+  });
+
+  it("flat：直连", () => {
+    expect(
+      buildTsnLinkPath({
+        sourceX: 0,
+        sourceY: 10,
+        targetX: 50,
+        targetY: 10,
+        sourcePosition: "right" as never,
+        targetPosition: "left" as never,
+        geometry: "flat",
+        corridorOrd: 0,
+        detourOrd: 0,
+        rowDir: 1,
+      }),
+    ).toBe("M 0,10 L 50,10");
   });
 });

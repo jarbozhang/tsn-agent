@@ -1010,35 +1010,51 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
 
     // 链路对（KTD3 序）：接入（primary 后 backup）→ 平面内 backbone。
     // 每条携带平面归属与角色（R6）：接入边 = 对端 SW 的平面，骨干边 = 所属平面。
+    struct LinkSpec {
+        src: String,
+        dst: String,
+        plane: Option<String>,
+        role: Option<String>,
+    }
     let plane_of = |switch_id: &str| -> Option<String> {
         switch_by_id.get(switch_id).map(|s| s.plane.clone())
     };
-    let mut link_pairs: Vec<(String, String, Option<String>, Option<String>)> = Vec::new();
+    let mut link_pairs: Vec<LinkSpec> = Vec::new();
     for es in &ordered_es {
         let primary = es.attachment.primary.switch_id.clone();
         let backup = es.attachment.backup.switch_id.clone();
         let primary_plane = plane_of(&primary);
         let backup_plane = plane_of(&backup);
-        link_pairs.push((es.id.clone(), primary, primary_plane, Some("access".into())));
-        link_pairs.push((es.id.clone(), backup, backup_plane, Some("access".into())));
+        link_pairs.push(LinkSpec {
+            src: es.id.clone(),
+            dst: primary,
+            plane: primary_plane,
+            role: Some("access".into()),
+        });
+        link_pairs.push(LinkSpec {
+            src: es.id.clone(),
+            dst: backup,
+            plane: backup_plane,
+            role: Some("access".into()),
+        });
     }
     for plane in ["A", "B"] {
         let chain = plane_switch_chain(params, plane);
         for pair in chain.windows(2) {
-            link_pairs.push((
-                pair[0].clone(),
-                pair[1].clone(),
-                Some(plane.to_string()),
-                Some("backbone".into()),
-            ));
+            link_pairs.push(LinkSpec {
+                src: pair[0].clone(),
+                dst: pair[1].clone(),
+                plane: Some(plane.to_string()),
+                role: Some("backbone".into()),
+            });
         }
     }
 
     // 端口需求（两端各计一次）。
     let mut demand: HashMap<String, usize> = HashMap::new();
-    for (a, b, _, _) in &link_pairs {
-        *demand.entry(a.clone()).or_default() += 1;
-        *demand.entry(b.clone()).or_default() += 1;
+    for spec in &link_pairs {
+        *demand.entry(spec.src.clone()).or_default() += 1;
+        *demand.entry(spec.dst.clone()).or_default() += 1;
     }
     let port_count_for = |id: &str| -> usize { (*demand.get(id).unwrap_or(&0)).max(1) };
 
@@ -1061,17 +1077,24 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
     let single_hop = group_count <= 1;
     let left_group_count = (group_count + 1) / 2; // 前半挂左，奇数中位组归左。
 
-    // 未入 group 的悬挂交换机占 group 列之后的扩展列，避免与 group 0 重叠。
+    // 列归属以 group 的 planeSwitches 引用为准（switch 自带 groupId 可能指向
+    // 未引用它的 group——按 groupId 取列会与该 group 的真实交换机重叠）。
+    let mut col_by_switch: HashMap<String, usize> = HashMap::new();
+    for (i, g) in params.switch_groups.iter().enumerate() {
+        col_by_switch.insert(g.plane_switches.a.clone(), i);
+        col_by_switch.insert(g.plane_switches.b.clone(), i);
+    }
+    // 未被任何 group 引用的悬挂交换机占 group 列之后的扩展列。
     let mut extra_col: HashMap<String, usize> = HashMap::new();
     for sw in &ordered_switches {
-        if !group_index.contains_key(&sw.group_id) && !extra_col.contains_key(&sw.id) {
+        if !col_by_switch.contains_key(&sw.id) && !extra_col.contains_key(&sw.id) {
             let next = extra_col.len();
             extra_col.insert(sw.id.clone(), next);
         }
     }
     let total_cols = group_count + extra_col.len();
     let single_hop_sw_center =
-        BASE_X + 150.0 * (ordered_switches.len().saturating_sub(1)) as f64;
+        BASE_X + (GROUP_PITCH / 2.0) * (ordered_switches.len().saturating_sub(1)) as f64;
     let right_edge_x = BASE_X + GROUP_PITCH * (total_cols.saturating_sub(1)) as f64 + SIDE_GAP;
     let left_edge_x = BASE_X - SIDE_GAP;
 
@@ -1089,8 +1112,8 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
             // 规范图一：SW 同行居中、按节点序横排。
             IntermediatePosition { x: BASE_X + GROUP_PITCH * sw_seq as f64, y: SW_ROW_Y }
         } else {
-            let col = match group_index.get(&sw.group_id) {
-                Some(g) => *g,
+            let col = match col_by_switch.get(&sw.id) {
+                Some(c) => *c,
                 None => group_count + extra_col[&sw.id],
             };
             let y = if sw.plane == "B" { PLANE_B_Y } else { PLANE_A_Y };
@@ -1132,7 +1155,7 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
             let (row_y, idx, row_len) =
                 if wi < n_up { (ES_TOP_Y, wi, n_up) } else { (ES_BOTTOM_Y, wi - n_up, n - n_up) };
             let row_start =
-                single_hop_sw_center - 90.0 * (row_len.saturating_sub(1)) as f64;
+                single_hop_sw_center - (ES_PITCH / 2.0) * (row_len.saturating_sub(1)) as f64;
             IntermediatePosition { x: row_start + ES_PITCH * idx as f64, y: row_y }
         } else {
             // 规范图二：y 对齐 primary 平面行；同 (侧, 行) lane 沿外端向外堆叠。
@@ -1178,13 +1201,19 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
         format!("P{}", value)
     };
     let mut links: Vec<IntermediateLink> = Vec::new();
-    for (numeric_link_id, (src, dst, plane, role)) in link_pairs.iter().enumerate() {
-        let src_port = next_port(src);
-        let dst_port = next_port(dst);
-        let mut link =
-            create_link(numeric_link_id as i64, src, &src_port, dst, &dst_port, data_rate);
-        link.plane = plane.clone();
-        link.role = role.clone();
+    for (numeric_link_id, spec) in link_pairs.iter().enumerate() {
+        let src_port = next_port(&spec.src);
+        let dst_port = next_port(&spec.dst);
+        let mut link = create_link(
+            numeric_link_id as i64,
+            &spec.src,
+            &src_port,
+            &spec.dst,
+            &dst_port,
+            data_rate,
+        );
+        link.plane = spec.plane.clone();
+        link.role = spec.role.clone();
         links.push(link);
     }
 
@@ -2670,6 +2699,10 @@ mod tests {
         // 行内相邻间距 ≥ ES_PITCH（R3 反重叠）。
         assert!((dp_pos(&topo, "es1").0 - dp_pos(&topo, "es2").0).abs() >= 180.0);
         assert!((dp_pos(&topo, "es4").0 - dp_pos(&topo, "es5").0).abs() >= 180.0);
+        // ES 行对 SW 行居中（R1）：上行均值 x = SW 均值 x。
+        let sw_mean = (sw1x + sw2x) / 2.0;
+        let top_mean = (1..=3).map(|i| dp_pos(&topo, &format!("es{}", i)).0).sum::<f64>() / 3.0;
+        assert!((top_mean - sw_mean).abs() <= 1.0, "top row not centered: {} vs {}", top_mean, sw_mean);
     }
 
     #[test]
@@ -2703,10 +2736,8 @@ mod tests {
         assert!((dp_pos(&topo, "e3").0 - dp_pos(&topo, "e4").0).abs() >= 180.0);
     }
 
-    #[test]
-    fn dual_plane_three_group_sides_split_front_half_left() {
-        // R2：3 组 → 前 2 组（含中位）挂左、第 3 组挂右，确定性。
-        let params = json!({
+    fn dual_plane_three_group_params() -> serde_json::Value {
+        json!({
             "dataRateMbps": 1000,
             "planes": [{"id": "A"}, {"id": "B"}],
             "switches": [
@@ -2729,10 +2760,15 @@ mod tests {
             ],
             "backbone": {"mode": "line", "withinPlane": true},
             "crossPlaneLinks": {"mode": "none"}
-        });
+        })
+    }
+
+    #[test]
+    fn dual_plane_three_group_sides_split_front_half_left() {
+        // R2：3 组 → 前 2 组（含中位）挂左、第 3 组挂右，确定性。
         let (topo, _) = initialize_topology(&InitializeIntent {
             template_id: "dual-plane-redundant".into(),
-            params,
+            params: dual_plane_three_group_params(),
         })
         .unwrap();
         let min_sw_x = ["sw1", "sw3", "sw5"].iter().map(|id| dp_pos(&topo, id).0).fold(f64::MAX, f64::min);
@@ -2949,7 +2985,11 @@ mod tests {
     #[test]
     fn dual_plane_output_passes_validate_intermediate() {
         // Finding 2：sidecar initialize 不复验，端口分配 bug 须被本断言提前拦截。
-        for params in [dual_plane_single_hop_params(), dual_plane_two_hop_params()] {
+        for params in [
+            dual_plane_single_hop_params(),
+            dual_plane_two_hop_params(),
+            dual_plane_three_group_params(),
+        ] {
             let (topo, _) = initialize_topology(&InitializeIntent {
                 template_id: "dual-plane-redundant".into(),
                 params,
@@ -2963,28 +3003,55 @@ mod tests {
 
     #[test]
     fn dual_plane_generation_is_deterministic_and_non_degenerate() {
-        // R5：同输入两次全等 + 无两个节点共享 (x,y)。
-        let make = || {
-            initialize_topology(&InitializeIntent {
-                template_id: "dual-plane-redundant".into(),
-                params: dual_plane_two_hop_params(),
-            })
-            .unwrap()
-            .0
-        };
-        let a = make();
-        let b = make();
-        assert_eq!(
-            serde_json::to_value(&a).unwrap(),
-            serde_json::to_value(&b).unwrap()
-        );
-        let mut seen = std::collections::HashSet::new();
-        for n in &a.nodes {
-            assert!(
-                seen.insert((n.position.x.to_bits(), n.position.y.to_bits())),
-                "node {} shares position with another",
-                n.id
+        // R4/AE5：同输入两次全等 + 无两个节点共享 (x,y)——覆盖全部三种布局分支
+        // （单跳三明治 / 双跳两平面行 / 3 组分侧）。
+        for params in [
+            dual_plane_single_hop_params(),
+            dual_plane_two_hop_params(),
+            dual_plane_three_group_params(),
+        ] {
+            let make = || {
+                initialize_topology(&InitializeIntent {
+                    template_id: "dual-plane-redundant".into(),
+                    params: params.clone(),
+                })
+                .unwrap()
+                .0
+            };
+            let a = make();
+            let b = make();
+            assert_eq!(
+                serde_json::to_value(&a).unwrap(),
+                serde_json::to_value(&b).unwrap()
             );
+            let mut seen = std::collections::HashSet::new();
+            for n in &a.nodes {
+                assert!(
+                    seen.insert((n.position.x.to_bits(), n.position.y.to_bits())),
+                    "node {} shares position with another",
+                    n.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dual_plane_grouped_but_unreferenced_switch_gets_own_column() {
+        // 自带 groupId 但未被该 group planeSwitches 引用的交换机不得与
+        // 该 group 的真实交换机重叠（列归属以 planeSwitches 引用为准）。
+        let mut params = dual_plane_two_hop_params();
+        params["switches"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": "sw9", "plane": "A", "groupId": "g1"}));
+        let (topo, _) = initialize_topology(&InitializeIntent {
+            template_id: "dual-plane-redundant".into(),
+            params,
+        })
+        .unwrap();
+        let sw9 = dp_pos(&topo, "sw9");
+        for id in ["sw1", "sw2", "sw3", "sw4"] {
+            assert_ne!(sw9, dp_pos(&topo, id), "sw9 overlaps {}", id);
         }
     }
 

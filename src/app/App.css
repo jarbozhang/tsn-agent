@@ -1717,6 +1717,7 @@ textarea:focus-visible {
   column-gap: 8px;
   align-items: center;
   min-width: 96px;
+  /* 须 ≤ Rust 布局间距 ES_PITCH(180) − 留白；改宽时同步 topology_compute.rs 布局常量。 */
   max-width: 126px;
   padding: 8px 10px;
   border: 1px solid rgba(250, 84, 28, 0.48);
