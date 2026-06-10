@@ -98,6 +98,10 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
   const sdkOptions = {
     cwd,
     settingSources: ["user", "project"],
+    // 显式 pin 模型：settingSources 含 "user" 会继承开发者个人 Claude Code 的
+    // 默认模型（如 /model 切到 worker 环境不可用的型号即整轮失败）——产品运行时
+    // 不耦合个人偏好。
+    model: "claude-sonnet-4-6",
     permissionMode: "dontAsk",
     tools: { type: "preset", preset: "claude_code" },
     allowedTools: buildAllowedToolsForStage(resolvedOptions.stageRunnerInput, Boolean(topologyMcpConfig)),
