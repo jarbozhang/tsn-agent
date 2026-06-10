@@ -17,6 +17,9 @@
   --error-dim: rgba(255, 77, 79, 0.1);
   --info: #1677ff;
   --info-dim: rgba(22, 119, 255, 0.1);
+  /* 双平面链路配色（AFDX 惯例 A 蓝 / B 红）——独立 token，不复用 --info/--error 语义。 */
+  --plane-a: #1d5fa8;
+  --plane-b: #c0392b;
   color: var(--text-primary);
   background: var(--bg-primary);
   font-family:
@@ -1642,9 +1645,33 @@ textarea:focus-visible {
   stroke: #a8b0c0;
 }
 
+/* 平面配色按 className 着色，规则置于 .selected 之前——级联顺序保证选中态回到 --accent。 */
+.topology-canvas .react-flow__edge.plane-a .react-flow__edge-path {
+  stroke: var(--plane-a);
+}
+
+.topology-canvas .react-flow__edge.plane-b .react-flow__edge-path {
+  stroke: var(--plane-b);
+}
+
+.topology-canvas .react-flow__edge.plane-neutral .react-flow__edge-path {
+  stroke: #a8b0c0;
+}
+
 .topology-canvas .react-flow__edge.selected .react-flow__edge-path,
 .topology-canvas .react-flow__edge:focus .react-flow__edge-path {
   stroke: var(--accent);
+}
+
+.tsn-port-label {
+  position: absolute;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 3px;
+  padding: 0 3px;
+  pointer-events: none;
 }
 
 .topology-canvas .react-flow__edge.flow-highlighted .react-flow__edge-path {

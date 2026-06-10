@@ -1,11 +1,15 @@
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import {
   Background,
+  BaseEdge,
   Controls,
+  EdgeLabelRenderer,
+  getSmoothStepPath,
   Handle,
   Position,
   ReactFlow,
   type Edge,
+  type EdgeProps,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
@@ -32,6 +36,10 @@ const CONFIG_TABS: Array<{ id: ConfigTabId; label: string }> = [
 
 const nodeTypes = {
   tsnNode: TsnTopologyNode,
+};
+
+const edgeTypes = {
+  tsnLink: TsnLinkEdge,
 };
 
 export interface WorkspacePaneProps {
@@ -93,6 +101,7 @@ export function WorkspacePane({
               nodes={flowTopology.nodes}
               edges={flowTopology.edges}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               fitView
               nodesDraggable={false}
               onNodeClick={onNodeSelect}
@@ -199,25 +208,131 @@ export function WorkspacePane({
   );
 }
 
-function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): { nodes: Node[]; edges: Edge[] } {
+type HandleSide = "top" | "bottom" | "left" | "right";
+
+export interface LinkStyleMeta {
+  plane?: "A" | "B";
+  leftLabel?: string;
+  rightLabel?: string;
+}
+
+/** R7：stylesJson 容错解析——缺失、非法值、解析失败一律回退空 meta（中性渲染），不抛错。 */
+export function parseLinkStyles(stylesJson: string): LinkStyleMeta {
+  try {
+    const parsed: unknown = JSON.parse(stylesJson);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const record = parsed as Record<string, unknown>;
+    const meta: LinkStyleMeta = {};
+    if (record.plane === "A" || record.plane === "B") {
+      meta.plane = record.plane;
+    }
+    if (typeof record.leftLabel === "string" && record.leftLabel !== "") {
+      meta.leftLabel = record.leftLabel;
+    }
+    if (typeof record.rightLabel === "string" && record.rightLabel !== "") {
+      meta.rightLabel = record.rightLabel;
+    }
+    return meta;
+  } catch {
+    return {};
+  }
+}
+
+/** R9：平面配色走 className（CSS 级联保证选中态 --accent 优先），不用 inline stroke。 */
+export function planeClassName(plane: LinkStyleMeta["plane"]): string {
+  if (plane === "A") {
+    return "plane-a";
+  }
+  if (plane === "B") {
+    return "plane-b";
+  }
+  return "plane-neutral";
+}
+
+/** R10：跨行（y 不同）一律垂直 handle、同行水平——两端 DB 坐标的纯函数。 */
+export function pickHandleSides(
+  source: Pick<TopologyNodeRow, "x" | "y">,
+  target: Pick<TopologyNodeRow, "x" | "y">,
+): { source: HandleSide; target: HandleSide } {
+  if (source.y === target.y) {
+    return source.x <= target.x
+      ? { source: "right", target: "left" }
+      : { source: "left", target: "right" };
+  }
+
+  return source.y < target.y
+    ? { source: "bottom", target: "top" }
+    : { source: "top", target: "bottom" };
+}
+
+export interface TsnLinkEdgeData {
+  /** R12：同 handle 边的 smoothstep 转弯距离（基准 20 + 序数 × 12）。 */
+  offset: number;
+  /** 同 handle 序数（按 linkSeq 升序），端口标签横向错开用。 */
+  stackIndex: number;
+  /** 同行共走廊边的绕行位移（offset 对同 y 直线无效，KTD）；0 = 直连。 */
+  centerYShift: number;
+  leftLabel?: string;
+  rightLabel?: string;
+  [key: string]: unknown;
+}
+
+function bumpCursor(cursor: Map<string, number>, key: string): number {
+  const value = cursor.get(key) ?? 0;
+  cursor.set(key, value + 1);
+  return value;
+}
+
+export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): { nodes: Node[]; edges: Edge[] } {
+  const nodeByImac = new Map(snapshot.nodes.map((node) => [node.imac, node]));
+  const sortedLinks = [...snapshot.links].sort((a, b) => a.linkSeq - b.linkSeq);
+  const handleCursor = new Map<string, number>();
+
   return {
     nodes: snapshot.nodes.map((node) => ({
       id: String(node.imac),
       type: "tsnNode",
       position: { x: node.x, y: node.y },
-      sourcePosition: Position.Right,
-      targetPosition: Position.Left,
       data: {
         label: nodeRowLabel(node),
         nodeType: node.nodeType === "switch" ? "switch" : "endSystem",
         imac: node.imac,
       },
     })),
-    edges: snapshot.links.map((link) => ({
-      id: linkRowId(link),
-      source: String(link.srcImac),
-      target: String(link.dstImac),
-    })),
+    edges: sortedLinks.map((link) => {
+      const source = nodeByImac.get(link.srcImac);
+      const target = nodeByImac.get(link.dstImac);
+      const meta = parseLinkStyles(link.stylesJson);
+      const sides =
+        source && target
+          ? pickHandleSides(source, target)
+          : { source: "right" as HandleSide, target: "left" as HandleSide };
+      const stackIndex = Math.max(
+        bumpCursor(handleCursor, `${link.srcImac}:${sides.source}`),
+        bumpCursor(handleCursor, `${link.dstImac}:${sides.target}`),
+      );
+      const sameRow = source !== undefined && target !== undefined && source.y === target.y;
+      const data: TsnLinkEdgeData = {
+        offset: 20 + stackIndex * 12,
+        stackIndex,
+        centerYShift: sameRow && stackIndex > 0 ? 44 + (stackIndex - 1) * 14 : 0,
+        leftLabel: meta.leftLabel,
+        rightLabel: meta.rightLabel,
+      };
+      return {
+        id: linkRowId(link),
+        source: String(link.srcImac),
+        target: String(link.dstImac),
+        sourceHandle: `s-${sides.source}`,
+        targetHandle: `t-${sides.target}`,
+        type: "tsnLink",
+        className: planeClassName(meta.plane),
+        data,
+      };
+    }),
   };
 }
 
@@ -235,6 +350,13 @@ function linkRowId(link: TopologyLinkRow): string {
   return `link-${link.linkSeq}`;
 }
 
+const HANDLE_SIDES: Array<[HandleSide, Position]> = [
+  ["top", Position.Top],
+  ["bottom", Position.Bottom],
+  ["left", Position.Left],
+  ["right", Position.Right],
+];
+
 function TsnTopologyNode({ data }: NodeProps) {
   const nodeData = data as {
     label?: string;
@@ -245,11 +367,94 @@ function TsnTopologyNode({ data }: NodeProps) {
 
   return (
     <div className={`tsn-node ${nodeType}`}>
-      <Handle type="target" position={Position.Left} />
-      <Handle type="source" position={Position.Right} />
+      {HANDLE_SIDES.map(([side, position]) => (
+        <Fragment key={side}>
+          <Handle id={`s-${side}`} type="source" position={position} />
+          <Handle id={`t-${side}`} type="target" position={position} />
+        </Fragment>
+      ))}
       <span className="tsn-node-type mono">{nodeType === "switch" ? "SW" : "ES"}</span>
       <strong>{nodeData.label}</strong>
       <small className="mono">imac {nodeData.imac}</small>
     </div>
+  );
+}
+
+/** 端口标签锚点：贴近 handle、沿 R12 偏移同轴错开，避免同 handle 标签互叠。 */
+function portLabelPoint(
+  x: number,
+  y: number,
+  position: Position,
+  stackIndex: number,
+): { x: number; y: number } {
+  switch (position) {
+    case Position.Top:
+      return { x: x + 14 + stackIndex * 16, y: y - 12 };
+    case Position.Bottom:
+      return { x: x + 14 + stackIndex * 16, y: y + 12 };
+    case Position.Left:
+      return { x: x - 18, y: y - 11 - stackIndex * 12 };
+    default:
+      return { x: x + 18, y: y - 11 - stackIndex * 12 };
+  }
+}
+
+function PortLabel({ x, y, text }: { x: number; y: number; text: string }) {
+  return (
+    <EdgeLabelRenderer>
+      <div
+        className="tsn-port-label mono nodrag nopan"
+        style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}
+      >
+        {text}
+      </div>
+    </EdgeLabelRenderer>
+  );
+}
+
+/**
+ * Plan 2026-06-10-002 KTD：thin custom edge——内部仍走 getSmoothStepPath（保
+ * smoothstep 形态与 offset），加双端端口标签；同行共走廊边用 centerY 位移绕行
+ * （offset 参数对同 y 直线无效）。
+ */
+function TsnLinkEdge(props: EdgeProps) {
+  const {
+    id,
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    markerEnd,
+    style,
+  } = props;
+  const data = (props.data ?? {}) as Partial<TsnLinkEdgeData>;
+  const stackIndex = data.stackIndex ?? 0;
+  const centerYShift = data.centerYShift ?? 0;
+  const [edgePath] = getSmoothStepPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    borderRadius: 6,
+    offset: data.offset ?? 20,
+    ...(centerYShift !== 0 ? { centerY: (sourceY + targetY) / 2 + centerYShift } : {}),
+  });
+  const left = data.leftLabel
+    ? portLabelPoint(sourceX, sourceY, sourcePosition, stackIndex)
+    : undefined;
+  const right = data.rightLabel
+    ? portLabelPoint(targetX, targetY, targetPosition, stackIndex)
+    : undefined;
+
+  return (
+    <>
+      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
+      {left && data.leftLabel && <PortLabel x={left.x} y={left.y} text={data.leftLabel} />}
+      {right && data.rightLabel && <PortLabel x={right.x} y={right.y} text={data.rightLabel} />}
+    </>
   );
 }
