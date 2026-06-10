@@ -69,6 +69,9 @@ pub const P0_DOMAIN_SCHEMA_SQL: &str = r#"
         session_id    TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
         imac          INTEGER NOT NULL,
         sync_name     TEXT    NOT NULL,
+        -- 逻辑节点名（如 ES-1）：initialize 落库写入，画布显示优先用它；
+        -- NULLABLE——apply_operations 增量节点与历史数据回退派生名。
+        name          TEXT,
         x             REAL    NOT NULL,
         y             REAL    NOT NULL,
         sync_type     TEXT    NOT NULL,
@@ -250,6 +253,27 @@ pub fn safety_net_schema_sql() -> String {
     )
 }
 
+/// topology_nodes.name 加列迁移（2026-06-10）：CREATE IF NOT EXISTS 不会给
+/// 已存在的表补列，SQLite 的 ALTER 又不幂等——用 pragma 检查守卫，老库自愈，
+/// 新库由上面 CREATE 直接带列后此处 no-op。
+pub async fn ensure_topology_nodes_name_column(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+) -> Result<(), sqlx::Error> {
+    let has_column: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pragma_table_info('topology_nodes') WHERE name = 'name'",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    if has_column == 0 {
+        sqlx::query("ALTER TABLE topology_nodes ADD COLUMN name TEXT")
+            .execute(pool)
+            .await?;
+    }
+
+    Ok(())
+}
+
 /// Export/Import 共享的 session 域数据表清单（表名 + 列清单，首列恒为 session_id）。
 /// 单一事实源：导出切片（session_export）与导入复制（session_import）都遍历此清单，
 /// 防两端漂移 —— 导出写了 import 不收的表 = 静默丢数据。
@@ -258,7 +282,7 @@ pub const SESSION_SCOPED_TABLES: &[(&str, &[&str])] = &[
     ("topology_refs", &["session_id", "ref_json"]),
     (
         "topology_nodes",
-        &["session_id", "imac", "sync_name", "x", "y", "sync_type", "node_type", "insert_order"],
+        &["session_id", "imac", "sync_name", "name", "x", "y", "sync_type", "node_type", "insert_order"],
     ),
     (
         "topology_links",

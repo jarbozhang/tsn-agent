@@ -149,6 +149,7 @@ export function WorkspacePane({
             </div>
             {selectedNode ? (
               <div className="detail-grid">
+                <DetailRow label="名称" value={selectedNode.name ?? "无"} />
                 <DetailRow label="IMAC" value={selectedNode.imac} />
                 <DetailRow label="同步名称" value={selectedNode.syncName} />
                 <DetailRow label="类型" value={selectedNode.nodeType === "switch" ? "交换机" : "端系统"} />
@@ -220,7 +221,12 @@ function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): { nodes: No
   };
 }
 
-function nodeRowLabel(node: TopologyNodeRow): string {
+/** 画布标签：优先逻辑名（与 agent 对话命名一致），缺失回退「前缀-同步名」派生。 */
+export function nodeRowLabel(node: TopologyNodeRow): string {
+  if (node.name) {
+    return node.name;
+  }
+
   const prefix = node.nodeType === "switch" ? "SW" : "ES";
   return `${prefix}-${node.syncName}`;
 }

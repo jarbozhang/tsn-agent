@@ -267,12 +267,13 @@ async fn persist_initialized_topology(
         let sync_type = json!({ "_classPath": legacy_class_path(type_str) }).to_string();
         sqlx::query(
             r#"INSERT INTO topology_nodes
-               (session_id, imac, sync_name, x, y, sync_type, node_type, insert_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
+               (session_id, imac, sync_name, name, x, y, sync_type, node_type, insert_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(session_id)
         .bind(imac)
         .bind(node.numeric_id.to_string())
+        .bind(&node.name)
         .bind(node.position.x)
         .bind(node.position.y)
         .bind(&sync_type)
@@ -356,7 +357,7 @@ pub async fn inspect(
         }
     };
     let node_rows = sqlx::query(
-        r#"SELECT imac, sync_name, x, y, sync_type, node_type, insert_order
+        r#"SELECT imac, sync_name, name, x, y, sync_type, node_type, insert_order
            FROM topology_nodes
            WHERE session_id = ?
            ORDER BY insert_order, imac"#,
@@ -403,6 +404,7 @@ pub async fn inspect(
         .map(|r| TopologyNodeRow {
             imac: r.get("imac"),
             sync_name: r.get("sync_name"),
+            name: r.get("name"),
             x: r.get("x"),
             y: r.get("y"),
             sync_type: r.get("sync_type"),
@@ -710,4 +712,58 @@ async fn require_session(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::Row;
+
+    /// 逻辑节点名（agent 传入的 SW-1/ES-1）必须随 initialize 落库——丢弃会导致
+    /// 聊天命名与画布派生名（前缀+全局序号）错位（ce-debug 2026-06-10）。
+    #[test]
+    fn persist_writes_logical_node_name_for_display() {
+        tauri::async_runtime::block_on(async {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql()).execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1', 't', 'now', 'now', '{}')")
+                .execute(&pool)
+                .await
+                .unwrap();
+
+            let topology: crate::topology_intermediate::IntermediateTopology =
+                serde_json::from_value(serde_json::json!({
+                    "schemaVersion": "tsn-agent.topology.intermediate.v0",
+                    "metadata": { "templateId": "dual-plane-redundant", "layout": "dual-plane", "source": "template" },
+                    "nodes": [
+                        { "id": "SW-1", "numericId": 0, "name": "SW-1", "type": "switch",
+                          "ports": [], "position": { "x": 0.0, "y": 0.0 } },
+                        { "id": "ES-1", "numericId": 1, "name": "ES-1", "type": "endSystem",
+                          "ports": [], "position": { "x": 1.0, "y": 1.0 } }
+                    ],
+                    "links": [],
+                    "diagnostics": []
+                }))
+                .unwrap();
+
+            super::persist_initialized_topology(&pool, "s1", &topology)
+                .await
+                .unwrap();
+
+            let names: Vec<Option<String>> =
+                sqlx::query("SELECT name FROM topology_nodes WHERE session_id = 's1' ORDER BY insert_order")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(|row| row.get("name"))
+                    .collect();
+
+            assert_eq!(names, vec![Some("SW-1".to_string()), Some("ES-1".to_string())]);
+        });
+    }
 }

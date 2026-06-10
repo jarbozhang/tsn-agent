@@ -34,15 +34,15 @@ vi.mock("@xyflow/react", () => ({
   ),
 }));
 
-import { WorkspacePane, type WorkspacePaneProps } from "./index";
-import type { TopologyRowSnapshot } from "../../../sessions/topology-snapshot";
+import { nodeRowLabel, WorkspacePane, type WorkspacePaneProps } from "./index";
+import type { TopologyNodeRow, TopologyRowSnapshot } from "../../../sessions/topology-snapshot";
 
 function sampleSnapshot(): TopologyRowSnapshot {
   return {
     sessionId: "s1",
     nodes: [
-      { imac: 1, syncName: "0", x: 0, y: 0, syncType: "{}", nodeType: "switch", insertOrder: 0 },
-      { imac: 2, syncName: "1", x: 160, y: 0, syncType: "{}", nodeType: null, insertOrder: 1 },
+      { imac: 1, syncName: "0", name: null, x: 0, y: 0, syncType: "{}", nodeType: "switch", insertOrder: 0 },
+      { imac: 2, syncName: "1", name: null, x: 160, y: 0, syncType: "{}", nodeType: null, insertOrder: 1 },
     ],
     links: [{ linkSeq: 0, name: "uplink", srcImac: 1, dstImac: 2, stylesJson: "{}" }],
   };
@@ -104,5 +104,32 @@ describe("WorkspacePane", () => {
     render(<WorkspacePane {...baseProps({ onSelectConfigTab })} />);
     await user.click(screen.getByRole("tab", { name: "链路详情" }));
     expect(onSelectConfigTab).toHaveBeenCalledWith("link-detail");
+  });
+});
+
+describe("nodeRowLabel", () => {
+  function nodeRow(overrides: Partial<TopologyNodeRow> = {}): TopologyNodeRow {
+    return {
+      imac: 102,
+      syncName: "2",
+      name: null,
+      x: 0,
+      y: 0,
+      syncType: "{}",
+      nodeType: "endSystem",
+      insertOrder: 2,
+      ...overrides,
+    };
+  }
+
+  it("画布标签优先用逻辑名，与 agent 对话命名一致", () => {
+    // 双平面场景：agent 传 ES-1 而 numericId=2 —— 老逻辑显示 ES-2 与聊天错位。
+    expect(nodeRowLabel(nodeRow({ name: "ES-1" }))).toBe("ES-1");
+    expect(nodeRowLabel(nodeRow({ name: "SW-1", nodeType: "switch", syncName: "0" }))).toBe("SW-1");
+  });
+
+  it("逻辑名缺失（增量节点/历史数据）回退「前缀-同步名」派生", () => {
+    expect(nodeRowLabel(nodeRow())).toBe("ES-2");
+    expect(nodeRowLabel(nodeRow({ nodeType: "switch", syncName: "0" }))).toBe("SW-0");
   });
 });

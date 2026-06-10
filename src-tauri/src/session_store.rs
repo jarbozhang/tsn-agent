@@ -234,6 +234,11 @@ pub async fn connect_app_database(app: &tauri::AppHandle) -> Result<Pool<Sqlite>
         .await
         .map_err(db_error)?;
 
+    // 加列迁移：老库 topology_nodes 补 name 列（幂等，见 db.rs）。
+    crate::db::ensure_topology_nodes_name_column(&pool)
+        .await
+        .map_err(db_error)?;
+
     Ok(pool)
 }
 

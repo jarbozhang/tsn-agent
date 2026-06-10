@@ -32,6 +32,8 @@ pub struct QueryTopologyResponse {
 pub struct TopologyNodeRow {
     pub imac: i64,
     pub sync_name: String,
+    /// 逻辑节点名（如 ES-1），initialize 写入；缺失时前端回退派生名。
+    pub name: Option<String>,
     pub x: f64,
     pub y: f64,
     pub sync_type: String,
@@ -57,7 +59,7 @@ pub async fn query_topology(
 ) -> Result<QueryTopologyResponse, String> {
     let pool = store.pool(&app).await?;
     let nodes = sqlx::query(
-        r#"SELECT imac, sync_name, x, y, sync_type, node_type, insert_order
+        r#"SELECT imac, sync_name, name, x, y, sync_type, node_type, insert_order
            FROM topology_nodes
            WHERE session_id = ?
            ORDER BY insert_order, imac"#,
@@ -84,6 +86,7 @@ pub async fn query_topology(
             .map(|r| TopologyNodeRow {
                 imac: r.get("imac"),
                 sync_name: r.get("sync_name"),
+                name: r.get("name"),
                 x: r.get("x"),
                 y: r.get("y"),
                 sync_type: r.get("sync_type"),

@@ -15,6 +15,8 @@ export interface TopologyRowSnapshot {
 export interface TopologyNodeRow {
   imac: number;
   syncName: string;
+  /** 逻辑节点名（如 ES-1），initialize 写入；缺失时画布回退派生名。 */
+  name: string | null;
   x: number;
   y: number;
   syncType: string;
