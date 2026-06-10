@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { runTsnAgent } from "../agent/agent-adapter";
+import type { ToolCallRecord } from "../agent/tool-call-record";
 import {
   logDiagnostic,
   sessionSummary,
@@ -50,6 +51,7 @@ export function App() {
     setCurrentSession,
     sessionExists,
     updateAssistantMessage,
+    updateAssistantToolCalls,
     reloadSessionsList,
     handleNewSession: createNewSession,
     handleSelectSession: selectSession,
@@ -132,6 +134,9 @@ export function App() {
       messages: [...contextSession.messages, userMessage, assistantMessage],
     };
     let streamedText = "";
+    // Plan 2026-06-10-001 U4：流式工具卡片按 id upsert（纯内存，不落库）；
+    // done 后由 result.toolCalls 整体覆盖对账（R12），崩溃路径随错误态丢弃（R14）。
+    const streamedToolCalls = new Map<string, ToolCallRecord>();
 
     setInput((value) => (value.trim() === trimmedInput ? "" : value));
     agentRun.startRun();
@@ -164,6 +169,13 @@ export function App() {
           agentRun.recordChunkAt(Date.now());
           agentRun.setPendingAssistantMessageId(undefined);
           updateAssistantMessage(pendingSession.id, assistantMessage.id, redactProviderNamesForDisplay(streamedText));
+        },
+        onToolCall: (record) => {
+          const previous = streamedToolCalls.get(record.id);
+          // result 事件不带 args：spread 不覆盖缺席键，previous.args 自然保留。
+          streamedToolCalls.set(record.id, previous ? { ...previous, ...record } : record);
+          agentRun.markStreaming();
+          updateAssistantToolCalls(pendingSession.id, assistantMessage.id, [...streamedToolCalls.values()]);
         },
       });
       const completedAt = new Date().toISOString();

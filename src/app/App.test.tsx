@@ -243,6 +243,99 @@ describe("App", () => {
     expect(screen.getByText("ls")).toBeInTheDocument();
   });
 
+  it("streams running cards mid-run (id upsert) and reconciles with done toolCalls (U4/AE1/AE6)", async () => {
+    const user = userEvent.setup();
+    let resolveRun!: (value: TsnAgentResult) => void;
+    runTsnAgentMock.mockImplementationOnce((request: { onToolCall?: (record: unknown) => void }) => {
+      request.onToolCall?.({
+        id: "toolu-1",
+        name: "Bash",
+        friendlyName: "Bash",
+        status: "running",
+        summary: "ls",
+        args: { command: "ls" },
+      });
+      // 同 id 重复 start：upsert 就地合并，不追加新卡。
+      request.onToolCall?.({
+        id: "toolu-1",
+        name: "Bash",
+        friendlyName: "Bash",
+        status: "running",
+        summary: "ls",
+        args: { command: "ls" },
+      });
+      return new Promise<TsnAgentResult>((resolve) => {
+        resolveRun = resolve;
+      });
+    });
+    render(<App />);
+
+    await typeDefaultIntent(user);
+    await user.click(screen.getByRole("button", { name: "生成规划草案" }));
+
+    // run 中途：流式卡片已出现，且同 id 只有一张。
+    await waitFor(() => {
+      expect(screen.getAllByText("Bash")).toHaveLength(1);
+    });
+
+    // done 对账：权威列表补齐流式期间漏发的 toolu-2。
+    resolveRun(
+      topologyAgentResult({
+        toolCalls: [
+          { id: "toolu-1", name: "Bash", friendlyName: "Bash", status: "success", summary: "ls", args: { command: "ls" }, result: "ok" },
+          { id: "toolu-2", name: "Read", friendlyName: "Read", status: "success", summary: "App.tsx", args: { file_path: "App.tsx" } },
+        ],
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("已根据本轮需求生成拓扑草案。")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Read")).toBeInTheDocument();
+
+    const stored = JSON.parse(window.localStorage.getItem("tsn-agent.sessions.v0") ?? "[]");
+    const withTools = stored[0].messages.find(
+      (message: { role: string; toolCalls?: Array<{ status: string }> }) => message.role === "assistant" && message.toolCalls?.length,
+    );
+    expect(withTools?.toolCalls).toHaveLength(2);
+    expect(withTools?.toolCalls.every((call: { status: string }) => call.status !== "running")).toBe(true);
+  });
+
+  it("drops streamed cards when the run resolves a failure result without toolCalls (U4/AE5)", async () => {
+    const user = userEvent.setup();
+    runTsnAgentMock.mockImplementationOnce(async (request: { onToolCall?: (record: unknown) => void }) => {
+      request.onToolCall?.({
+        id: "toolu-1",
+        name: "Bash",
+        friendlyName: "Bash",
+        status: "running",
+        summary: "ls",
+        args: { command: "ls" },
+      });
+      // 真实崩溃路径：adapter catch 吞掉异常，resolve 不含 toolCalls 的失败文案结果。
+      return {
+        events: [],
+        workflow: createInitialWorkflowState(),
+        assistantText: "本轮请求失败：智能助手运行时异常退出。",
+        mode: "claude",
+      } satisfies TsnAgentResult;
+    });
+    render(<App />);
+
+    await typeDefaultIntent(user);
+    await user.click(screen.getByRole("button", { name: "生成规划草案" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/本轮请求失败/)).toBeInTheDocument();
+    });
+
+    // 流式卡片随 done 覆盖（toolCalls: undefined）丢弃：无运行中残卡、不落库。
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    const stored = JSON.parse(window.localStorage.getItem("tsn-agent.sessions.v0") ?? "[]");
+    const assistantMessages = stored[0].messages.filter((message: { role: string }) => message.role === "assistant");
+    expect(assistantMessages.every((message: { toolCalls?: unknown[] }) => !message.toolCalls?.length)).toBe(true);
+  });
+
   it("renames the session after the first user message", async () => {
     const user = userEvent.setup();
     render(<App />);

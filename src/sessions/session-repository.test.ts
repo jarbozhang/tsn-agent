@@ -231,6 +231,32 @@ describe("redactSessionForStorage", () => {
     expect(typeof storedCall?.result).toBe("string");
     expect((storedCall?.result as string).length).toBeLessThan(big.length);
   });
+
+  it("filters running tool calls before persistence and logs the anomaly (U4 backstop)", () => {
+    const session: TsnSession = {
+      ...createEmptySession(),
+      messages: [
+        {
+          id: "message-running-tool",
+          role: "assistant",
+          createdAt: "2026-06-10T00:00:00.000Z",
+          content: "进行中。",
+          toolCalls: [
+            { id: "toolu-running", name: "Bash", friendlyName: "Bash", status: "running", summary: "ls", args: { command: "ls" } },
+            { id: "toolu-done", name: "Bash", friendlyName: "Bash", status: "success", summary: "ls", args: { command: "ls" }, result: "ok" },
+          ],
+        },
+      ],
+    };
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const redacted = redactSessionForStorage(session);
+
+    expect(redacted.messages[0].toolCalls).toHaveLength(1);
+    expect(redacted.messages[0].toolCalls?.[0].id).toBe("toolu-done");
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("toolu-running"));
+    consoleSpy.mockRestore();
+  });
 });
 
 describe("BrowserSessionRepository tool calls", () => {

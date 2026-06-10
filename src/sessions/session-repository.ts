@@ -267,7 +267,7 @@ export function redactSessionForStorage(session: TsnSession): TsnSession {
     messages: session.messages.map((message) => ({
       ...message,
       content: redactSecrets(message.content),
-      ...(message.toolCalls ? { toolCalls: message.toolCalls.map(redactToolCallForStorage) } : {}),
+      ...(message.toolCalls ? { toolCalls: dropRunningToolCalls(message.toolCalls).map(redactToolCallForStorage) } : {}),
     })),
     agentEvents: session.agentEvents.map((event) => ({
       ...event,
@@ -337,6 +337,20 @@ export function redactSecrets(value: string): string {
     .replace(/((?:api[_-]?key|token|secret|password|claude_api_key)\s*[:=]\s*)([^\s,;]+)/gi, "$1[redacted]")
     .replace(/("(?:accessToken|refreshToken|authToken|apiKey|api_key|token|secret|password)"\s*:\s*")([^"]+)(")/gi, "$1[redacted]$3")
     .replace(/(Authorization\s*:\s*Bearer\s+)([^\s,;]+)/gi, "$1[redacted]");
+}
+
+/**
+ * Plan 2026-06-10-001 U4 backstop：`running` 是流式 UI 瞬态，done 对账覆盖后理论上
+ * 不可能到达落库——一旦触发说明对账链路有 bug，过滤并 console.error 暴露（不静默）。
+ */
+function dropRunningToolCalls(toolCalls: ToolCallRecord[]): ToolCallRecord[] {
+  const running = toolCalls.filter((record) => record.status === "running");
+  if (running.length > 0) {
+    console.error(
+      `[session-repository] ${running.length} 条 running 态工具记录到达落库路径（应已被 done 对账覆盖），已过滤。ids=${running.map((record) => record.id).join(",")}`,
+    );
+  }
+  return toolCalls.filter((record) => record.status !== "running");
 }
 
 /**

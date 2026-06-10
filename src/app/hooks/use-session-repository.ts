@@ -10,6 +10,7 @@ import {
   type DiagnosticLogRepository,
 } from "../../diagnostics/diagnostic-log-repository";
 import { logDiagnostic, sessionSummary } from "../../diagnostics/app-diagnostics";
+import type { ToolCallRecord } from "../../agent/tool-call-record";
 
 export interface UseSessionRepositoryOptions {
   repository?: SessionRepository;
@@ -39,6 +40,11 @@ export interface UseSessionRepositoryReturn {
   persistSessionIfCurrent: (next: TsnSession, options?: PersistSessionOptions) => Promise<void>;
   sessionExists: (sessionId: string) => Promise<boolean>;
   updateAssistantMessage: (sessionId: string, messageId: string, content: string) => void;
+  /**
+   * Plan 2026-06-10-001 U4：流式工具卡片纯内存更新（不写库）——run 期间按 id
+   * upsert 后整组替换该 assistant 消息的 toolCalls；done 对账由既有落库路径覆盖。
+   */
+  updateAssistantToolCalls: (sessionId: string, messageId: string, toolCalls: ToolCallRecord[]) => void;
   reloadSessionsList: () => Promise<void>;
   handleNewSession: () => Promise<TsnSession>;
   handleSelectSession: (session: TsnSession) => Promise<void>;
@@ -151,6 +157,24 @@ export function useSessionRepository(
     [],
   );
 
+  const updateAssistantToolCalls = useCallback(
+    (sessionId: string, messageId: string, toolCalls: ToolCallRecord[]) => {
+      setCurrentSession((session) => {
+        if (session.id !== sessionId) {
+          return session;
+        }
+
+        return {
+          ...session,
+          messages: session.messages.map((message) =>
+            message.id === messageId ? { ...message, toolCalls } : message,
+          ),
+        };
+      });
+    },
+    [],
+  );
+
   const handleNewSession = useCallback(async (): Promise<TsnSession> => {
     const session = createEmptySession();
     await persistSession(session, {
@@ -225,6 +249,7 @@ export function useSessionRepository(
     persistSessionIfCurrent,
     sessionExists,
     updateAssistantMessage,
+    updateAssistantToolCalls,
     reloadSessionsList,
     handleNewSession,
     handleSelectSession,
