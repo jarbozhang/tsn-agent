@@ -315,6 +315,30 @@ describe("SqliteSessionRepository", () => {
     expect(database.rows.get(session.id)?.messageCount).toBe(1);
   });
 
+  it("keeps the row id authoritative when payload carries a stale id (import retry)", async () => {
+    // 导入 id 冲突重试：Rust 用新 id 写行 PK，但旧文件 payload 内嵌旧 id ——
+    // 行 id 必须权威，否则列表出现两条同 id（双高亮 + 按新 id find 失败）。
+    const database = new MemoryDatabase();
+    const stale = { ...createEmptySession(), id: "session-old" };
+    database.rows.set("session-new", {
+      id: "session-new",
+      title: "导入的会话",
+      createdAt: "2026-06-10T00:00:00.000Z",
+      updatedAt: "2026-06-10T00:00:00.000Z",
+      messageCount: 0,
+      eventCount: 0,
+      hasProject: false,
+      projectName: undefined,
+      bundleFileCount: 0,
+      payload: JSON.stringify(stale),
+    });
+    const repository = new SqliteSessionRepository(Promise.resolve(database));
+
+    const [restored] = await repository.list();
+
+    expect(restored.id).toBe("session-new");
+  });
+
   it("recovers an imported session whose payload is the export-spec '{}'", async () => {
     // 坏/空 payload（'{}' 或字段缺失）兜底：核心字段从 sessions 列恢复，否则
     // 列表渲染 .messages.at(-1) 直接崩（codex P1）。导出现携带完整 payload，

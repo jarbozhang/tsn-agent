@@ -300,13 +300,15 @@ function storedSessionToSession(session: StoredSession | undefined): TsnSession 
     // DB 列兜底：导入切片的 payload 是 '{}'（导出规格不带对话），核心字段从
     // sessions 列恢复，缺它们会让列表渲染 `.messages.at(-1)` 直接崩。
     // 合法 payload 含全部字段，spread 覆盖兜底 → 行为零变化。
+    // 例外：id 以行 PK 为权威——子表与查询全按行 id 挂；导入换 id 重试场景
+    // payload 可能内嵌旧 id，被它覆盖会导致列表重复 id（双高亮）。
     return normalizeSession({
-      id: session.id,
       title: session.title,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       messages: [],
       ...parsed,
+      id: session.id,
     } as TsnSession);
   } catch {
     return undefined;

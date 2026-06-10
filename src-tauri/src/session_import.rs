@@ -196,12 +196,18 @@ async fn perform_import_inner(
     }
     // payload 必须是合法 JSON object —— 前端 storedSessionToSession 会 JSON.parse；
     // 坏 payload 虽被前端 catch 兜底（过滤掉），导入时直接拒绝比静默消失更可读。
-    if !matches!(
-        serde_json::from_str::<serde_json::Value>(&payload),
-        Ok(serde_json::Value::Object(_))
-    ) {
-        return Err("sessions.payload 不是合法 JSON object，拒绝导入".to_string());
-    }
+    // 同时把内嵌 id 改写为 target_session_id：换 id 重试场景下行 PK 与 payload
+    // 必须一致，否则前端列表出现重复 id（双高亮 + 按新 id 定位失败）。
+    let payload = match serde_json::from_str::<serde_json::Value>(&payload) {
+        Ok(serde_json::Value::Object(mut obj)) => {
+            obj.insert(
+                "id".to_string(),
+                serde_json::Value::String(target_session_id.clone()),
+            );
+            serde_json::Value::Object(obj).to_string()
+        }
+        _ => return Err("sessions.payload 不是合法 JSON object，拒绝导入".to_string()),
+    };
 
     // 行数上限（与 compute 校验同一常量；按目标 session 过滤 —— 守卫范围必须
     // 与实际复制范围一致，否则带异 session 孤儿行的文件会被误拒）。
@@ -485,6 +491,28 @@ mod tests {
     }
 
     #[test]
+    fn import_rewrites_embedded_payload_id_to_target_session_id() {
+        // 换 id 重试场景：payload 内嵌旧 id 必须改写为行 PK，否则前端列表
+        // 出现重复 id（双高亮）且按新 id 定位失败。
+        tauri::async_runtime::block_on(async {
+            let (dir, main_pool) = seed_main_pool().await;
+            let export_path =
+                produce_export_db(dir.path(), r#"{"id":"orig","title":"源会话"}"#).await;
+
+            perform_import(&main_pool, &export_path, Some("new")).await.unwrap();
+
+            let payload: String =
+                sqlx::query_scalar("SELECT payload FROM sessions WHERE id='new'")
+                    .fetch_one(&main_pool)
+                    .await
+                    .unwrap();
+            let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
+            assert_eq!(value["id"], "new", "payload 内嵌 id 必须与行 PK 一致");
+            assert_eq!(value["title"], "源会话", "其余字段保持源值");
+        });
+    }
+
+    #[test]
     fn import_rejects_existing_target_session_and_rolls_back() {
         tauri::async_runtime::block_on(async {
             let (dir, main_pool) = seed_main_pool().await;
@@ -676,7 +704,8 @@ mod tests {
             let err = perform_import(&main_pool, &export_path, Some("mac")).await.unwrap_err();
             assert!(err.contains("mac_address"), "err={err}");
 
-            // 合法 JSON object payload 原样保留（导出携带完整会话，入库已脱敏）。
+            // 合法 JSON object payload 保留源字段，但内嵌 id 改写为行 PK（换 id
+            // 重试场景下二者必须一致，见 import_rewrites_embedded_payload_id 测试）。
             let keep_path = dir.path().join("keep.db");
             let opts = sqlx::sqlite::SqliteConnectOptions::new()
                 .filename(&keep_path).create_if_missing(true);
@@ -689,7 +718,7 @@ mod tests {
             perform_import(&main_pool, &keep_path, Some("clean")).await.unwrap();
             let payload: String = sqlx::query_scalar("SELECT payload FROM sessions WHERE id='clean'")
                 .fetch_one(&main_pool).await.unwrap();
-            assert_eq!(payload, r#"{"messages":[{"role":"user"}]}"#);
+            assert_eq!(payload, r#"{"id":"clean","messages":[{"role":"user"}]}"#);
 
             // 非法 JSON payload 被拒（前端 JSON.parse 有 catch 兜底，导入端显式拒绝更可读）。
             let bad_path = dir.path().join("bad.db");
