@@ -48,7 +48,6 @@ export interface UseSessionRepositoryReturn {
   reloadSessionsList: () => Promise<void>;
   handleNewSession: () => Promise<TsnSession>;
   handleSelectSession: (session: TsnSession) => Promise<void>;
-  handleDuplicateSession: () => Promise<TsnSession | undefined>;
   handleDeleteSession: () => Promise<TsnSession>;
   diagnostics: DiagnosticLogRepository;
 }
@@ -198,28 +197,6 @@ export function useSessionRepository(
     [repository, diagnostics],
   );
 
-  const handleDuplicateSession = useCallback(async (): Promise<TsnSession | undefined> => {
-    const sourceSessionId = currentSession.id;
-    const duplicated = await repository.duplicate(sourceSessionId);
-
-    if (!duplicated) {
-      return undefined;
-    }
-
-    logDiagnostic(diagnostics, {
-      sessionId: duplicated.id,
-      category: "session",
-      message: "复制会话",
-      details: {
-        sourceSessionId,
-        ...sessionSummary(duplicated),
-      },
-    });
-    setCurrentSession(duplicated);
-    setSessions(await repository.list());
-    return duplicated;
-  }, [currentSession.id, repository, diagnostics]);
-
   const handleDeleteSession = useCallback(async (): Promise<TsnSession> => {
     const deletedSessionId = currentSession.id;
     await repository.remove(deletedSessionId);
@@ -253,7 +230,6 @@ export function useSessionRepository(
     reloadSessionsList,
     handleNewSession,
     handleSelectSession,
-    handleDuplicateSession,
     handleDeleteSession,
     diagnostics,
   };

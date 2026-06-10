@@ -2203,6 +2203,11 @@ textarea:focus-visible {
   background: transparent;
 }
 
+/* 会话抽屉底部三键一行（导出/导入/删除），压缩纵向占用。 */
+.drawer-actions.three-up {
+  grid-template-columns: repeat(3, 1fr);
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

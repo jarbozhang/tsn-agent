@@ -29,7 +29,6 @@ function baseProps(overrides: Partial<WorkspaceToolsProps> = {}): WorkspaceTools
     diagnosticsRepository: new BrowserDiagnosticLogRepository(createMemoryStorage()),
     onNewSession: vi.fn(),
     onSelectSession: vi.fn(),
-    onDuplicateSession: vi.fn(),
     onDeleteSession: vi.fn(),
     backfillFailures: [],
     transferNotice: undefined,

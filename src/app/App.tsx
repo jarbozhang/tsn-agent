@@ -55,7 +55,6 @@ export function App() {
     reloadSessionsList,
     handleNewSession: createNewSession,
     handleSelectSession: selectSession,
-    handleDuplicateSession: duplicateSession,
     handleDeleteSession: deleteSession,
   } = useSessionRepository({ repository, diagnostics: diagnosticsRepository });
   const [input, setInput] = useState("");
@@ -73,6 +72,7 @@ export function App() {
   const { snapshot: topologySnapshot, refetch: refetchTopology } = useTopologySnapshot(currentSession.id);
   const [transferNotice, setTransferNotice] = useState<TransferNotice | undefined>();
   const [retryTargetId, setRetryTargetId] = useState<string | undefined>();
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [payloadView, setPayloadView] = useState<{ sessionId: string; text: string } | undefined>();
   const { failures: backfillFailures, refresh: refreshBackfillFailures } = useBackfillFailures();
 
@@ -265,17 +265,14 @@ export function App() {
     setActiveWorkspacePanel(undefined);
   }
 
-  async function handleDuplicateSession() {
-    const duplicated = await duplicateSession();
-
-    if (duplicated) {
-      setActiveWorkspacePanel(undefined);
-    }
+  // 删除走确认弹窗；确认后保持「会话」抽屉打开，方便看到列表变化。
+  function handleDeleteSession() {
+    setDeleteConfirmOpen(true);
   }
 
-  async function handleDeleteSession() {
+  async function confirmDeleteSession() {
+    setDeleteConfirmOpen(false);
     await deleteSession();
-    setActiveWorkspacePanel(undefined);
   }
 
   function handleNodeSelect(_event: unknown, node: Node) {
@@ -395,7 +392,6 @@ export function App() {
           payloadView={payloadView}
           onNewSession={handleNewSession}
           onSelectSession={handleSelectSession}
-          onDuplicateSession={handleDuplicateSession}
           onDeleteSession={handleDeleteSession}
           onExportSession={handleExportSession}
           onImportSession={handleImportSession}
@@ -437,6 +433,16 @@ export function App() {
         danger
         onConfirm={() => void handleRetryBackfill()}
         onCancel={() => setRetryTargetId(undefined)}
+      />
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        title="删除当前会话"
+        body={`将删除「${currentSession.title}」及其拓扑数据，删除后无法恢复。`}
+        confirmLabel="删除"
+        danger
+        onConfirm={() => void confirmDeleteSession()}
+        onCancel={() => setDeleteConfirmOpen(false)}
       />
     </div>
   );

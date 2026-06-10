@@ -480,7 +480,7 @@ describe("App", () => {
     expect(within(linkPanel).getByText("ES-2")).toBeInTheDocument();
   });
 
-  it("creates, duplicates, and deletes sessions from the sessions panel", async () => {
+  it("creates and deletes sessions with confirmation while the drawer stays open", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -490,18 +490,26 @@ describe("App", () => {
     expect(screen.getByLabelText("输入你的 TSN 需求")).toHaveValue("我需要4个交换机，每个交换机连接5个端系统");
 
     await user.click(screen.getByRole("button", { name: "会话" }));
-    await user.click(screen.getByRole("button", { name: "复制当前" }));
-    await user.click(screen.getByRole("button", { name: "会话" }));
-
     await waitFor(() => {
-      expect(screen.getAllByText(/副本/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText("新的 TSN 规划").length).toBeGreaterThanOrEqual(2);
     });
+    const sessionsBefore = screen.getAllByText("新的 TSN 规划").length;
 
+    // 取消路径：弹确认、不删除。
     await user.click(screen.getByRole("button", { name: "删除当前" }));
+    expect(screen.getByText("删除当前会话")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByText("删除当前会话")).not.toBeInTheDocument();
+    expect(screen.getAllByText("新的 TSN 规划")).toHaveLength(sessionsBefore);
+
+    // 确认路径：删除生效，且「会话」抽屉保持打开（仍可见新建会话按钮与列表）。
+    await user.click(screen.getByRole("button", { name: "删除当前" }));
+    await user.click(screen.getByRole("button", { name: "删除" }));
 
     await waitFor(() => {
-      expect(screen.queryAllByText(/副本/)).toHaveLength(0);
+      expect(screen.getAllByText("新的 TSN 规划").length).toBeLessThan(sessionsBefore);
     });
+    expect(screen.getByRole("button", { name: "新建会话" })).toBeInTheDocument();
   });
 
   it("surfaces release notes in the settings panel", async () => {

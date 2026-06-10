@@ -1,6 +1,5 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import {
-  Copy,
   Download,
   FolderOpen,
   Plus,
@@ -36,7 +35,6 @@ export interface WorkspaceToolsProps {
   payloadView: { sessionId: string; text: string } | undefined;
   onNewSession: () => void;
   onSelectSession: (session: TsnSession) => void;
-  onDuplicateSession: () => void;
   onDeleteSession: () => void;
   onExportSession: () => void;
   onImportSession: () => void;
@@ -58,7 +56,6 @@ export function WorkspaceTools({
   payloadView,
   onNewSession,
   onSelectSession,
-  onDuplicateSession,
   onDeleteSession,
   onExportSession,
   onImportSession,
@@ -85,7 +82,6 @@ export function WorkspaceTools({
           payloadView={payloadView}
           onClose={() => setActivePanel(undefined)}
           onDeleteSession={onDeleteSession}
-          onDuplicateSession={onDuplicateSession}
           onNewSession={onNewSession}
           onSelectSession={onSelectSession}
           onExportSession={onExportSession}
@@ -147,7 +143,6 @@ function WorkspaceToolDrawer({
   payloadView,
   onClose,
   onDeleteSession,
-  onDuplicateSession,
   onNewSession,
   onSelectSession,
   onExportSession,
@@ -167,7 +162,6 @@ function WorkspaceToolDrawer({
   payloadView: { sessionId: string; text: string } | undefined;
   onClose: () => void;
   onDeleteSession: () => void;
-  onDuplicateSession: () => void;
   onNewSession: () => void;
   onSelectSession: (session: TsnSession) => void;
   onExportSession: () => void;
@@ -198,7 +192,6 @@ function WorkspaceToolDrawer({
           transferBusy={transferBusy}
           payloadView={payloadView}
           onDeleteSession={onDeleteSession}
-          onDuplicateSession={onDuplicateSession}
           onNewSession={onNewSession}
           onSelectSession={onSelectSession}
           onExportSession={onExportSession}
@@ -241,7 +234,6 @@ function SessionToolPanel({
   transferBusy,
   payloadView,
   onDeleteSession,
-  onDuplicateSession,
   onNewSession,
   onSelectSession,
   onExportSession,
@@ -258,7 +250,6 @@ function SessionToolPanel({
   transferBusy: boolean;
   payloadView: { sessionId: string; text: string } | undefined;
   onDeleteSession: () => void;
-  onDuplicateSession: () => void;
   onNewSession: () => void;
   onSelectSession: (session: TsnSession) => void;
   onExportSession: () => void;
@@ -304,18 +295,7 @@ function SessionToolPanel({
         ))}
       </div>
 
-      <div className="drawer-actions">
-        <button className="btn" type="button" onClick={onDuplicateSession}>
-          <Copy size={15} aria-hidden="true" />
-          复制当前
-        </button>
-        <button className="btn danger" type="button" onClick={onDeleteSession}>
-          <Trash2 size={15} aria-hidden="true" />
-          删除当前
-        </button>
-      </div>
-
-      <div className="drawer-actions">
+      <div className="drawer-actions three-up">
         <button
           className="btn"
           type="button"
@@ -335,6 +315,10 @@ function SessionToolPanel({
         >
           <Upload size={15} aria-hidden="true" />
           导入会话
+        </button>
+        <button className="btn danger" type="button" onClick={onDeleteSession}>
+          <Trash2 size={15} aria-hidden="true" />
+          删除当前
         </button>
       </div>
 

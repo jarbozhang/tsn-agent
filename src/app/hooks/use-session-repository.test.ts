@@ -198,24 +198,6 @@ describe("useSessionRepository", () => {
     expect(result.current.currentSession.id).toBe("target");
   });
 
-  it("handleDuplicateSession duplicates and switches", async () => {
-    const original: TsnSession = { ...createEmptySession(), id: "to-dup", title: "original" };
-    await repository.save(original);
-    await repository.setCurrent(original.id);
-
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
-    await waitFor(() => expect(result.current.currentSession.id).toBe("to-dup"));
-
-    let duplicated: TsnSession | undefined;
-    await act(async () => {
-      duplicated = await result.current.handleDuplicateSession();
-    });
-
-    expect(duplicated).toBeDefined();
-    expect(duplicated?.id).not.toBe("to-dup");
-    expect(result.current.currentSession.id).toBe(duplicated?.id);
-  });
-
   it("handleDeleteSession removes current and switches to a new one", async () => {
     const original: TsnSession = { ...createEmptySession(), id: "to-delete", title: "delete me" };
     await repository.save(original);
