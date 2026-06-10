@@ -59,6 +59,9 @@ struct ClaudeWorkerEvent {
     stage_results: Vec<serde_json::Value>,
     #[serde(default)]
     tool_calls: Vec<serde_json::Value>,
+    // Plan 2026-06-10-001 U2：流式工具事件整体透传，Rust 不拆字段（契约客户端无关）。
+    #[serde(default)]
+    tool_call: Option<serde_json::Value>,
     audit_path: Option<String>,
 }
 
@@ -69,6 +72,7 @@ struct ClaudeAgentEventPayload {
     kind: String,
     text: Option<String>,
     session_id: Option<String>,
+    tool_call: Option<serde_json::Value>,
 }
 
 /// 暴露拓扑模板参数合法域（类型/上下限/枚举）给前端只读展示。
@@ -452,7 +456,7 @@ fn handle_worker_line(
         "chunk" => {
             let text = parsed.text.unwrap_or_default();
             if !text.is_empty() {
-                emit_claude_event(app, &run_id, "chunk", Some(text), None);
+                emit_claude_event(app, &run_id, "chunk", Some(text), None, None);
             }
         }
         "session" => {
@@ -465,7 +469,12 @@ fn handle_worker_line(
                 None,
                 serde_json::json!({ "claudeSessionId": parsed.session_id }),
             );
-            emit_claude_event(app, &run_id, "session", None, parsed.session_id);
+            emit_claude_event(app, &run_id, "session", None, parsed.session_id, None);
+        }
+        "tool_call" => {
+            if let Some(tool_call) = parsed.tool_call {
+                emit_claude_event(app, &run_id, "tool_call", None, None, Some(tool_call));
+            }
         }
         "done" => {
             let assistant_text = parsed.assistant_text.unwrap_or_default().trim().to_string();
@@ -554,6 +563,7 @@ fn emit_claude_event(
     kind: &str,
     text: Option<String>,
     session_id: Option<String>,
+    tool_call: Option<serde_json::Value>,
 ) {
     let _ = app.emit(
         "claude-agent-event",
@@ -562,6 +572,7 @@ fn emit_claude_event(
             kind: kind.to_string(),
             text,
             session_id,
+            tool_call,
         },
     );
 }
@@ -706,6 +717,33 @@ mod tests {
 
         assert!(error.contains("非 JSON"));
         assert!(!error.contains("secret"));
+    }
+
+    #[test]
+    fn parses_tool_call_worker_event_line() {
+        let line = r#"{"event":"tool_call","runId":"run-1","toolCall":{"id":"toolu-1","name":"Bash","args":{"command":"ls"},"phase":"start"}}"#;
+
+        let parsed: ClaudeWorkerEvent = serde_json::from_str(line).expect("valid event");
+
+        assert_eq!(parsed.event, "tool_call");
+        assert_eq!(parsed.run_id.as_deref(), Some("run-1"));
+        let tool_call = parsed.tool_call.expect("tool_call present");
+        assert_eq!(tool_call["id"], "toolu-1");
+        assert_eq!(tool_call["phase"], "start");
+    }
+
+    #[test]
+    fn existing_event_lines_parse_without_tool_call() {
+        let chunk: ClaudeWorkerEvent =
+            serde_json::from_str(r#"{"event":"chunk","runId":"run-1","text":"hi"}"#).expect("chunk parses");
+        assert!(chunk.tool_call.is_none());
+
+        let done: ClaudeWorkerEvent = serde_json::from_str(
+            r#"{"event":"done","runId":"run-1","assistantText":"ok","toolCalls":[{"id":"toolu-1"}]}"#,
+        )
+        .expect("done parses");
+        assert!(done.tool_call.is_none());
+        assert_eq!(done.tool_calls.len(), 1);
     }
 
     #[test]
