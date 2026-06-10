@@ -613,12 +613,13 @@ textarea:focus-visible {
   min-height: 0;
 }
 
+/* 文件卡片自动换行而非横向滚动：overflow 滚动容器在 WebKit（Tauri WKWebView）
+   的 grid auto 行里 automatic min size = 0，行会被压塌只剩半截卡片。 */
 .skill-file-list {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-  overflow-x: auto;
-  padding-bottom: 2px;
 }
 
 .skill-file-item {
