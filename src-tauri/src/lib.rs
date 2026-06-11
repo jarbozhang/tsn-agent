@@ -19,6 +19,7 @@ mod topology_intermediate;
 mod topology_mutation_buffer;
 mod topology_mutations_command;
 mod topology_ops;
+mod topology_position_command;
 mod topology_query_command;
 mod topology_sidecar;
 mod topology_sidecar_routes;
@@ -104,6 +105,7 @@ pub fn run() {
             topology_backfill::retry_backfill,
             topology_backfill::view_session_payload,
             topology_mutations_command::get_topology_mutations_since,
+            topology_position_command::update_node_position,
             topology_query_command::query_topology,
             session_store::get_current_session,
             session_store::list_sessions,
