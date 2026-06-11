@@ -356,9 +356,19 @@ textarea:focus-visible {
 
 .workspace-tool-panel {
   display: grid;
+  flex: 1;
   gap: 12px;
   padding: 14px;
   overflow-y: auto;
+  /* WKWebView：flex 子项默认 min-height auto 不收缩，滚动容器会被内容撑破导致底部被裁。 */
+  min-height: 0;
+}
+
+/* WebKit 滚动容器忽略 padding-bottom：占位元素把底部留白计入滚动高度。 */
+.workspace-tool-panel::after {
+  content: "";
+  display: block;
+  height: 2px;
 }
 
 .diagnostics-panel {
