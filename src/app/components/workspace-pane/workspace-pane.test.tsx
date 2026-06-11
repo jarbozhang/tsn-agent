@@ -30,6 +30,7 @@ vi.mock("@xyflow/react", () => ({
     onEdgeClick?: (event: unknown, edge: { id: string }) => void;
     onNodeDragStart?: (event: unknown, node: unknown) => void;
     onNodeDragStop?: (event: unknown, node: unknown) => void;
+    onPaneClick?: (event: unknown) => void;
   }) => {
     const { nodes, edges, onNodeClick, onEdgeClick, onNodeDragStart, onNodeDragStop } = props;
     // 真实 ReactFlow 仅在挂载后调 onInit 一次；mock 每次渲染都调——
@@ -85,6 +86,9 @@ vi.mock("@xyflow/react", () => ({
             选择链路 {edge.id}
           </button>
         ))}
+        <button type="button" onClick={() => props.onPaneClick?.({})}>
+          点击画布空白
+        </button>
       </div>
     );
   },
@@ -125,6 +129,7 @@ function baseProps(overrides: Partial<WorkspacePaneProps> = {}): WorkspacePanePr
     onSelectConfigTab: vi.fn(),
     onNodeSelect: vi.fn(),
     onLinkSelect: vi.fn(),
+    onClearSelection: vi.fn(),
     onRefreshTopology: vi.fn(),
     commitNodePosition: vi.fn(async () => ({ mutationId: 1 })),
     ...overrides,
@@ -170,9 +175,56 @@ describe("WorkspacePane", () => {
   it("calls onSelectConfigTab when a config tab is clicked", async () => {
     const user = userEvent.setup();
     const onSelectConfigTab = vi.fn();
-    render(<WorkspacePane {...baseProps({ onSelectConfigTab })} />);
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: sampleSnapshot(),
+          selectedTopologyItem: { kind: "node", id: "1" },
+          onSelectConfigTab,
+        })}
+      />,
+    );
     await user.click(screen.getByRole("tab", { name: "链路详情" }));
     expect(onSelectConfigTab).toHaveBeenCalledWith("link-detail");
+  });
+});
+
+describe("WorkspacePane 详情面板显隐", () => {
+  it("无选中时详情面板默认隐藏", () => {
+    render(<WorkspacePane {...baseProps({ topologySnapshot: sampleSnapshot() })} />);
+    expect(screen.queryByRole("tablist", { name: "工程详情" })).not.toBeInTheDocument();
+  });
+
+  it("点击画布空白触发清除选中", async () => {
+    const user = userEvent.setup();
+    const onClearSelection = vi.fn();
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: sampleSnapshot(),
+          selectedTopologyItem: { kind: "node", id: "1" },
+          onClearSelection,
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "点击画布空白" }));
+    expect(onClearSelection).toHaveBeenCalled();
+  });
+
+  it("关闭按钮触发清除选中", async () => {
+    const user = userEvent.setup();
+    const onClearSelection = vi.fn();
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: sampleSnapshot(),
+          selectedTopologyItem: { kind: "node", id: "1" },
+          onClearSelection,
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "关闭详情" }));
+    expect(onClearSelection).toHaveBeenCalled();
   });
 });
 

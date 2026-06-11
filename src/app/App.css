@@ -1897,6 +1897,24 @@ textarea:focus-visible {
   font-size: 10px;
 }
 
+.config-close {
+  flex: 0 0 auto;
+  margin-right: 8px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  background: transparent;
+  cursor: pointer;
+}
+
+.config-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary, rgba(0, 0, 0, 0.06));
+}
+
 .config-body {
   display: block;
   flex: 1;

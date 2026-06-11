@@ -285,6 +285,10 @@ export function App() {
     setActiveConfigTab("link-detail");
   }
 
+  function handleClearTopologySelection() {
+    setSelectedTopologyItem(undefined);
+  }
+
   async function handleExportSession() {
     if (isAgentRunning) {
       return;
@@ -423,6 +427,7 @@ export function App() {
           onSelectConfigTab={setActiveConfigTab}
           onNodeSelect={handleNodeSelect}
           onLinkSelect={handleLinkSelect}
+          onClearSelection={handleClearTopologySelection}
           onRefreshTopology={() => void refetchTopology()}
         />
       </main>

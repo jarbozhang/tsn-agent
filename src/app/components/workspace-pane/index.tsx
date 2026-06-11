@@ -91,6 +91,8 @@ export interface WorkspacePaneProps {
   onSelectConfigTab: (tab: ConfigTabId) => void;
   onNodeSelect: (event: unknown, node: Node) => void;
   onLinkSelect: (event: unknown, edge: Edge) => void;
+  /** 清除选中：详情面板随选中态显隐（点画布空白或关闭按钮触发）。 */
+  onClearSelection: () => void;
   /** 写入失败/陈旧时的回正：重拉快照覆盖本地（R10/R11）。 */
   onRefreshTopology: () => void;
   commitNodePosition?: (args: CommitNodePositionArgs) => Promise<CommitNodePositionResult>;
@@ -106,6 +108,7 @@ export function WorkspacePane({
   onSelectConfigTab,
   onNodeSelect,
   onLinkSelect,
+  onClearSelection,
   onRefreshTopology,
   commitNodePosition = invokeCommitNodePosition,
 }: WorkspacePaneProps) {
@@ -364,6 +367,7 @@ export function WorkspacePane({
               onNodeDragStop={handleNodeDragStop}
               onNodeClick={onNodeSelect}
               onEdgeClick={onLinkSelect}
+              onPaneClick={onClearSelection}
             >
               <Background />
               <Controls showInteractive={false} />
@@ -380,6 +384,8 @@ export function WorkspacePane({
         </div>
       </div>
 
+      {/* 详情面板默认隐藏，点击节点/链路打开（流功能后续在此承载）。 */}
+      {selectedTopologyItem && (
       <div className="config-panel">
         <div className="config-tabs" role="tablist" aria-label="工程详情">
           {CONFIG_TABS.map((tab) => (
@@ -398,6 +404,14 @@ export function WorkspacePane({
           ))}
           <div className="config-spacer" />
           <span className="config-state mono">配置 · {hasTopology ? "草案" : "未生成"}</span>
+          <button
+            type="button"
+            className="config-close"
+            aria-label="关闭详情"
+            onClick={onClearSelection}
+          >
+            ×
+          </button>
         </div>
 
         <div className="config-body">
@@ -462,6 +476,7 @@ export function WorkspacePane({
           )}
         </div>
       </div>
+      )}
     </section>
   );
 }
