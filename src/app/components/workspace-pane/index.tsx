@@ -1,5 +1,7 @@
-import { Fragment, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
+  applyNodeChanges,
   Background,
   Controls,
   Handle,
@@ -7,7 +9,9 @@ import {
   ReactFlow,
   type Edge,
   type Node,
+  type NodeChange,
   type NodeProps,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import {
   countEndSystems,
@@ -16,17 +20,16 @@ import {
   type TopologyRowSnapshot,
 } from "../../../sessions/topology-snapshot";
 import { DetailRow, Stat } from "../shared";
-import { TsnLinkEdge } from "./tsn-link-edge";
-import { linkRowId, nodeRowLabel, topologySnapshotToReactFlow, type HandleSide } from "./topology-flow";
+import { TsnFloatingEdge } from "./tsn-floating-edge";
+import { linkRowId, nodeRowLabel, topologySnapshotToReactFlow } from "./topology-flow";
 
 export {
   nodeRowLabel,
   parseLinkStyles,
-  pickHandleSides,
   planeClassName,
   topologySnapshotToReactFlow,
 } from "./topology-flow";
-export type { TsnLinkEdgeData } from "./topology-flow";
+export type { TsnEdgeData } from "./topology-flow";
 
 export type ConfigTabId = "node-detail" | "link-detail";
 
@@ -44,8 +47,21 @@ const nodeTypes = {
 };
 
 const edgeTypes = {
-  tsnLink: TsnLinkEdge,
+  tsnFloating: TsnFloatingEdge,
 };
+
+export interface CommitNodePositionArgs {
+  sessionId: string;
+  imac: number;
+  x: number;
+  y: number;
+  expectedMutationId: number;
+}
+
+/** R5：默认写通道 = update_node_position Tauri command（测试可注入替身）。 */
+async function invokeCommitNodePosition(args: CommitNodePositionArgs): Promise<void> {
+  await invoke("update_node_position", { request: args });
+}
 
 export interface WorkspacePaneProps {
   topologySnapshot: TopologyRowSnapshot | undefined;
@@ -53,9 +69,14 @@ export interface WorkspacePaneProps {
   activeConfigTab: ConfigTabId;
   isAgentRunning: boolean;
   hasUserInteraction: boolean;
+  /** 本 session 最近观测的 mutationId（R11 陈旧写检测基准）。 */
+  lastMutationId: number;
   onSelectConfigTab: (tab: ConfigTabId) => void;
   onNodeSelect: (event: unknown, node: Node) => void;
   onLinkSelect: (event: unknown, edge: Edge) => void;
+  /** 写入失败/陈旧时的回正：重拉快照覆盖本地（R10/R11）。 */
+  onRefreshTopology: () => void;
+  commitNodePosition?: (args: CommitNodePositionArgs) => Promise<void>;
 }
 
 export function WorkspacePane({
@@ -64,9 +85,12 @@ export function WorkspacePane({
   activeConfigTab,
   isAgentRunning,
   hasUserInteraction,
+  lastMutationId,
   onSelectConfigTab,
   onNodeSelect,
   onLinkSelect,
+  onRefreshTopology,
+  commitNodePosition = invokeCommitNodePosition,
 }: WorkspacePaneProps) {
   const flowTopology = useMemo(
     () => (topologySnapshot && !isEmptyTopologySnapshot(topologySnapshot)
@@ -74,12 +98,161 @@ export function WorkspacePane({
       : undefined),
     [topologySnapshot],
   );
+
+  // —— 拖动状态（R5/R7/R10/R11）——
+  const [flowNodes, setFlowNodes] = useState<Node[]>([]);
+  // pending 坐标 overlay：dragStop 起覆盖到达快照中该节点的位置，
+  // 快照坐标与 overlay 一致（写入确认）或 NACK 回正时清除。
+  const [pendingPositions, setPendingPositions] = useState<Map<string, { x: number; y: number }>>(new Map());
+  const draggingRef = useRef(false);
+  const dragStartMutationIdRef = useRef(0);
+  const bufferedNodesRef = useRef<Node[] | undefined>(undefined);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const saveFailedTimerRef = useRef<number | undefined>(undefined);
+  const flowInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const fittedSessionRef = useRef<string | undefined>(undefined);
+
+  const applySnapshotNodes = useCallback(
+    (nodes: Node[], overlay: Map<string, { x: number; y: number }>) => {
+      const next = nodes.map((node) => {
+        const pending = overlay.get(node.id);
+        if (!pending) {
+          return node;
+        }
+        if (node.position.x === pending.x && node.position.y === pending.y) {
+          return node; // 写入已确认；overlay 在下方 effect 中清除。
+        }
+        return { ...node, position: { x: pending.x, y: pending.y } };
+      });
+      setFlowNodes(next);
+    },
+    [],
+  );
+
+  // 快照 → 本地 nodes：拖动中缓存，拖毕应用；overlay 覆盖未确认坐标（R7 全窗口）。
+  useEffect(() => {
+    const nodes = flowTopology?.nodes ?? [];
+    if (draggingRef.current) {
+      bufferedNodesRef.current = nodes;
+      return;
+    }
+    applySnapshotNodes(nodes, pendingPositions);
+  }, [flowTopology, pendingPositions, applySnapshotNodes]);
+
+  // 写入确认：快照坐标与 overlay 一致时清除该 overlay 条目。
+  useEffect(() => {
+    if (!flowTopology || pendingPositions.size === 0) {
+      return;
+    }
+    const confirmed: string[] = [];
+    for (const [id, pending] of pendingPositions) {
+      const row = flowTopology.nodes.find((node) => node.id === id);
+      if (row && row.position.x === pending.x && row.position.y === pending.y) {
+        confirmed.push(id);
+      }
+    }
+    if (confirmed.length > 0) {
+      setPendingPositions((prev) => {
+        const next = new Map(prev);
+        for (const id of confirmed) {
+          next.delete(id);
+        }
+        return next;
+      });
+    }
+  }, [flowTopology, pendingPositions]);
+
+  // R12：每个 session 首次出现拓扑时 fitView 一次；其后快照刷新与拖动不重置视口。
+  useEffect(() => {
+    const sessionId = topologySnapshot?.sessionId;
+    if (!sessionId || !flowTopology || !flowInstanceRef.current) {
+      return;
+    }
+    if (fittedSessionRef.current !== sessionId) {
+      fittedSessionRef.current = sessionId;
+      void flowInstanceRef.current.fitView();
+    }
+  }, [topologySnapshot?.sessionId, flowTopology]);
+
+  useEffect(() => () => {
+    if (saveFailedTimerRef.current !== undefined) {
+      window.clearTimeout(saveFailedTimerRef.current);
+    }
+  }, []);
+
+  const showSaveFailed = useCallback(() => {
+    setSaveFailed(true);
+    if (saveFailedTimerRef.current !== undefined) {
+      window.clearTimeout(saveFailedTimerRef.current);
+    }
+    saveFailedTimerRef.current = window.setTimeout(() => setSaveFailed(false), 3000);
+  }, []);
+
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    setFlowNodes((nodes) => applyNodeChanges(changes, nodes));
+  }, []);
+
+  const handleNodeDragStart = useCallback(() => {
+    draggingRef.current = true;
+    dragStartMutationIdRef.current = lastMutationId;
+  }, [lastMutationId]);
+
+  const handleNodeDragStop = useCallback(
+    (event: unknown, node: Node) => {
+      draggingRef.current = false;
+      const x = Math.round(node.position.x);
+      const y = Math.round(node.position.y);
+      const sessionId = topologySnapshot?.sessionId;
+
+      const overlay = new Map(pendingPositions);
+      overlay.set(node.id, { x, y });
+      setPendingPositions(overlay);
+
+      // 拖毕视同选中该节点（R9），详情面板坐标经 overlay 即时显示新值。
+      onNodeSelect(event, node);
+
+      // 拖动中缓存的快照现在应用（位置仍被 overlay 保护）。
+      if (bufferedNodesRef.current) {
+        applySnapshotNodes(bufferedNodesRef.current, overlay);
+        bufferedNodesRef.current = undefined;
+      }
+
+      if (!sessionId) {
+        return;
+      }
+      void commitNodePosition({
+        sessionId,
+        imac: Number(node.id),
+        x,
+        y,
+        expectedMutationId: dragStartMutationIdRef.current,
+      }).catch(() => {
+        // R10/R11：失败或陈旧 → 清 overlay、重拉快照回正、可见提示。
+        setPendingPositions((prev) => {
+          const next = new Map(prev);
+          next.delete(node.id);
+          return next;
+        });
+        showSaveFailed();
+        onRefreshTopology();
+      });
+    },
+    [topologySnapshot?.sessionId, pendingPositions, onNodeSelect, applySnapshotNodes, commitNodePosition, showSaveFailed, onRefreshTopology],
+  );
+
   const hasTopology = !isEmptyTopologySnapshot(topologySnapshot);
   const switchCount = topologySnapshot ? countSwitches(topologySnapshot) : 0;
   const endSystemCount = topologySnapshot ? countEndSystems(topologySnapshot) : 0;
   const linkCount = topologySnapshot?.links.length ?? 0;
-  const selectedNode = selectedTopologyItem?.kind === "node"
+  const selectedNodeRow = selectedTopologyItem?.kind === "node"
     ? topologySnapshot?.nodes.find((node) => String(node.imac) === selectedTopologyItem.id)
+    : undefined;
+  // 详情面板坐标优先读 overlay（R9：拖毕即显示新坐标，无确认窗口跳变）。
+  const selectedNode = selectedNodeRow
+    ? (() => {
+        const pending = pendingPositions.get(String(selectedNodeRow.imac));
+        return pending ? { ...selectedNodeRow, x: pending.x, y: pending.y } : selectedNodeRow;
+      })()
     : undefined;
   const selectedLink = selectedTopologyItem?.kind === "link"
     ? topologySnapshot?.links.find((link) => linkRowId(link) === selectedTopologyItem.id)
@@ -100,15 +273,32 @@ export function WorkspacePane({
           <Stat label="端系统" value={endSystemCount} />
           <Stat label="链路" value={linkCount} />
         </div>
+        {saveFailed && (
+          <div className="transfer-notice error tsn-position-notice" role="alert">
+            位置保存失败，已恢复
+          </div>
+        )}
         <div className="topology-canvas" aria-label="拓扑画布" data-testid="topology-canvas">
           {flowTopology ? (
             <ReactFlow
-              nodes={flowTopology.nodes}
+              nodes={flowNodes}
               edges={flowTopology.edges}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
-              fitView
-              nodesDraggable={false}
+              nodesDraggable
+              selectionOnDrag={false}
+              multiSelectionKeyCode={null}
+              onInit={(instance) => {
+                flowInstanceRef.current = instance;
+                const sessionId = topologySnapshot?.sessionId;
+                if (sessionId && fittedSessionRef.current !== sessionId) {
+                  fittedSessionRef.current = sessionId;
+                  void instance.fitView();
+                }
+              }}
+              onNodesChange={handleNodesChange}
+              onNodeDragStart={handleNodeDragStart}
+              onNodeDragStop={handleNodeDragStop}
               onNodeClick={onNodeSelect}
               onEdgeClick={onLinkSelect}
             >
@@ -213,13 +403,6 @@ export function WorkspacePane({
   );
 }
 
-const HANDLE_SIDES: Array<[HandleSide, Position]> = [
-  ["top", Position.Top],
-  ["bottom", Position.Bottom],
-  ["left", Position.Left],
-  ["right", Position.Right],
-];
-
 function TsnTopologyNode({ data }: NodeProps) {
   const nodeData = data as {
     label?: string;
@@ -230,12 +413,9 @@ function TsnTopologyNode({ data }: NodeProps) {
 
   return (
     <div className={`tsn-node ${nodeType}`}>
-      {HANDLE_SIDES.map(([side, position]) => (
-        <Fragment key={side}>
-          <Handle id={`s-${side}`} type="source" position={position} />
-          <Handle id={`t-${side}`} type="target" position={position} />
-        </Fragment>
-      ))}
+      {/* R2：floating 边不锚定 handle；保留一对隐形 handle 满足 React Flow 边合法性。 */}
+      <Handle id="s" type="source" position={Position.Top} />
+      <Handle id="t" type="target" position={Position.Top} />
       <span className="tsn-node-type mono">{nodeType === "switch" ? "SW" : "ES"}</span>
       <strong>{nodeData.label}</strong>
       <small className="mono">imac {nodeData.imac}</small>

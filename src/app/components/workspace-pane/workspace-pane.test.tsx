@@ -1,6 +1,10 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(async () => undefined),
+}));
 
 vi.mock("@xyflow/react", () => ({
   Background: () => null,
@@ -8,24 +12,42 @@ vi.mock("@xyflow/react", () => ({
   Handle: () => null,
   BaseEdge: () => null,
   EdgeLabelRenderer: ({ children }: { children?: unknown }) => children ?? null,
-  getSmoothStepPath: () => ["M0 0", 0, 0],
+  getBezierPath: () => ["M0 0", 0, 0],
+  useInternalNode: () => undefined,
+  applyNodeChanges: (_changes: unknown[], nodes: Array<{ id: string }>) => nodes,
   Position: { Left: "left", Right: "right", Top: "top", Bottom: "bottom" },
   ReactFlow: ({
     nodes,
     edges,
     onNodeClick,
     onEdgeClick,
+    onNodeDragStart,
+    onNodeDragStop,
   }: {
     nodes: Array<{ id: string }>;
     edges: Array<{ id: string }>;
     onNodeClick?: (event: unknown, node: { id: string }) => void;
     onEdgeClick?: (event: unknown, edge: { id: string }) => void;
+    onNodeDragStart?: (event: unknown, node: unknown) => void;
+    onNodeDragStop?: (event: unknown, node: unknown) => void;
   }) => (
     <div aria-label="拓扑画布">
       {nodes.length} nodes / {edges.length} edges
       {nodes.map((node) => (
         <button key={node.id} type="button" onClick={() => onNodeClick?.({}, node)}>
           选择节点 {node.id}
+        </button>
+      ))}
+      {nodes.map((node) => (
+        <button
+          key={`drag-${node.id}`}
+          type="button"
+          onClick={() => {
+            onNodeDragStart?.({}, node);
+            onNodeDragStop?.({}, { ...node, position: { x: 480.4, y: 95.6 } });
+          }}
+        >
+          拖毕节点 {node.id}
         </button>
       ))}
       {edges.map((edge) => (
@@ -40,14 +62,13 @@ vi.mock("@xyflow/react", () => ({
 import {
   nodeRowLabel,
   parseLinkStyles,
-  pickHandleSides,
   planeClassName,
   topologySnapshotToReactFlow,
   WorkspacePane,
-  type TsnLinkEdgeData,
+  type TsnEdgeData,
   type WorkspacePaneProps,
 } from "./index";
-import { buildTsnLinkPath, portLabelPoint } from "./tsn-link-edge";
+import { floatingEdgeAnchors, portLabelPoint } from "./tsn-floating-edge";
 import type { TopologyNodeRow, TopologyRowSnapshot } from "../../../sessions/topology-snapshot";
 
 function sampleSnapshot(): TopologyRowSnapshot {
@@ -68,9 +89,12 @@ function baseProps(overrides: Partial<WorkspacePaneProps> = {}): WorkspacePanePr
     activeConfigTab: "node-detail",
     isAgentRunning: false,
     hasUserInteraction: false,
+    lastMutationId: 0,
     onSelectConfigTab: vi.fn(),
     onNodeSelect: vi.fn(),
     onLinkSelect: vi.fn(),
+    onRefreshTopology: vi.fn(),
+    commitNodePosition: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -120,6 +144,72 @@ describe("WorkspacePane", () => {
   });
 });
 
+describe("WorkspacePane 拖动持久化（U4）", () => {
+  it("Covers AE2：拖毕以整数坐标 + 拖动起始 mutationId 调用写入，并选中该节点", async () => {
+    const user = userEvent.setup();
+    const commitNodePosition = vi.fn(async () => undefined);
+    const onNodeSelect = vi.fn();
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: sampleSnapshot(),
+          lastMutationId: 7,
+          commitNodePosition,
+          onNodeSelect,
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "拖毕节点 2" }));
+    await waitFor(() => expect(commitNodePosition).toHaveBeenCalledTimes(1));
+    expect(commitNodePosition).toHaveBeenCalledWith({
+      sessionId: "s1",
+      imac: 2,
+      x: 480,
+      y: 96,
+      expectedMutationId: 7,
+    });
+    expect(onNodeSelect).toHaveBeenCalled();
+  });
+
+  it("Covers AE5：写入失败 → 触发快照回正并显示可见提示", async () => {
+    const user = userEvent.setup();
+    const commitNodePosition = vi.fn(async () => {
+      throw new Error("stale");
+    });
+    const onRefreshTopology = vi.fn();
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: sampleSnapshot(),
+          commitNodePosition,
+          onRefreshTopology,
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "拖毕节点 2" }));
+    await waitFor(() => expect(onRefreshTopology).toHaveBeenCalled());
+    expect(screen.getByRole("alert")).toHaveTextContent("位置保存失败，已恢复");
+  });
+
+  it("R9：拖毕后详情面板坐标经 overlay 即时显示新值（写入确认前）", async () => {
+    const user = userEvent.setup();
+    // commit 永不 resolve 快照——overlay 应当独立支撑显示。
+    const commitNodePosition = vi.fn(async () => undefined);
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: sampleSnapshot(),
+          selectedTopologyItem: { kind: "node", id: "2" },
+          commitNodePosition,
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "拖毕节点 2" }));
+    const panel = screen.getByRole("tabpanel", { name: "节点详情" });
+    await waitFor(() => expect(within(panel).getByText("480, 96")).toBeInTheDocument());
+  });
+});
+
 describe("nodeRowLabel", () => {
   function nodeRow(overrides: Partial<TopologyNodeRow> = {}): TopologyNodeRow {
     return {
@@ -136,7 +226,6 @@ describe("nodeRowLabel", () => {
   }
 
   it("画布标签优先用逻辑名，与 agent 对话命名一致", () => {
-    // 双平面场景：agent 传 ES-1 而 numericId=2 —— 老逻辑显示 ES-2 与聊天错位。
     expect(nodeRowLabel(nodeRow({ name: "ES-1" }))).toBe("ES-1");
     expect(nodeRowLabel(nodeRow({ name: "SW-1", nodeType: "switch", syncName: "0" }))).toBe("SW-1");
   });
@@ -177,7 +266,7 @@ describe("parseLinkStyles（R7 容错）", () => {
   });
 });
 
-describe("planeClassName（R9）", () => {
+describe("planeClassName（R3）", () => {
   it("三态 className", () => {
     expect(planeClassName("A")).toBe("plane-a");
     expect(planeClassName("B")).toBe("plane-b");
@@ -185,176 +274,77 @@ describe("planeClassName（R9）", () => {
   });
 });
 
-describe("pickHandleSides（R10 纯函数）", () => {
-  it("跨行一律垂直：上方节点 bottom ↔ 下方节点 top", () => {
-    expect(pickHandleSides({ x: 0, y: 0 }, { x: 500, y: 300 })).toEqual({
-      source: "bottom",
-      target: "top",
-    });
-    expect(pickHandleSides({ x: 500, y: 300 }, { x: 0, y: 0 })).toEqual({
-      source: "top",
-      target: "bottom",
-    });
-  });
-
-  it("同行水平：左 right ↔ 右 left", () => {
-    expect(pickHandleSides({ x: 0, y: 100 }, { x: 300, y: 100 })).toEqual({
-      source: "right",
-      target: "left",
-    });
-    expect(pickHandleSides({ x: 300, y: 100 }, { x: 0, y: 100 })).toEqual({
-      source: "left",
-      target: "right",
-    });
-  });
-
-  it("单跳长距跨行边（ES-1→SW-2）不选水平 handle（防穿行）", () => {
-    // |dx| 远大于 |dy| 也必须走垂直——主轴判定会穿过同排节点。
-    expect(pickHandleSides({ x: 90, y: 60 }, { x: 420, y: 300 }).source).toBe("bottom");
-  });
-});
-
-describe("topologySnapshotToReactFlow（U4/U5）", () => {
+describe("topologySnapshotToReactFlow（U3 映射）", () => {
   function node(imac: number, x: number, y: number): TopologyNodeRow {
     return { imac, syncName: String(imac), name: null, x, y, syncType: "{}", nodeType: imac < 10 ? "switch" : "endSystem", insertOrder: imac };
   }
 
-  it("plane className 三态 + smoothstep 自定义 edge + handle 选边落到 edge 对象", () => {
+  it("Covers AE1/AE4：floating 边无 handle 绑定、className 三态、存量 p1 标签透传", () => {
     const snapshot: TopologyRowSnapshot = {
       sessionId: "s1",
       nodes: [node(1, 120, 300), node(10, 90, 60)],
       links: [
         { linkSeq: 0, name: null, srcImac: 10, dstImac: 1, stylesJson: '{"plane":"A","leftLabel":"P0","rightLabel":"P0"}' },
-        { linkSeq: 1, name: null, srcImac: 10, dstImac: 1, stylesJson: '{"plane":"B"}' },
+        { linkSeq: 1, name: null, srcImac: 10, dstImac: 1, stylesJson: '{"leftLabel":"p1","rightLabel":"p2"}' },
         { linkSeq: 2, name: null, srcImac: 10, dstImac: 1, stylesJson: "broken" },
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
-    expect(edges.map((e) => e.className)).toEqual(["plane-a", "plane-b", "plane-neutral"]);
-    expect(edges.every((e) => e.type === "tsnLink")).toBe(true);
-    // ES(10) 在上、SW(1) 在下：跨行垂直。
-    expect(edges[0].sourceHandle).toBe("s-bottom");
-    expect(edges[0].targetHandle).toBe("t-top");
-    const data0 = edges[0].data as TsnLinkEdgeData;
-    expect(data0.leftLabel).toBe("P0");
-    expect(data0.rightLabel).toBe("P0");
-  });
-
-  it("跨行边同走廊序数互异且两次映射相同（R12 确定性）", () => {
-    const snapshot: TopologyRowSnapshot = {
-      sessionId: "s1",
-      nodes: [node(1, 120, 300), node(2, 420, 300), node(10, 90, 60), node(11, 270, 60)],
-      links: [
-        { linkSeq: 0, name: null, srcImac: 10, dstImac: 1, stylesJson: "{}" },
-        { linkSeq: 1, name: null, srcImac: 10, dstImac: 2, stylesJson: "{}" },
-        { linkSeq: 2, name: null, srcImac: 11, dstImac: 1, stylesJson: "{}" },
-      ],
-    };
-    const read = () =>
-      topologySnapshotToReactFlow(snapshot).edges.map((e) => {
-        const data = e.data as TsnLinkEdgeData;
-        return [data.geometry, data.corridorOrd];
-      });
-    const first = read();
-    expect(first.every(([g]) => g === "cross")).toBe(true);
-    // 同一对行（60↔300）内走廊序数两两互异 → 横段高度互异。
-    expect(new Set(first.map(([, ord]) => ord)).size).toBe(3);
-    expect(read()).toEqual(first);
-  });
-
-  it("同行边几何：被遮挡/堆叠走 detour，内侧首条直连（KTD）", () => {
-    // 双跳左外端堆叠：e-inner(x=-100) 与 e-outer(x=-280) 同行连 SW(x=120)。
-    const snapshot: TopologyRowSnapshot = {
-      sessionId: "s1",
-      nodes: [node(1, 120, 360), node(10, -100, 360), node(11, -280, 360)],
-      links: [
-        { linkSeq: 0, name: null, srcImac: 10, dstImac: 1, stylesJson: "{}" },
-        { linkSeq: 1, name: null, srcImac: 11, dstImac: 1, stylesJson: "{}" },
-      ],
-    };
-    const { edges } = topologySnapshotToReactFlow(snapshot);
-    const inner = edges[0].data as TsnLinkEdgeData;
-    const outer = edges[1].data as TsnLinkEdgeData;
-    expect(inner.geometry).toBe("flat");
-    // 外侧边路径上有 e-inner 节点遮挡 → 绕行，方向确定。
-    expect(outer.geometry).toBe("detour");
-    expect([1, -1]).toContain(outer.rowDir);
-  });
-
-  it("标签锚点用各端自身 handle 序数（同 handle 双标签不重叠）", () => {
-    // 单跳 es2 双上联：两条边在 es2 bottom handle 的序数为 0/1，标签锚点必须互异。
-    const snapshot: TopologyRowSnapshot = {
-      sessionId: "s1",
-      nodes: [node(1, 120, 300), node(2, 420, 300), node(10, 90, 60)],
-      links: [
-        { linkSeq: 0, name: null, srcImac: 10, dstImac: 1, stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}' },
-        { linkSeq: 1, name: null, srcImac: 10, dstImac: 2, stylesJson: '{"leftLabel":"P1","rightLabel":"P0"}' },
-      ],
-    };
-    const { edges } = topologySnapshotToReactFlow(snapshot);
-    const first = edges[0].data as TsnLinkEdgeData;
-    const second = edges[1].data as TsnLinkEdgeData;
-    expect(first.srcOrd).toBe(0);
-    expect(second.srcOrd).toBe(1);
-    const a = portLabelPoint(100, 80, "bottom" as never, first.srcOrd);
-    const b = portLabelPoint(100, 80, "bottom" as never, second.srcOrd);
-    expect(a).not.toEqual(b);
+    expect(edges.map((e) => e.className)).toEqual(["plane-a", "plane-neutral", "plane-neutral"]);
+    expect(edges.every((e) => e.type === "tsnFloating")).toBe(true);
+    expect(edges.every((e) => e.sourceHandle === undefined && e.targetHandle === undefined)).toBe(true);
+    const legacy = edges[1].data as TsnEdgeData;
+    expect(legacy.leftLabel).toBe("p1");
+    expect(legacy.rightLabel).toBe("p2");
   });
 });
 
-describe("buildTsnLinkPath（正交路径构造，真实路径无 mock 盲区）", () => {
-  it("cross：走廊高度随 corridorOrd 位移，路径互异", () => {
-    const base = {
-      sourceX: 100,
-      sourceY: 100,
-      targetX: 300,
-      targetY: 340,
-      sourcePosition: "bottom" as never,
-      targetPosition: "top" as never,
-      geometry: "cross" as const,
-      detourOrd: 0,
-      rowDir: 1 as const,
-    };
-    const p0 = buildTsnLinkPath({ ...base, corridorOrd: 0 });
-    const p1 = buildTsnLinkPath({ ...base, corridorOrd: 1 });
-    expect(p0).toContain("L 100,220");
-    expect(p1).toContain("L 100,232");
-    expect(p0).not.toBe(p1);
+describe("floatingEdgeAnchors（U3 交点纯函数）", () => {
+  const rect = (x: number, y: number, width = 126, height = 56) => ({ x, y, width, height });
+
+  it("水平相邻节点：交点落在相对的左右边框上", () => {
+    const source = rect(0, 0);
+    const target = rect(400, 0);
+    const anchors = floatingEdgeAnchors(source, target);
+    expect(anchors.sx).toBeCloseTo(126);
+    expect(anchors.sourcePosition).toBe("right");
+    expect(anchors.tx).toBeCloseTo(400);
+    expect(anchors.targetPosition).toBe("left");
+    expect(anchors.sy).toBeCloseTo(28);
+    expect(anchors.ty).toBeCloseTo(28);
   });
 
-  it("detour：向行外绕行且深度随序数递增", () => {
-    const base = {
-      sourceX: -100,
-      sourceY: 360,
-      targetX: 120,
-      targetY: 360,
-      sourcePosition: "right" as never,
-      targetPosition: "left" as never,
-      geometry: "detour" as const,
-      corridorOrd: 0,
-      rowDir: 1 as const,
-    };
-    const d0 = buildTsnLinkPath({ ...base, detourOrd: 0 });
-    const d1 = buildTsnLinkPath({ ...base, detourOrd: 1 });
-    expect(d0).toContain("404"); // 360 + 44
-    expect(d1).toContain("418"); // 360 + 44 + 14
-    expect(buildTsnLinkPath({ ...base, detourOrd: 0, rowDir: -1 })).toContain("316"); // 360 - 44
+  it("垂直相邻节点：交点落在上下边框上", () => {
+    const source = rect(0, 0);
+    const target = rect(0, 300);
+    const anchors = floatingEdgeAnchors(source, target);
+    expect(anchors.sy).toBeCloseTo(56);
+    expect(anchors.sourcePosition).toBe("bottom");
+    expect(anchors.ty).toBeCloseTo(300);
+    expect(anchors.targetPosition).toBe("top");
   });
 
-  it("flat：直连", () => {
-    expect(
-      buildTsnLinkPath({
-        sourceX: 0,
-        sourceY: 10,
-        targetX: 50,
-        targetY: 10,
-        sourcePosition: "right" as never,
-        targetPosition: "left" as never,
-        geometry: "flat",
-        corridorOrd: 0,
-        detourOrd: 0,
-        rowDir: 1,
-      }),
-    ).toBe("M 0,10 L 50,10");
+  it("对角节点：交点仍在节点边框范围内", () => {
+    const source = rect(0, 0);
+    const target = rect(400, 300);
+    const anchors = floatingEdgeAnchors(source, target);
+    expect(anchors.sx).toBeGreaterThanOrEqual(0);
+    expect(anchors.sx).toBeLessThanOrEqual(126);
+    expect(anchors.sy).toBeGreaterThanOrEqual(0);
+    expect(anchors.sy).toBeLessThanOrEqual(56);
+  });
+
+  it("Covers AE4 退化：中心重合时返回有限坐标（中心直连兜底，不产 NaN）", () => {
+    const a = rect(100, 100);
+    const b = rect(100, 100);
+    const anchors = floatingEdgeAnchors(a, b);
+    for (const value of [anchors.sx, anchors.sy, anchors.tx, anchors.ty]) {
+      expect(Number.isFinite(value)).toBe(true);
+    }
+  });
+
+  it("portLabelPoint 沿出射方向外推", () => {
+    expect(portLabelPoint(100, 50, "top" as never)).toEqual({ x: 100, y: 36 });
+    expect(portLabelPoint(100, 50, "right" as never)).toEqual({ x: 116, y: 50 });
   });
 });

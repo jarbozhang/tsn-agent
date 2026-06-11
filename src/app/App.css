@@ -1690,6 +1690,31 @@ textarea:focus-visible {
   pointer-events: none;
 }
 
+/* 选中边的端口标签随边色同步到 accent（标签在 EdgeLabelRenderer portal，
+   边的 .selected 选择器够不到，由组件注入 selected className）。 */
+.tsn-port-label.selected {
+  color: var(--accent);
+}
+
+/* R9：节点可拖动的光标反馈；精确选择器避免波及 Controls 按钮。 */
+.topology-canvas .react-flow__node {
+  cursor: grab;
+}
+
+.topology-canvas .react-flow__node.dragging {
+  cursor: grabbing;
+}
+
+/* R10 回滚提示：复用 transfer-notice.error 配色，画布内底部居中。 */
+.tsn-position-notice {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  margin: 0;
+}
+
 .topology-canvas .react-flow__edge.flow-highlighted .react-flow__edge-path {
   stroke: var(--accent);
   stroke-width: 2.6px;
@@ -1780,11 +1805,16 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+/* R2：handle 不再承担视觉与交互（floating 边自算锚点）；保留 DOM 但完全隐形。
+   不用 opacity——避免 hover 时 React Flow 默认高亮残留。 */
 .tsn-node .react-flow__handle {
-  width: 6px;
-  height: 6px;
-  border: 1px solid #ffffff;
-  background: var(--text-primary);
+  width: 0;
+  height: 0;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
 }
 
 .topology-canvas .react-flow__controls {

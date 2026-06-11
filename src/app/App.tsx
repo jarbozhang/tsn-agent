@@ -69,7 +69,7 @@ export function App() {
   } = useAgentRunController({ scrollDeps: [currentSession.id, currentSession.messages] });
   const [activeConfigTab, setActiveConfigTab] = useState<ConfigTabId>("node-detail");
   const [selectedTopologyItem, setSelectedTopologyItem] = useState<SelectedTopologyItem | undefined>();
-  const { snapshot: topologySnapshot, refetch: refetchTopology } = useTopologySnapshot(currentSession.id);
+  const { snapshot: topologySnapshot, refetch: refetchTopology, lastMutationId } = useTopologySnapshot(currentSession.id);
   const [transferNotice, setTransferNotice] = useState<TransferNotice | undefined>();
   const [retryTargetId, setRetryTargetId] = useState<string | undefined>();
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -419,9 +419,11 @@ export function App() {
           activeConfigTab={activeConfigTab}
           isAgentRunning={isAgentRunning}
           hasUserInteraction={hasUserInteraction}
+          lastMutationId={lastMutationId}
           onSelectConfigTab={setActiveConfigTab}
           onNodeSelect={handleNodeSelect}
           onLinkSelect={handleLinkSelect}
+          onRefreshTopology={() => void refetchTopology()}
         />
       </main>
 
