@@ -101,6 +101,11 @@ impl EffectiveSkillRoot {
             Some(self.path)
         }
     }
+
+    /// 诊断用根级原因（如播种失败回退/不可用原因），供 spawn 告警携带。
+    pub fn diagnostics_reason(&self) -> Option<&str> {
+        self.reason.as_deref()
+    }
 }
 
 #[tauri::command]
@@ -116,7 +121,10 @@ pub fn list_skill_files(
             skill_id: request.skill_id,
             status: root.status,
             files: Vec::new(),
-            message: Some("暂无可预览的 skill 文件目录。".to_string()),
+            message: Some(
+                root.reason
+                    .unwrap_or_else(|| "暂无可预览的 skill 文件目录。".to_string()),
+            ),
         });
     }
 
@@ -333,7 +341,18 @@ fn seed_skill_dir(src: &Path, dst: &Path) -> Result<(), String> {
     if dst.exists() {
         return Ok(());
     }
-    let tmp = dst.with_extension(format!("tmp-{}", timestamp_nanos()));
+    // tmp 名叠加 pid + 进程内序号：macOS SystemTime 仅微秒精度，并发首播
+    // 同微秒会共用同一 tmp 目录，撕裂 rename 的原子性前提。
+    let tmp = {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        dst.with_extension(format!(
+            "tmp-{}-{}-{}",
+            timestamp_nanos(),
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ))
+    };
     if let Err(error) = copy_dir_skip_symlinks(src, &tmp) {
         let _ = std::fs::remove_dir_all(&tmp);
         return Err(error);
@@ -433,7 +452,8 @@ fn resolve_skill_root_in(
         path: id_dir,
         writable: false,
         status: SkillFileRootStatus::Unavailable,
-        reason: None,
+        // 根级不可用原因（如 app-data 创建失败）随 per-id 结果穿出，UI 如实显示。
+        reason: effective.reason.clone(),
     })
 }
 
@@ -827,13 +847,13 @@ mod tests {
         cleanup(app_data);
     }
 
+    #[cfg(unix)]
     #[test]
     fn seeding_skips_symlink_entries() {
         let resource = create_test_skill_root();
         write_file(&resource.join("tsn-topology/SKILL.md"), "factory");
         let outside = resource.join("outside.txt");
         std::fs::write(&outside, "secret").expect("write outside");
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&outside, resource.join("tsn-topology/link.txt"))
             .expect("create symlink");
         let app_data = unique_temp_path("tsn-skill-appdata");
@@ -884,6 +904,46 @@ mod tests {
 
         assert!(!effective.writable);
         assert_eq!(effective.status, SkillFileRootStatus::Unavailable);
+    }
+
+    #[test]
+    fn root_reason_takes_precedence_over_per_file_reason() {
+        let root = create_test_skill_root();
+        write_file(&root.join("SKILL.md"), "content");
+        let path = resolve_existing_file(&root, "SKILL.md").expect("resolve file");
+
+        let with_root_reason =
+            read_text_file("tsn-topology", &root, &path, false, Some("根级回退原因")).expect("read");
+        assert!(!with_root_reason.editable);
+        assert_eq!(with_root_reason.readonly_reason.as_deref(), Some("根级回退原因"));
+
+        let without_root_reason =
+            read_text_file("tsn-topology", &root, &path, false, None).expect("read");
+        assert_eq!(
+            without_root_reason.readonly_reason.as_deref(),
+            Some("只读 skill 资源不可编辑。")
+        );
+
+        cleanup(root);
+    }
+
+    #[test]
+    fn into_usable_path_maps_status_to_worker_consumption() {
+        let usable = EffectiveSkillRoot {
+            path: PathBuf::from("/tmp/x"),
+            writable: false,
+            status: SkillFileRootStatus::Readonly,
+            reason: None,
+        };
+        assert_eq!(usable.into_usable_path(), Some(PathBuf::from("/tmp/x")));
+
+        let unavailable = EffectiveSkillRoot {
+            path: PathBuf::from("/tmp/x"),
+            writable: false,
+            status: SkillFileRootStatus::Unavailable,
+            reason: None,
+        };
+        assert_eq!(unavailable.into_usable_path(), None);
     }
 
     #[test]

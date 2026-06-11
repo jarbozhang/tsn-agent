@@ -693,6 +693,7 @@ describe("claude-agent-worker", () => {
         auditDir,
         appSessionId: "session/audit:1",
         runId: "agent-run-audit",
+        skillRoot: "/tmp/tsn-agent-audit-skill-root",
         stageRunnerInput: {
           userIntent: "我需要4个交换机",
           stage: "topology",
@@ -709,6 +710,8 @@ describe("claude-agent-worker", () => {
     expect(audit.schemaVersion).toBe("tsn-agent.agent-run-audit.v1");
     expect(audit.appSessionId).toBe("session/audit:1");
     expect(audit.runId).toBe("agent-run-audit");
+    // skill 指引实际读取根进审计（真机排查同源问题的依据）。
+    expect(audit.skillRoot).toBe("/tmp/tsn-agent-audit-skill-root");
     expect(audit.summary).toMatchObject({
       status: "success",
       stage: "topology",

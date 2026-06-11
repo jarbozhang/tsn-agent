@@ -106,7 +106,17 @@ fn run_claude_agent_blocking(
     let app_session_id = request.app_session_id.clone();
     let audit_dir = agent_audit_dir(&app);
     // 同源（R2）：worker 与编辑器消费同一有效 skill 根决策（含 app-data 懒播种）。
-    let skill_root = crate::skill_files::effective_skill_root(&app).into_usable_path();
+    let (skill_root, skill_root_reason) = {
+        let effective = crate::skill_files::effective_skill_root(&app);
+        let reason = effective.diagnostics_reason().map(str::to_string);
+        // 混合态守卫：根可用但 worker 消费的 SKILL.md 缺失（个别目录播种失败）时
+        // 视同不可用——走 cwd 兜底（打包态=内置工厂副本），与编辑器 per-id 回退
+        // 显示的内容对齐，避免「界面看得到指引、agent 只注入骨架」的反向不同源。
+        let path = effective
+            .into_usable_path()
+            .filter(|root| root.join("tsn-topology").join("SKILL.md").exists());
+        (path, reason)
+    };
     let prompt_chars = request.prompt.chars().count();
     let context_chars = request
         .conversation_context
@@ -130,9 +140,10 @@ fn run_claude_agent_blocking(
         }),
     );
     if skill_root.is_none() {
-        // skill 根 Unavailable 时省略 payload 字段，worker 走 cwd 兜底。注意该兜底
-        // 在打包态会成功读到内置工厂副本、不触发 skill_guidance_unavailable——
-        // 界面编辑与 agent 消费可能不同源，必须留 warn 痕迹供排查。
+        // skill 根不可用（或可用但缺 SKILL.md）时 payload 携带 skillRoot:null，
+        // worker 端 typeof 守卫视同缺省走 cwd 兜底。注意该兜底在打包态会成功读到
+        // 内置工厂副本、不触发 skill_guidance_unavailable——界面编辑与 agent 消费
+        // 可能不同源，必须留 warn 痕迹供排查。
         log_worker_event(
             &app,
             app_session_id.as_deref(),
@@ -140,7 +151,7 @@ fn run_claude_agent_blocking(
             "warn",
             "skill 根解析不可用，本次运行回退 worker cwd 兜底（打包态等价于内置工厂副本）",
             None,
-            serde_json::json!({}),
+            serde_json::json!({ "reason": skill_root_reason }),
         );
     }
     // Plan v3 U3+U4b：注入 sidecar url + token + session_id 给 worker，

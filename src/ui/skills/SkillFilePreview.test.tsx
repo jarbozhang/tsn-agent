@@ -58,6 +58,8 @@ describe("SkillFilePreview", () => {
     expect(await screen.findByText("原始 skill 内容")).toBeInTheDocument();
     expect(service.listFiles).toHaveBeenCalledWith("tsn-topology");
     expect(service.readFile).toHaveBeenCalledWith("tsn-topology", "SKILL.md");
+    // 可编辑（available）状态不渲染只读提示条。
+    expect(screen.queryByText(/当前为只读指引/)).not.toBeInTheDocument();
   });
 
   it("edits and saves small text files", async () => {

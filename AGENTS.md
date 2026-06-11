@@ -117,6 +117,7 @@
 - 单元测试：`npm test`
 - 浏览器端到端：`npm run e2e`
 - Tauri/Rust 测试：`npm run cargo:test`
+- worker 构建：`npm run build:worker`——`src-node/` 源码改动后必跑；dev 与 release 跑的都是 dist 产物，不重建则验证的是旧代码
 - Tauri 开发入口：`npm run tauri dev`
 - Vite Web 开发入口：`npm run dev`
 
