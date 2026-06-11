@@ -56,6 +56,19 @@ export interface TsnEdgeData {
   [key: string]: unknown;
 }
 
+export type TsnNodeKind = "switch" | "endSystem" | "controller";
+
+/** DB nodeType（自由字符串）→ 渲染类型 token；未知/缺失回退端系统。 */
+export function nodeTypeToken(nodeType: string | null): TsnNodeKind {
+  if (nodeType === "switch") {
+    return "switch";
+  }
+  if (nodeType === "controller") {
+    return "controller";
+  }
+  return "endSystem";
+}
+
 export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): { nodes: Node[]; edges: Edge[] } {
   return {
     nodes: snapshot.nodes.map((node) => ({
@@ -64,7 +77,7 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): { no
       position: { x: node.x, y: node.y },
       data: {
         label: nodeRowLabel(node),
-        nodeType: node.nodeType === "switch" ? "switch" : "endSystem",
+        nodeType: nodeTypeToken(node.nodeType),
         imac: node.imac,
       },
     })),
@@ -86,14 +99,19 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): { no
   };
 }
 
+const NODE_KIND_PREFIX: Record<TsnNodeKind, string> = {
+  switch: "SW",
+  endSystem: "ES",
+  controller: "CTRL",
+};
+
 /** 画布标签：优先逻辑名（与 agent 对话命名一致），缺失回退「前缀-同步名」派生。 */
 export function nodeRowLabel(node: TopologyNodeRow): string {
   if (node.name) {
     return node.name;
   }
 
-  const prefix = node.nodeType === "switch" ? "SW" : "ES";
-  return `${prefix}-${node.syncName}`;
+  return `${NODE_KIND_PREFIX[nodeTypeToken(node.nodeType)]}-${node.syncName}`;
 }
 
 export function linkRowId(link: TopologyLinkRow): string {

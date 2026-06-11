@@ -20,15 +20,22 @@ import {
 } from "../../../sessions/topology-snapshot";
 import { DetailRow, Stat } from "../shared";
 import { TsnFloatingEdge } from "./tsn-floating-edge";
-import { linkRowId, nodeRowLabel, topologySnapshotToReactFlow } from "./topology-flow";
+import {
+  linkRowId,
+  nodeRowLabel,
+  nodeTypeToken,
+  topologySnapshotToReactFlow,
+  type TsnNodeKind,
+} from "./topology-flow";
 
 export {
   nodeRowLabel,
+  nodeTypeToken,
   parseLinkStyles,
   planeClassName,
   topologySnapshotToReactFlow,
 } from "./topology-flow";
-export type { TsnEdgeData } from "./topology-flow";
+export type { TsnEdgeData, TsnNodeKind } from "./topology-flow";
 
 export type ConfigTabId = "node-detail" | "link-detail";
 
@@ -412,7 +419,7 @@ export function WorkspacePane({
                 <DetailRow label="名称" value={selectedNode.name ?? "无"} />
                 <DetailRow label="IMAC" value={selectedNode.imac} />
                 <DetailRow label="同步名称" value={selectedNode.syncName} />
-                <DetailRow label="类型" value={selectedNode.nodeType === "switch" ? "交换机" : "端系统"} />
+                <DetailRow label="类型" value={NODE_KIND_NAME[nodeTypeToken(selectedNode.nodeType)]} />
                 <DetailRow label="坐标" value={`${selectedNode.x}, ${selectedNode.y}`} />
                 <DetailRow label="插入顺序" value={selectedNode.insertOrder} />
               </div>
@@ -459,10 +466,22 @@ export function WorkspacePane({
   );
 }
 
+const NODE_KIND_BADGE: Record<TsnNodeKind, string> = {
+  switch: "SW",
+  endSystem: "ES",
+  controller: "CTRL",
+};
+
+const NODE_KIND_NAME: Record<TsnNodeKind, string> = {
+  switch: "交换机",
+  endSystem: "端系统",
+  controller: "控制器",
+};
+
 function TsnTopologyNode({ data }: NodeProps) {
   const nodeData = data as {
     label?: string;
-    nodeType?: "switch" | "endSystem";
+    nodeType?: TsnNodeKind;
     imac?: number;
   };
   const nodeType = nodeData.nodeType ?? "endSystem";
@@ -472,7 +491,7 @@ function TsnTopologyNode({ data }: NodeProps) {
       {/* R2：floating 边不锚定 handle；保留一对隐形 handle 满足 React Flow 边合法性。 */}
       <Handle id="s" type="source" position={Position.Top} />
       <Handle id="t" type="target" position={Position.Top} />
-      <span className="tsn-node-type mono">{nodeType === "switch" ? "SW" : "ES"}</span>
+      <span className="tsn-node-type mono">{NODE_KIND_BADGE[nodeType]}</span>
       <strong>{nodeData.label}</strong>
       <small className="mono">imac {nodeData.imac}</small>
     </div>

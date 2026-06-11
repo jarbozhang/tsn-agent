@@ -92,6 +92,7 @@ vi.mock("@xyflow/react", () => ({
 
 import {
   nodeRowLabel,
+  nodeTypeToken,
   parseLinkStyles,
   planeClassName,
   topologySnapshotToReactFlow,
@@ -377,6 +378,17 @@ describe("nodeRowLabel", () => {
   it("逻辑名缺失（增量节点/历史数据）回退「前缀-同步名」派生", () => {
     expect(nodeRowLabel(nodeRow())).toBe("ES-2");
     expect(nodeRowLabel(nodeRow({ nodeType: "switch", syncName: "0" }))).toBe("SW-0");
+    expect(nodeRowLabel(nodeRow({ nodeType: "controller", syncName: "9" }))).toBe("CTRL-9");
+  });
+});
+
+describe("nodeTypeToken（节点类型视觉系统）", () => {
+  it("switch/controller 原值映射，未知与缺失回退端系统", () => {
+    expect(nodeTypeToken("switch")).toBe("switch");
+    expect(nodeTypeToken("controller")).toBe("controller");
+    expect(nodeTypeToken("endSystem")).toBe("endSystem");
+    expect(nodeTypeToken(null)).toBe("endSystem");
+    expect(nodeTypeToken("unknown-future-kind")).toBe("endSystem");
   });
 });
 

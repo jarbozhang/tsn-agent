@@ -1761,16 +1761,28 @@ textarea:focus-visible {
   /* 须 ≤ Rust 布局间距 ES_PITCH(180) − 留白；改宽时同步 topology_compute.rs 布局常量。 */
   max-width: 126px;
   padding: 8px 10px;
-  border: 1px solid rgba(250, 84, 28, 0.48);
+  border: 1px solid rgba(100, 116, 139, 0.45);
   border-radius: 6px;
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
 }
 
+/* 节点类型视觉系统：交换机钢蓝、端系统橙、控制器紫——
+   与边的平面配色（A 蓝 --plane-a / B 红 --plane-b）保持区分。 */
 .tsn-node.switch {
   min-width: 118px;
-  border-color: rgba(250, 84, 28, 0.72);
+  border-color: rgba(51, 65, 85, 0.55);
+  background: #f3f6fa;
+}
+
+.tsn-node.endSystem {
+  border-color: rgba(250, 84, 28, 0.55);
+}
+
+.tsn-node.controller {
+  border-color: rgba(124, 58, 237, 0.55);
+  background: #faf7ff;
 }
 
 .tsn-node-type {
@@ -1778,13 +1790,22 @@ textarea:focus-visible {
   grid-area: type;
   align-items: center;
   justify-content: center;
-  width: 26px;
+  min-width: 26px;
   height: 26px;
+  padding: 0 4px;
   border-radius: 5px;
-  color: var(--accent);
+  color: #ffffff;
   font-size: 10px;
   font-weight: 700;
-  background: var(--accent-dim);
+  background: var(--accent);
+}
+
+.tsn-node.switch .tsn-node-type {
+  background: #334155;
+}
+
+.tsn-node.controller .tsn-node-type {
+  background: #7c3aed;
 }
 
 .tsn-node strong {
