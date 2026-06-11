@@ -1,0 +1,56 @@
+{
+    "mac_unicast_parameter": {
+        "node": [
+            {
+                "node_id": "0",
+                "entry": [
+                    {
+                        "vlan_id": "",
+                        "dmac": "00:22:33:44:55:66",
+                        "outport": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "2",
+                "entry": [
+                    {
+                        "vlan_id": "",
+                        "dmac": "00:22:33:44:55:66",
+                        "outport": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "4",
+                "entry": [
+                    {
+                        "vlan_id": "",
+                        "dmac": "00:22:33:44:55:66",
+                        "outport": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "3",
+                "entry": [
+                    {
+                        "vlan_id": "",
+                        "dmac": "00:22:33:44:55:66",
+                        "outport": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "1",
+                "entry": [
+                    {
+                        "vlan_id": "",
+                        "dmac": "00:22:33:44:55:66",
+                        "outport": "1"
+                    }
+                ]
+            }
+        ]
+    }
+}

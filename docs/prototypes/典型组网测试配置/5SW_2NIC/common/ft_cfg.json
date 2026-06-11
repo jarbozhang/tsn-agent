@@ -1,0 +1,46 @@
+{
+    "ft_cfg_para": {
+        "oss": {
+            "hot_standby_gm_mid": "0",
+            "ft_switch": "0"
+        },
+        "ft_node": [
+            {
+                "ft_mid": "0",
+                "master_1_port": "2",
+                "slave_1_port": "0",
+                "hot_standby": "1"
+            },
+            {
+                "ft_mid": "1",
+                "master_1_port": "2",
+                "slave_1_port": "1",
+                "hot_standby": "0"
+            },
+            {
+                "ft_mid": "2",
+                "master_1_port": "2",
+                "slave_1_port": "1",
+                "hot_standby": "0"
+            },
+            {
+                "ft_mid": "3",
+                "master_1_port": "2",
+                "slave_1_port": "1",
+                "hot_standby": "0"
+            },
+            {
+                "ft_mid": "4",
+                "master_1_port": "0",
+                "slave_1_port": "1",
+                "hot_standby": "0"
+            },
+            {
+                "ft_mid": "6",
+                "master_1_port": "0",
+                "slave_1_port": "0",
+                "hot_standby": "0"
+            }
+        ]
+    }
+}

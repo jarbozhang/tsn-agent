@@ -1,0 +1,178 @@
+{
+    "node": {
+        "nodes": [
+            {
+                "imac": "887",
+                "sync_name": "0",
+                "x": -236.61068214514512,
+                "y": -30.07644897126528,
+                "sync_type": 2
+            },
+            {
+                "imac": "888",
+                "sync_name": "1",
+                "x": -98.653051454521,
+                "y": -13.081668378942027,
+                "sync_type": 2
+            },
+            {
+                "imac": "889",
+                "sync_name": "2",
+                "x": 99.28615779724396,
+                "y": -4.0844315947708765,
+                "sync_type": 2
+            },
+            {
+                "imac": "890",
+                "sync_name": "3",
+                "x": 279.2308934806666,
+                "y": -4.0844315947708765,
+                "sync_type": 2
+            },
+            {
+                "imac": "891",
+                "sync_name": "4",
+                "x": 411.19036631517656,
+                "y": -4.0844315947708765,
+                "sync_type": 2
+            },
+            {
+                "imac": "892",
+                "sync_name": "5",
+                "x": -456.5431368693284,
+                "y": -30.07644897126528,
+                "sync_type": 8
+            },
+            {
+                "imac": "893",
+                "sync_name": "6",
+                "x": 432.65772107976943,
+                "y": -136.98574483356006,
+                "sync_type": 8
+            },
+            {
+                "imac": "924",
+                "sync_name": "10",
+                "x": -237.62552604389012,
+                "y": -157.21777326635765,
+                "sync_type": 39
+            }
+        ],
+        "links": [
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "0",
+                    "rightLabel": "0",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 892,
+                "addr": 887
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "1",
+                    "rightLabel": "0",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 887,
+                "addr": 888
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "1",
+                    "rightLabel": "0",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 888,
+                "addr": 889
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "1",
+                    "rightLabel": "0",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 889,
+                "addr": 890
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "1",
+                    "rightLabel": "0",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 890,
+                "addr": 891
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "0",
+                    "rightLabel": "1",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 893,
+                "addr": 891
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "7",
+                    "rightLabel": "0",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 887,
+                "addr": 924
+            }
+        ]
+    },
+    "refs": {
+        "2": {
+            "_classPath": "Q.Graphs.exchanger"
+        },
+        "8": {
+            "_classPath": "Q.Graphs.server"
+        },
+        "10": {
+            "_classPath": "Q.Position.LEFT_BOTTOM"
+        },
+        "12": {
+            "_classPath": "Q.Position.RIGHT_BOTTOM"
+        },
+        "14": {
+            "_classPath": "Q.Position.CENTER_BOTTOM"
+        },
+        "16": {
+            "_classPath": "Q.Position.CENTER_TOP"
+        },
+        "39": {
+            "_classPath": "Q.Graphs.node"
+        }
+    }
+}

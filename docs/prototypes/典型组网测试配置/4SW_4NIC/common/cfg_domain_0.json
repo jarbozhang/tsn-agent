@@ -1,0 +1,125 @@
+{
+    "sync_cfg_para": {
+        "oss": {
+            "oss_mid": "a",
+            "gm_mid": "0",
+            "gm_local_time": "0s0ns",
+            "fre_switch": "1",
+            "one_step_mode": "0"
+        },
+        "node": [
+            {
+                "hcp_mid": "0",
+                "master_port": "17",
+                "slave_port": "0",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "link_delay_offset": "0",
+                "trust_threshold": "100",
+                "port_ptp_enabled": "17",
+                "tick_interval_flag": "1"
+            },
+            {
+                "hcp_mid": "1",
+                "master_port": "10",
+                "slave_port": "2",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "link_delay_offset": "0",
+                "trust_threshold": "100",
+                "port_ptp_enabled": "12",
+                "tick_interval_flag": "1"
+            },
+            {
+                "hcp_mid": "2",
+                "master_port": "5",
+                "slave_port": "10",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "link_delay_offset": "0",
+                "trust_threshold": "100",
+                "port_ptp_enabled": "15",
+                "tick_interval_flag": "1"
+            },
+            {
+                "hcp_mid": "3",
+                "master_port": "0",
+                "slave_port": "10",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "link_delay_offset": "0",
+                "trust_threshold": "100",
+                "port_ptp_enabled": "10",
+                "tick_interval_flag": "1"
+            },
+            {
+                "hcp_mid": "4",
+                "master_port": "0",
+                "slave_port": "1",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "link_delay_offset": "0",
+                "trust_threshold": "100",
+                "port_ptp_enabled": "1",
+                "tick_interval_flag": "0"
+            },
+            {
+                "hcp_mid": "5",
+                "master_port": "0",
+                "slave_port": "1",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "link_delay_offset": "0",
+                "trust_threshold": "100",
+                "port_ptp_enabled": "1",
+                "tick_interval_flag": "0"
+            },
+            {
+                "hcp_mid": "6",
+                "master_port": "0",
+                "slave_port": "1",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "link_delay_offset": "0",
+                "trust_threshold": "100",
+                "port_ptp_enabled": "1",
+                "tick_interval_flag": "0"
+            },
+            {
+                "hcp_mid": "7",
+                "master_port": "0",
+                "slave_port": "1",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "link_delay_offset": "0",
+                "trust_threshold": "100",
+                "port_ptp_enabled": "1",
+                "tick_interval_flag": "0"
+            }
+        ]
+    }
+}

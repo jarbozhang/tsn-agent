@@ -1,0 +1,56 @@
+{
+    "time_trigger_tbl": {
+        "node": [
+            {
+                "node_id": "0",
+                "entry": [
+                    {
+                        "trigger": "2",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "open"
+                    },
+                    {
+                        "trigger": "883",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "close"
+                    },
+                    {
+                        "trigger": "884",
+                        "output_port": "5",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "trigger": "1765",
+                        "output_port": "5",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "4",
+                "entry": [
+                    {
+                        "trigger": "1",
+                        "dbuf_id": "0"
+                    },
+                    {
+                        "trigger": "2",
+                        "output_port": "0",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "trigger": "883",
+                        "output_port": "0",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            }
+        ]
+    }
+}

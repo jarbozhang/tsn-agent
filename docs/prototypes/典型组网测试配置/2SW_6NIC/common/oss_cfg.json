@@ -1,0 +1,117 @@
+{
+    "sync_cfg_para": {
+        "oss": {
+            "oss_mid": "a",
+            "gm_mid": "0",
+            "gm_local_time": "0s0ns",
+            "fre_switch": "1",
+            "one_step_mode": "0"
+        },
+        "node": [
+            {
+                "hcp_mid": "0",
+                "master_port": "7f",
+                "slave_port": "0",
+                "port_ptp_enabled": "7f",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "tick_interval_flag": "1",
+                "link_delay_offset": "0"
+            },
+            {
+                "hcp_mid": "2",
+                "master_port": "0",
+                "slave_port": "1",
+                "port_ptp_enabled": "1",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "tick_interval_flag": "0",
+                "link_delay_offset": "0"
+            },
+            {
+                "hcp_mid": "1",
+                "master_port": "0",
+                "slave_port": "40",
+                "port_ptp_enabled": "40",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "tick_interval_flag": "1",
+                "link_delay_offset": "0"
+            },
+            {
+                "hcp_mid": "3",
+                "master_port": "0",
+                "slave_port": "1",
+                "port_ptp_enabled": "1",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "tick_interval_flag": "0",
+                "link_delay_offset": "0"
+            },
+            {
+                "hcp_mid": "4",
+                "master_port": "0",
+                "slave_port": "1",
+                "port_ptp_enabled": "1",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "tick_interval_flag": "0",
+                "link_delay_offset": "0"
+            },
+            {
+                "hcp_mid": "5",
+                "master_port": "0",
+                "slave_port": "1",
+                "port_ptp_enabled": "1",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "tick_interval_flag": "0",
+                "link_delay_offset": "0"
+            },
+            {
+                "hcp_mid": "6",
+                "master_port": "0",
+                "slave_port": "1",
+                "port_ptp_enabled": "1",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "tick_interval_flag": "0",
+                "link_delay_offset": "0"
+            },
+            {
+                "hcp_mid": "7",
+                "master_port": "0",
+                "slave_port": "1",
+                "port_ptp_enabled": "1",
+                "sync_period": "3",
+                "measure_period": "1",
+                "measure_timeout": "6",
+                "report_enable": "1",
+                "offset_threshold": "c8",
+                "tick_interval_flag": "0",
+                "link_delay_offset": "0"
+            }
+        ]
+    }
+}

@@ -1,0 +1,75 @@
+{
+  "mac_tbl": {
+    "node": [
+      {
+        "node_id": "1",
+        "mac_forward_table": {
+          "entry": [
+            {
+              "index": "0",
+              "type": "0",
+              "outport": "2",
+              "mask": "1",
+              "vlan_id": "1",
+              "mac": "02:02:03:04:05:01"
+            },
+            {
+              "index": "0",
+              "type": "1",
+              "outport": "5",
+              "mask": "2",
+              "vlan_id": "2",
+              "mac": "02:02:03:04:05:02"
+            },
+            {
+              "index": "1",
+              "type": "1",
+              "outport": "15",
+              "mask": "3",
+              "vlan_id": "3",
+              "mac": "02:02:03:04:05:03"
+            }
+          ]
+        },
+        "link_aggregation_table": {
+          "entry": [
+            {
+              "index_id": "0",
+              "mask": "15",
+              "outport1": "1",
+              "outport2": "2",
+              "outport3": "3",
+              "outport4": "4"
+            },
+            {
+              "index_id": "1",
+              "mask": "5",
+              "outport1": "5",
+              "outport2": "0",
+              "outport3": "7",
+              "outport4": "0"
+            }
+          ]
+        },
+        "redundant_forward_table": {
+          "entry": [
+            {
+              "index_id": "5",
+              "outport1": "3",
+              "outport2": "4"
+            }
+          ]
+        },
+        "backup_port_table": {
+          "entry": [
+            {
+              "index_id": "3",
+              "outport1": "5",
+              "outport2": "7"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

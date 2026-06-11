@@ -1,0 +1,12 @@
+{
+    "sync_cfg_para": {
+        "oss": {
+            "oss_mid": "3",
+            "gm_mid": "",
+            "gm_local_time": "1758249000s60ns",
+            "fre_switch": "1",
+            "one_step_mode": "0"
+        },
+        "node": []
+    }
+}

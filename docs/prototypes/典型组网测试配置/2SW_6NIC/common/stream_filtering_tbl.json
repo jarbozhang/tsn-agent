@@ -1,0 +1,17 @@
+{
+    "stream_filtering_tbl": {
+        "node": [
+            {
+                "node_id": "0",
+                "entry": [
+                    {
+                        "ipv": "7",
+                        "open_time": "2",
+                        "close_time": "883",
+                        "flow_id": "0"
+                    }
+                ]
+            }
+        ]
+    }
+}

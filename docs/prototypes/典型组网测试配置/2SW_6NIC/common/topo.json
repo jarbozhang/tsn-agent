@@ -1,0 +1,146 @@
+{
+    "node_cfg_para": {
+        "node": [
+            {
+                "Node_MID": 0,
+                "Node_Bitmap": 127,
+                "Node_DeviceType": 0,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        2,
+                        3,
+                        4,
+                        5,
+                        6,
+                        7,
+                        1
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1,
+                        2,
+                        3,
+                        4,
+                        5,
+                        6
+                    ]
+                }
+            },
+            {
+                "Node_MID": 1,
+                "Node_Bitmap": 127,
+                "Node_DeviceType": 0,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        2,
+                        3,
+                        4,
+                        5,
+                        6,
+                        7,
+                        0
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1,
+                        2,
+                        3,
+                        4,
+                        5,
+                        6
+                    ]
+                }
+            },
+            {
+                "Node_MID": 2,
+                "Node_Bitmap": 3,
+                "Node_DeviceType": 3,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        0,
+                        1
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1
+                    ]
+                }
+            },
+            {
+                "Node_MID": 3,
+                "Node_Bitmap": 3,
+                "Node_DeviceType": 3,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        0,
+                        1
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1
+                    ]
+                }
+            },
+            {
+                "Node_MID": 4,
+                "Node_Bitmap": 3,
+                "Node_DeviceType": 3,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        0,
+                        1
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1
+                    ]
+                }
+            },
+            {
+                "Node_MID": 5,
+                "Node_Bitmap": 3,
+                "Node_DeviceType": 3,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        0,
+                        1
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1
+                    ]
+                }
+            },
+            {
+                "Node_MID": 6,
+                "Node_Bitmap": 3,
+                "Node_DeviceType": 3,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        0,
+                        1
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1
+                    ]
+                }
+            },
+            {
+                "Node_MID": 7,
+                "Node_Bitmap": 3,
+                "Node_DeviceType": 3,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        0,
+                        1
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1
+                    ]
+                }
+            }
+        ]
+    }
+}

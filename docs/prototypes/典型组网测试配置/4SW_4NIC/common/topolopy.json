@@ -1,0 +1,263 @@
+{
+    "node": {
+        "nodes": [
+            {
+                "imac": "171",
+                "sync_name": "10",
+                "x": -261.1168098835134,
+                "y": 158.32331428802127,
+                "sync_type": 2
+            },
+            {
+                "imac": "172",
+                "sync_name": "0",
+                "x": -241.1273264687968,
+                "y": 38.858047263299554,
+                "sync_type": 4
+            },
+            {
+                "imac": "173",
+                "sync_name": "5",
+                "x": -382.8004809994228,
+                "y": -129.78605478154404,
+                "sync_type": 6
+            },
+            {
+                "imac": "179",
+                "sync_name": "1",
+                "x": -244.69942058798176,
+                "y": -93.97538810621695,
+                "sync_type": 4
+            },
+            {
+                "imac": "180",
+                "sync_name": "2",
+                "x": -99.13249201144265,
+                "y": 40.51109122291949,
+                "sync_type": 4
+            },
+            {
+                "imac": "181",
+                "sync_name": "3",
+                "x": -106.83654690163223,
+                "y": -90.1421892706453,
+                "sync_type": 4
+            },
+            {
+                "imac": "182",
+                "sync_name": "4",
+                "x": -385.48429842165865,
+                "y": 81.12303224162578,
+                "sync_type": 6
+            },
+            {
+                "imac": "193",
+                "sync_name": "7",
+                "x": 44.24401699647984,
+                "y": -135.83325584907706,
+                "sync_type": 6
+            },
+            {
+                "imac": "194",
+                "sync_name": "6",
+                "x": 59.029849419655136,
+                "y": 96.68933170080331,
+                "sync_type": 6
+            }
+        ],
+        "links": [
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "7",
+                    "rightLabel": "0",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 172,
+                "addr": 171
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "1",
+                    "rightLabel": "1",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 172,
+                "addr": 179
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "1",
+                    "rightLabel": "1",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 180,
+                "addr": 181
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "1",
+                    "rightLabel": "0",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 173,
+                "addr": 179
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "0",
+                    "rightLabel": "2",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 182,
+                "addr": 172
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "4",
+                    "rightLabel": "4",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 179,
+                "addr": 181
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "4",
+                    "rightLabel": "4",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 172,
+                "addr": 180
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "0",
+                    "rightLabel": "1",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 181,
+                "addr": 193
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "2",
+                    "rightLabel": "0",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 180,
+                "addr": 194
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "2",
+                    "rightLabel": "1",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 181,
+                "addr": 194
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "0",
+                    "rightLabel": "0",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 193,
+                "addr": 180
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "0",
+                    "rightLabel": "0",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 173,
+                "addr": 172
+            },
+            {
+                "name": " ",
+                "styles": {
+                    "arrow.to": false,
+                    "leftLabel": "2",
+                    "rightLabel": "1",
+                    "speed": "1000",
+                    "st_queues": "3",
+                    "macrotick": "0.032"
+                },
+                "imac": 179,
+                "addr": 182
+            }
+        ]
+    },
+    "refs": {
+        "2": {
+            "_classPath": "Q.Graphs.node"
+        },
+        "4": {
+            "_classPath": "Q.Graphs.exchanger"
+        },
+        "6": {
+            "_classPath": "Q.Graphs.server"
+        },
+        "7": {
+            "_classPath": "Q.Position.LEFT_BOTTOM"
+        },
+        "9": {
+            "_classPath": "Q.Position.RIGHT_BOTTOM"
+        },
+        "11": {
+            "_classPath": "Q.Position.CENTER_BOTTOM"
+        },
+        "13": {
+            "_classPath": "Q.Position.CENTER_TOP"
+        }
+    }
+}

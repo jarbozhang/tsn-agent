@@ -1,0 +1,54 @@
+{
+    "rc_forward_tbl": {
+        "node": [
+            {
+                "node_id": "0",
+                "entry": [
+                    {
+                        "flow_id": "1",
+                        "outport": "10",
+                        "priority": "4",
+                        "reserve": "0",
+                        "tb_id": "0"
+                    }
+                ]
+            },
+            {
+                "node_id": "1",
+                "entry": [
+                    {
+                        "flow_id": "1",
+                        "outport": "10",
+                        "priority": "4",
+                        "reserve": "0",
+                        "tb_id": "0"
+                    }
+                ]
+            },
+            {
+                "node_id": "2",
+                "entry": [
+                    {
+                        "flow_id": "1",
+                        "outport": "4",
+                        "priority": "4",
+                        "reserve": "0",
+                        "tb_id": "0"
+                    }
+                ]
+            },
+            {
+                "node_id": "3",
+                "entry": [
+                    {
+                        "flow_id": "1",
+                        "outport": "4",
+                        "priority": "4",
+                        "reserve": "0",
+                        "tb_id": "0"
+                    }
+                ]
+            }
+        ]
+    }
+}

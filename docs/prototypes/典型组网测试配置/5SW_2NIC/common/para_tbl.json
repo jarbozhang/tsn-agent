@@ -1,0 +1,52 @@
+{
+    "para_tbl": {
+        "node": [
+            {
+                "node_id": "0",
+                "node_type": "0",
+                "cyclelen": "1000000",
+                "qbv_or_qch": "0"
+            },
+            {
+                "node_id": "1",
+                "node_type": "0",
+                "cyclelen": "1000000",
+                "qbv_or_qch": "0"
+            },
+            {
+                "node_id": "2",
+                "node_type": "0",
+                "cyclelen": "1000000",
+                "qbv_or_qch": "0"
+            },
+            {
+                "node_id": "3",
+                "node_type": "0",
+                "cyclelen": "1000000",
+                "qbv_or_qch": "0"
+            },
+            {
+                "node_id": "4",
+                "node_type": "0",
+                "cyclelen": "1000000",
+                "qbv_or_qch": "0"
+            },
+            {
+                "node_id": "5",
+                "node_type": "1",
+                "cyclelen": "1000000",
+                "qbv_or_qch": "0",
+                "vlan_cfg": "0",
+                "vlan_id": "0"
+            },
+            {
+                "node_id": "6",
+                "node_type": "1",
+                "cyclelen": "1000000",
+                "qbv_or_qch": "0",
+                "vlan_cfg": "0",
+                "vlan_id": "0"
+            }
+        ]
+    }
+}

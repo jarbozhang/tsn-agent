@@ -1,0 +1,19 @@
+{
+    "static_mac_cfg": {
+        "l2switch": {
+            "l2switch_mid": "22"
+        },
+        "node": [
+            {
+                "hcp_mid": "0",
+                "broadcast_flag": "0x1FFFFFFFF",
+                "static_mac_table_num": "3"
+            },
+            {
+                "hcp_mid": "1",
+                "broadcast_flag": "0xFFFFFFFF",
+                "static_mac_table_num": "4"
+            }
+        ]
+    }
+}

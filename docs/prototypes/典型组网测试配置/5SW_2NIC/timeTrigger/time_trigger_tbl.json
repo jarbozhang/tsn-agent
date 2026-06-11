@@ -1,0 +1,172 @@
+{
+    "time_trigger_tbl": {
+        "node": [
+            {
+                "node_id": "0",
+                "entry": [
+                    {
+                        "trigger": "2",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "open"
+                    },
+                    {
+                        "trigger": "883",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "close"
+                    },
+                    {
+                        "trigger": "884",
+                        "output_port": "1",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "trigger": "1765",
+                        "output_port": "1",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "1",
+                "entry": [
+                    {
+                        "trigger": "884",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "open"
+                    },
+                    {
+                        "trigger": "1765",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "close"
+                    },
+                    {
+                        "trigger": "1766",
+                        "output_port": "1",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "trigger": "2647",
+                        "output_port": "1",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "2",
+                "entry": [
+                    {
+                        "trigger": "1766",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "open"
+                    },
+                    {
+                        "trigger": "2647",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "close"
+                    },
+                    {
+                        "trigger": "2648",
+                        "output_port": "1",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "trigger": "3529",
+                        "output_port": "1",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "3",
+                "entry": [
+                    {
+                        "trigger": "2648",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "open"
+                    },
+                    {
+                        "trigger": "3529",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "close"
+                    },
+                    {
+                        "trigger": "3530",
+                        "output_port": "1",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "trigger": "4410",
+                        "output_port": "1",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "4",
+                "entry": [
+                    {
+                        "trigger": "3529",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "open"
+                    },
+                    {
+                        "trigger": "4410",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "close"
+                    },
+                    {
+                        "trigger": "4412",
+                        "output_port": "1",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "trigger": "5293",
+                        "output_port": "1",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "5",
+                "entry": [
+                    {
+                        "trigger": "1",
+                        "dbuf_id": "0"
+                    },
+                    {
+                        "trigger": "2",
+                        "output_port": "0",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "trigger": "883",
+                        "output_port": "0",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            }
+        ]
+    }
+}

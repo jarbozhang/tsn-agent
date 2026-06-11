@@ -1,0 +1,177 @@
+{
+    "network_init_cfg": {
+        "tsnlight": {
+            "tsnlight_mid": "a"
+        },
+        "node": [
+            {
+                "hcp_mid": "0",
+                "tsmp_forward_table": {
+                    "entry": [
+                        {
+                            "dmid": "a",
+                            "outport": "80"
+                        },
+                        {
+                            "dmid": "1",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "3",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "2",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "6",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "7",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "4",
+                            "outport": "4"
+                        },
+                        {
+                            "dmid": "5",
+                            "outport": "1"
+                        }
+                    ]
+                }
+            },
+            {
+                "hcp_mid": "1",
+                "tsmp_forward_table": {
+                    "entry": [
+                        {
+                            "dmid": "a",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "0",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "3",
+                            "outport": "10"
+                        },
+                        {
+                            "dmid": "2",
+                            "outport": "10"
+                        },
+                        {
+                            "dmid": "6",
+                            "outport": "10"
+                        },
+                        {
+                            "dmid": "7",
+                            "outport": "10"
+                        },
+                        {
+                            "dmid": "4",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "5",
+                            "outport": "2"
+                        }
+                    ]
+                }
+            },
+            {
+                "hcp_mid": "3",
+                "tsmp_forward_table": {
+                    "entry": [
+                        {
+                            "dmid": "a",
+                            "outport": "10"
+                        },
+                        {
+                            "dmid": "0",
+                            "outport": "10"
+                        },
+                        {
+                            "dmid": "1",
+                            "outport": "10"
+                        },
+                        {
+                            "dmid": "2",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "6",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "7",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "4",
+                            "outport": "10"
+                        },
+                        {
+                            "dmid": "5",
+                            "outport": "10"
+                        }
+                    ]
+                }
+            },
+            {
+                "hcp_mid": "2",
+                "tsmp_forward_table": {
+                    "entry": [
+                        {
+                            "dmid": "a",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "0",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "1",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "3",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "6",
+                            "outport": "4"
+                        },
+                        {
+                            "dmid": "7",
+                            "outport": "1"
+                        },
+                        {
+                            "dmid": "4",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "5",
+                            "outport": "2"
+                        }
+                    ]
+                }
+            },
+            {
+                "hcp_mid": "6"
+            },
+            {
+                "hcp_mid": "7"
+            },
+            {
+                "hcp_mid": "4"
+            },
+            {
+                "hcp_mid": "5"
+            }
+        ]
+    }
+}

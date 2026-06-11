@@ -1,0 +1,71 @@
+{
+    "forward_tbl": {
+        "node": [
+            {
+                "node_id": "0",
+                "entry": [
+                    {
+                        "flow_id": "0",
+                        "outport": "2",
+                        "priority": "7",
+                        "reserve": "0",
+                        "flow_period": "31250",
+                        "inject_time_slot": "2"
+                    }
+                ]
+            },
+            {
+                "node_id": "1",
+                "entry": [
+                    {
+                        "flow_id": "0",
+                        "outport": "2",
+                        "priority": "7",
+                        "reserve": "0",
+                        "flow_period": "31250",
+                        "inject_time_slot": "884"
+                    }
+                ]
+            },
+            {
+                "node_id": "2",
+                "entry": [
+                    {
+                        "flow_id": "0",
+                        "outport": "2",
+                        "priority": "7",
+                        "reserve": "0",
+                        "flow_period": "31250",
+                        "inject_time_slot": "1766"
+                    }
+                ]
+            },
+            {
+                "node_id": "3",
+                "entry": [
+                    {
+                        "flow_id": "0",
+                        "outport": "2",
+                        "priority": "7",
+                        "reserve": "0",
+                        "flow_period": "31250",
+                        "inject_time_slot": "2648"
+                    }
+                ]
+            },
+            {
+                "node_id": "4",
+                "entry": [
+                    {
+                        "flow_id": "0",
+                        "outport": "2",
+                        "priority": "7",
+                        "reserve": "0",
+                        "flow_period": "31250",
+                        "inject_time_slot": "3529"
+                    }
+                ]
+            }
+        ]
+    }
+}

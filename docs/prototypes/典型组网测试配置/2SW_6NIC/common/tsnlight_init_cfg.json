@@ -1,0 +1,105 @@
+{
+    "network_init_cfg": {
+        "tsnlight": {
+            "tsnlight_mid": "a"
+        },
+        "node": [
+            {
+                "hcp_mid": "0",
+                "tsmp_forward_table": {
+                    "entry": [
+                        {
+                            "dmid": "a",
+                            "outport": "80"
+                        },
+                        {
+                            "dmid": "2",
+                            "outport": "1"
+                        },
+                        {
+                            "dmid": "1",
+                            "outport": "40"
+                        },
+                        {
+                            "dmid": "3",
+                            "outport": "2"
+                        },
+                        {
+                            "dmid": "4",
+                            "outport": "4"
+                        },
+                        {
+                            "dmid": "5",
+                            "outport": "8"
+                        },
+                        {
+                            "dmid": "6",
+                            "outport": "10"
+                        },
+                        {
+                            "dmid": "7",
+                            "outport": "20"
+                        }
+                    ]
+                }
+            },
+            {
+                "hcp_mid": "2"
+            },
+            {
+                "hcp_mid": "1",
+                "tsmp_forward_table": {
+                    "entry": [
+                        {
+                            "dmid": "a",
+                            "outport": "40"
+                        },
+                        {
+                            "dmid": "0",
+                            "outport": "40"
+                        },
+                        {
+                            "dmid": "2",
+                            "outport": "40"
+                        },
+                        {
+                            "dmid": "3",
+                            "outport": "40"
+                        },
+                        {
+                            "dmid": "4",
+                            "outport": "40"
+                        },
+                        {
+                            "dmid": "5",
+                            "outport": "40"
+                        },
+                        {
+                            "dmid": "6",
+                            "outport": "40"
+                        },
+                        {
+                            "dmid": "7",
+                            "outport": "40"
+                        }
+                    ]
+                }
+            },
+            {
+                "hcp_mid": "3"
+            },
+            {
+                "hcp_mid": "4"
+            },
+            {
+                "hcp_mid": "5"
+            },
+            {
+                "hcp_mid": "6"
+            },
+            {
+                "hcp_mid": "7"
+            }
+        ]
+    }
+}

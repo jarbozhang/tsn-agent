@@ -1,0 +1,85 @@
+{
+    "time_trigger_tbl": {
+        "node": [
+            {
+                "node_id": "0",
+                "entry": [
+                    {
+                        "trigger": "2",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "open"
+                    },
+                    {
+                        "trigger": "883",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "close"
+                    },
+                    {
+                        "trigger": "884",
+                        "output_port": "4",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "trigger": "1765",
+                        "output_port": "4",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "2",
+                "entry": [
+                    {
+                        "trigger": "884",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "open"
+                    },
+                    {
+                        "trigger": "1765",
+                        "ipv": "7",
+                        "flow_id": "0",
+                        "switch": "close"
+                    },
+                    {
+                        "trigger": "1766",
+                        "output_port": "2",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "trigger": "2647",
+                        "output_port": "2",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "4",
+                "entry": [
+                    {
+                        "trigger": "1",
+                        "dbuf_id": "0"
+                    },
+                    {
+                        "trigger": "2",
+                        "output_port": "0",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "trigger": "883",
+                        "output_port": "0",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            }
+        ]
+    }
+}

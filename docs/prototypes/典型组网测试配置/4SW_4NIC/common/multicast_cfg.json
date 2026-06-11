@@ -1,0 +1,48 @@
+{
+	"multicast_cfg_para": {
+		"multicast": {
+			"multicast_mid": "8",
+			"querier_enable": "0",
+			"querier_mid": "0",
+			"querier_period": "30",
+			"querier_sip": "192.168.0.1",
+			"querier_maxresptime": "10"
+		},
+		"node": [
+			{
+				"hcp_mid": "0",
+				"static_route_port": "0",
+				"quickly_leave_port": "0",
+				"report_restrain_enbale": "0",
+				"forward_mode": "0",
+				"route_port_aging_time": "40",
+				"member_port_aging_time": "60",
+				"multicast_forward_table": {
+					"entry": [
+						{
+							"ip": "235.10.1.2",
+							"outport": "000000008"
+						}
+					]
+				}
+			},
+			{
+				"hcp_mid": "1",
+				"static_route_port": "0",
+				"quickly_leave_port": "f",
+				"report_restrain_enbale": "0",
+				"forward_mode": "0",
+				"route_port_aging_time": "40",
+				"member_port_aging_time": "60",
+				"multicast_forward_table": {
+					"entry": [
+						{
+							"ip": "235.10.1.2",
+							"outport": "000000008"
+						}
+					]
+				}
+			}
+		]
+	}
+}

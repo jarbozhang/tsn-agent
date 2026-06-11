@@ -1,0 +1,14 @@
+{
+    "link_aggregation_parameter": {
+        "node": [
+            {
+                "node_id": "0",
+                "entry": []
+            },
+            {
+                "node_id": "1",
+                "entry": []
+            }
+        ]
+    }
+}

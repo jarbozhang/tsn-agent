@@ -1,0 +1,107 @@
+{
+    "node_cfg_para": {
+        "node": [
+            {
+                "Node_MID": 0,
+                "Node_Bitmap": 3,
+                "Node_DeviceType": 0,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        5,
+                        1
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1
+                    ]
+                }
+            },
+            {
+                "Node_MID": 1,
+                "Node_Bitmap": 3,
+                "Node_DeviceType": 0,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        0,
+                        2
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1
+                    ]
+                }
+            },
+            {
+                "Node_MID": 2,
+                "Node_Bitmap": 3,
+                "Node_DeviceType": 0,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        1,
+                        3
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1
+                    ]
+                }
+            },
+            {
+                "Node_MID": 3,
+                "Node_Bitmap": 3,
+                "Node_DeviceType": 0,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        2,
+                        4
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1
+                    ]
+                }
+            },
+            {
+                "Node_MID": 4,
+                "Node_Bitmap": 3,
+                "Node_DeviceType": 0,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        3,
+                        6
+                    ],
+                    "Linked_port_set": [
+                        0,
+                        1
+                    ]
+                }
+            },
+            {
+                "Node_MID": 5,
+                "Node_Bitmap": 1,
+                "Node_DeviceType": 3,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        0
+                    ],
+                    "Linked_port_set": [
+                        0
+                    ]
+                }
+            },
+            {
+                "Node_MID": 6,
+                "Node_Bitmap": 1,
+                "Node_DeviceType": 3,
+                "Node_neighbor_set": {
+                    "Neighbor_MID_set": [
+                        4
+                    ],
+                    "Linked_port_set": [
+                        0
+                    ]
+                }
+            }
+        ]
+    }
+}

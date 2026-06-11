@@ -1,0 +1,108 @@
+{
+    "gcl_tbl": {
+        "node": [
+            {
+                "node_id": "0",
+                "entry": [
+                    {
+                        "output_port": "1",
+                        "trigger": "884",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "output_port": "1",
+                        "trigger": "1765",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "1",
+                "entry": [
+                    {
+                        "output_port": "1",
+                        "trigger": "1766",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "output_port": "1",
+                        "trigger": "2647",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "2",
+                "entry": [
+                    {
+                        "output_port": "1",
+                        "trigger": "2648",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "output_port": "1",
+                        "trigger": "3529",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "3",
+                "entry": [
+                    {
+                        "output_port": "1",
+                        "trigger": "3529",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "output_port": "1",
+                        "trigger": "4410",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "4",
+                "entry": [
+                    {
+                        "output_port": "1",
+                        "trigger": "4412",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "output_port": "1",
+                        "trigger": "5293",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "5",
+                "entry": [
+                    {
+                        "output_port": "0",
+                        "trigger": "2",
+                        "gate": "10011111",
+                        "output_pulse": "1"
+                    },
+                    {
+                        "output_port": "0",
+                        "trigger": "883",
+                        "gate": "00011111",
+                        "output_pulse": "1"
+                    }
+                ]
+            }
+        ]
+    }
+}

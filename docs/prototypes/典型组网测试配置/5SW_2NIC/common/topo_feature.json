@@ -1,0 +1,122 @@
+[
+    {
+        "link_id": 0,
+        "src_node": 5,
+        "src_port": 0,
+        "dst_node": 0,
+        "dst_port": 0,
+        "speed": 1000,
+        "st_queues": 3,
+        "macrotick": 0.032
+    },
+    {
+        "link_id": 1,
+        "src_node": 0,
+        "src_port": 0,
+        "dst_node": 5,
+        "dst_port": 0,
+        "speed": 1000,
+        "st_queues": 3,
+        "macrotick": 0.032
+    },
+    {
+        "link_id": 2,
+        "src_node": 0,
+        "src_port": 1,
+        "dst_node": 1,
+        "dst_port": 0,
+        "speed": 1000,
+        "st_queues": 3,
+        "macrotick": 0.032
+    },
+    {
+        "link_id": 3,
+        "src_node": 1,
+        "src_port": 0,
+        "dst_node": 0,
+        "dst_port": 1,
+        "speed": 1000,
+        "st_queues": 3,
+        "macrotick": 0.032
+    },
+    {
+        "link_id": 4,
+        "src_node": 1,
+        "src_port": 1,
+        "dst_node": 2,
+        "dst_port": 0,
+        "speed": 1000,
+        "st_queues": 3,
+        "macrotick": 0.032
+    },
+    {
+        "link_id": 5,
+        "src_node": 2,
+        "src_port": 0,
+        "dst_node": 1,
+        "dst_port": 1,
+        "speed": 1000,
+        "st_queues": 3,
+        "macrotick": 0.032
+    },
+    {
+        "link_id": 6,
+        "src_node": 2,
+        "src_port": 1,
+        "dst_node": 3,
+        "dst_port": 0,
+        "speed": 1000,
+        "st_queues": 3,
+        "macrotick": 0.032
+    },
+    {
+        "link_id": 7,
+        "src_node": 3,
+        "src_port": 0,
+        "dst_node": 2,
+        "dst_port": 1,
+        "speed": 1000,
+        "st_queues": 3,
+        "macrotick": 0.032
+    },
+    {
+        "link_id": 8,
+        "src_node": 3,
+        "src_port": 1,
+        "dst_node": 4,
+        "dst_port": 0,
+        "speed": 1000,
+        "st_queues": 3,
+        "macrotick": 0.032
+    },
+    {
+        "link_id": 9,
+        "src_node": 4,
+        "src_port": 0,
+        "dst_node": 3,
+        "dst_port": 1,
+        "speed": 1000,
+        "st_queues": 3,
+        "macrotick": 0.032
+    },
+    {
+        "link_id": 10,
+        "src_node": 6,
+        "src_port": 0,
+        "dst_node": 4,
+        "dst_port": 1,
+        "speed": 1000,
+        "st_queues": 3,
+        "macrotick": 0.032
+    },
+    {
+        "link_id": 11,
+        "src_node": 4,
+        "src_port": 1,
+        "dst_node": 6,
+        "dst_port": 0,
+        "speed": 1000,
+        "st_queues": 3,
+        "macrotick": 0.032
+    }
+]

@@ -53,3 +53,5 @@ generated-projects/
 # Existing nested skill repository. Keep it outside the root app git boundary.
 /tsn-topology/
 .context/
+.gstack/
+.playwright-mcp/

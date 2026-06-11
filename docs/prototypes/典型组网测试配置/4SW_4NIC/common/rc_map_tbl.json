@@ -1,0 +1,25 @@
+{
+    "rc_map_tbl": {
+        "node": [
+            {
+                "node_id": "4",
+                "entry": [
+                    {
+                        "flow_id": "1",
+                        "valid": "1",
+                        "reserved": "0",
+                        "five_tuple_mask": "0b0",
+                        "ip_protocol": "17",
+                        "dst_port": "60000",
+                        "src_port": "60000",
+                        "dst_ip": "192.168.1.2",
+                        "src_ip": "192.168.1.1",
+                        "priority": "4",
+                        "redundant": "1",
+                        "dbufid": "0"
+                    }
+                ]
+            }
+        ]
+    }
+}

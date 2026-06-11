@@ -1,0 +1,30 @@
+[
+    {
+        "stream_id": 0,
+        "path": [
+            {
+                "route": [
+                    0,
+                    2,
+                    4,
+                    6,
+                    8,
+                    11
+                ],
+                "flow_type": "ST",
+                "latency_requirement": 1000,
+                "jitter_requirement": 1000,
+                "redundant": 0,
+                "fl_api_flag": 0,
+                "delay_para": 100,
+                "src_ip": "192.168.1.1",
+                "dst_ip": "192.168.1.2",
+                "src_port": 1024,
+                "dst_port": 1024,
+                "dst_mac": "11:22:33:44:55:66",
+                "ip_protocol": 17,
+                "fivetuple_mask": 0
+            }
+        ]
+    }
+]

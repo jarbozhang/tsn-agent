@@ -1,0 +1,15 @@
+{
+    "eliminate_tbl": {
+        "node": [
+            {
+                "node_id": "7",
+                "entry": [
+                    {
+                        "flow_id": "1",
+                        "ci": "0"
+                    }
+                ]
+            }
+        ]
+    }
+}

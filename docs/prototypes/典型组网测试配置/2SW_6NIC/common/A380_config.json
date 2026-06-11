@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "description": "A380 TSN仿真输入配置",
+  "node_configs": [
+    {
+      "node_name": "ES3",
+      "tester_id": 0,
+      "port_id": 1,
+      "role": "tx",
+      "sync_type": 0,
+      "port_rate": 1000000000,
+      "cycle_time": 1000000,
+      "duration": 1000000,
+      "max_jitter": 500,
+      "streams": [
+        {
+          "stream_id": 5,
+          "traffic_model": "constant",
+          "rate": 1000000,
+          "cmi": 125000,
+          "mif": 1,
+          "mfs": 128,
+          "interval": 1000000,
+          "eth_type": "0x88B5",
+          "c_tag": "0x8100A064"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+[
+    {
+        "stream_id": 0,
+        "src_node": 4,
+        "dst_node": 7,
+        "path_number": 1,
+        "size": 1024,
+        "period": 1000,
+        "path": [
+            {
+                "route": [
+                    7,
+                    19
+                ],
+                "flow_type": "ST",
+                "latency_requirement": 1000,
+                "jitter_requirement": 1000,
+                "redundant": 0,
+                "fl_api_flag": 0,
+                "delay_para": 100,
+                "src_ip": "192.168.1.1",
+                "dst_ip": "192.168.1.2",
+                "src_port": 1024,
+                "dst_port": 1024,
+                "dst_mac": "11:22:33:44:55:66",
+                "ip_protocol": 17,
+                "fivetuple_mask": 0
+            }
+        ]
+    },
+    {
+        "stream_id": 1,
+        "size": 1000,
+        "period": 1000,
+        "cbs_or_ats": 0,
+        "bandwidth": 1000.0,
+        "path": [
+            {
+                "route": [
+                    7,
+                    19
+                ],
+                "latency_requirement": 15000,
+                "jitter_requirement": 0,
+                "redundant": 1,
+                "fl_api_flag": 0,
+                "delay_para": 0,
+                "src_ip": "192.168.1.1",
+                "dst_ip": "192.168.1.2",
+                "src_port": 60000,
+                "dst_port": 60000,
+                "dst_mac": "11:22:33:44:55:66",
+                "ip_protocol": 17,
+                "fivetuple_mask": 0,
+                "priority": [
+                    "SRA",
+                    "SRA"
+                ]
+            },
+            {
+                "route": [
+                    12,
+                    25
+                ],
+                "latency_requirement": 15000,
+                "jitter_requirement": 0,
+                "redundant": 1,
+                "fl_api_flag": 0,
+                "delay_para": 0,
+                "src_ip": "192.168.1.1",
+                "dst_ip": "192.168.1.2",
+                "src_port": 60000,
+                "dst_port": 60000,
+                "dst_mac": "11:22:33:44:55:66",
+                "ip_protocol": 17,
+                "fivetuple_mask": 0,
+                "priority": [
+                    "SRA",
+                    "SRA"
+                ]
+            }
+        ]
+    }
+]

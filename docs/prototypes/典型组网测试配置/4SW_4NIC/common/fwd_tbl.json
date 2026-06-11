@@ -1,0 +1,32 @@
+{
+    "forward_tbl": {
+        "node": [
+            {
+                "node_id": "0",
+                "entry": [
+                    {
+                        "flow_id": "0",
+                        "outport": "10",
+                        "priority": "7",
+                        "reserve": "0",
+                        "flow_period": "31250",
+                        "inject_time_slot": "2"
+                    }
+                ]
+            },
+            {
+                "node_id": "2",
+                "entry": [
+                    {
+                        "flow_id": "0",
+                        "outport": "4",
+                        "priority": "7",
+                        "reserve": "0",
+                        "flow_period": "31250",
+                        "inject_time_slot": "884"
+                    }
+                ]
+            }
+        ]
+    }
+}

@@ -1,0 +1,149 @@
+{
+    "cfg_parameter": {
+        "node": [
+            {
+                "node_id": "0",
+                "port": [
+                    {
+                        "port_id": "0",
+                        "portTransmitRate": "1000",
+                        "portTransmitFrequency": "125",
+                        "idleSlopeA": "800",
+                        "idleSlopeB": "800",
+                        "dutyCycleA": "1",
+                        "dutyCycleB": "1"
+                    },
+                    {
+                        "port_id": "1",
+                        "portTransmitRate": "1000",
+                        "portTransmitFrequency": "125",
+                        "idleSlopeA": "800",
+                        "idleSlopeB": "800",
+                        "dutyCycleA": "1",
+                        "dutyCycleB": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "1",
+                "port": [
+                    {
+                        "port_id": "0",
+                        "portTransmitRate": "1000",
+                        "portTransmitFrequency": "125",
+                        "idleSlopeA": "800",
+                        "idleSlopeB": "800",
+                        "dutyCycleA": "1",
+                        "dutyCycleB": "1"
+                    },
+                    {
+                        "port_id": "1",
+                        "portTransmitRate": "1000",
+                        "portTransmitFrequency": "125",
+                        "idleSlopeA": "800",
+                        "idleSlopeB": "800",
+                        "dutyCycleA": "1",
+                        "dutyCycleB": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "2",
+                "port": [
+                    {
+                        "port_id": "0",
+                        "portTransmitRate": "1000",
+                        "portTransmitFrequency": "125",
+                        "idleSlopeA": "800",
+                        "idleSlopeB": "800",
+                        "dutyCycleA": "1",
+                        "dutyCycleB": "1"
+                    },
+                    {
+                        "port_id": "1",
+                        "portTransmitRate": "1000",
+                        "portTransmitFrequency": "125",
+                        "idleSlopeA": "800",
+                        "idleSlopeB": "800",
+                        "dutyCycleA": "1",
+                        "dutyCycleB": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "3",
+                "port": [
+                    {
+                        "port_id": "0",
+                        "portTransmitRate": "1000",
+                        "portTransmitFrequency": "125",
+                        "idleSlopeA": "800",
+                        "idleSlopeB": "800",
+                        "dutyCycleA": "1",
+                        "dutyCycleB": "1"
+                    },
+                    {
+                        "port_id": "1",
+                        "portTransmitRate": "1000",
+                        "portTransmitFrequency": "125",
+                        "idleSlopeA": "800",
+                        "idleSlopeB": "800",
+                        "dutyCycleA": "1",
+                        "dutyCycleB": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "4",
+                "port": [
+                    {
+                        "port_id": "0",
+                        "portTransmitRate": "1000",
+                        "portTransmitFrequency": "125",
+                        "idleSlopeA": "800",
+                        "idleSlopeB": "800",
+                        "dutyCycleA": "1",
+                        "dutyCycleB": "1"
+                    },
+                    {
+                        "port_id": "1",
+                        "portTransmitRate": "1000",
+                        "portTransmitFrequency": "125",
+                        "idleSlopeA": "800",
+                        "idleSlopeB": "800",
+                        "dutyCycleA": "1",
+                        "dutyCycleB": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "5",
+                "port": [
+                    {
+                        "port_id": "0",
+                        "portTransmitRate": "1000",
+                        "portTransmitFrequency": "125",
+                        "idleSlopeA": "800",
+                        "idleSlopeB": "800",
+                        "dutyCycleA": "1",
+                        "dutyCycleB": "1"
+                    }
+                ]
+            },
+            {
+                "node_id": "6",
+                "port": [
+                    {
+                        "port_id": "0",
+                        "portTransmitRate": "1000",
+                        "portTransmitFrequency": "125",
+                        "idleSlopeA": "800",
+                        "idleSlopeB": "800",
+                        "dutyCycleA": "1",
+                        "dutyCycleB": "1"
+                    }
+                ]
+            }
+        ]
+    }
+}

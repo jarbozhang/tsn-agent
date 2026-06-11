@@ -1,0 +1,34 @@
+{
+    "static_mac_cfg": {
+        "l2switch": {
+            "l2switch_mid": "0xa"
+        },
+        "node": [
+            {
+                "hcp_mid": "0x0",
+                "broadcast_flag": "0x1ffffff00",
+                "static_mac_table_num": "1"
+            },
+            {
+                "hcp_mid": "0x2",
+                "broadcast_flag": "0x1ffffff00",
+                "static_mac_table_num": "1"
+            },
+            {
+                "hcp_mid": "0x4",
+                "broadcast_flag": "0x1ffffff00",
+                "static_mac_table_num": "1"
+            },
+            {
+                "hcp_mid": "0x3",
+                "broadcast_flag": "0x1ffffff00",
+                "static_mac_table_num": "1"
+            },
+            {
+                "hcp_mid": "0x1",
+                "broadcast_flag": "0x1ffffff00",
+                "static_mac_table_num": "1"
+            }
+        ]
+    }
+}
