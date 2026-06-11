@@ -112,14 +112,14 @@ describe("SkillFilePreview", () => {
     expect(screen.getByText("暂无目录")).toBeInTheDocument();
   });
 
-  it("shows readonly factory notice instead of a disabled editor", async () => {
+  it("shows readonly fallback notice instead of a disabled editor", async () => {
     const service = createService({
       readFile: vi.fn().mockResolvedValue({
         skillId: "tsn-topology",
         path: "SKILL.md",
         content: "只读内容",
         editable: false,
-        readonlyReason: "只读 skill 资源不可编辑。",
+        readonlyReason: "可写 skill 副本不可用（无法创建可写目录），当前为内置只读副本。",
       }),
     });
 
@@ -127,8 +127,8 @@ describe("SkillFilePreview", () => {
 
     expect(await screen.findByText("只读内容")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "编辑文件" })).not.toBeInTheDocument();
-    expect(screen.getByText(/出厂只读指引/)).toBeInTheDocument();
-    expect(screen.getByText(/只读 skill 资源不可编辑/)).toBeInTheDocument();
+    expect(screen.getByText(/当前为只读指引/)).toBeInTheDocument();
+    expect(screen.getByText(/可写 skill 副本不可用/)).toBeInTheDocument();
   });
 
   it("renders the topology legal-domain from the catalog", async () => {

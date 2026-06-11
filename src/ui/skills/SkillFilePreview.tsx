@@ -275,7 +275,7 @@ export function SkillFilePreview({
                 </div>
                 {!content.editable && (
                   <div className="skill-file-readonly-notice" role="note">
-                    出厂只读指引（发版应用不可编辑）{content.readonlyReason ? `：${content.readonlyReason}` : ""}
+                    当前为只读指引（可写副本不可用时的兜底）{content.readonlyReason ? `：${content.readonlyReason}` : ""}
                   </div>
                 )}
                 {savedNotice && !isEditing && (
