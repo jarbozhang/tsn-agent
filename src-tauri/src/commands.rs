@@ -105,6 +105,8 @@ fn run_claude_agent_blocking(
     let run_id = request.run_id.clone().unwrap_or_else(create_run_id);
     let app_session_id = request.app_session_id.clone();
     let audit_dir = agent_audit_dir(&app);
+    // 同源（R2）：worker 与编辑器消费同一有效 skill 根决策（含 app-data 懒播种）。
+    let skill_root = crate::skill_files::effective_skill_root(&app).into_usable_path();
     let prompt_chars = request.prompt.chars().count();
     let context_chars = request
         .conversation_context
@@ -124,8 +126,23 @@ fn run_claude_agent_blocking(
             "promptChars": prompt_chars,
             "contextChars": context_chars,
             "auditDir": audit_dir.as_ref().map(|path| path.display().to_string()),
+            "skillRoot": skill_root.as_ref().map(|path| path.display().to_string()),
         }),
     );
+    if skill_root.is_none() {
+        // skill 根 Unavailable 时省略 payload 字段，worker 走 cwd 兜底。注意该兜底
+        // 在打包态会成功读到内置工厂副本、不触发 skill_guidance_unavailable——
+        // 界面编辑与 agent 消费可能不同源，必须留 warn 痕迹供排查。
+        log_worker_event(
+            &app,
+            app_session_id.as_deref(),
+            &run_id,
+            "warn",
+            "skill 根解析不可用，本次运行回退 worker cwd 兜底（打包态等价于内置工厂副本）",
+            None,
+            serde_json::json!({}),
+        );
+    }
     // Plan v3 U3+U4b：注入 sidecar url + token + session_id 给 worker，
     // worker 再透传给 MCP child 的 `env`（避免 SDK env passthrough bug，见 Spike B）。
     let (sidecar_url, sidecar_token, app_session_id_for_env) = {
@@ -146,6 +163,7 @@ fn run_claude_agent_blocking(
         "runId": run_id,
         "appSessionId": request.app_session_id,
         "auditDir": audit_dir,
+        "skillRoot": skill_root,
         "resumeSessionId": request.resume_session_id,
         "conversationContext": request.conversation_context,
         "stageRunnerInput": request.stage_runner_input,

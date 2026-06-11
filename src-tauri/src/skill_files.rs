@@ -92,6 +92,17 @@ pub struct EffectiveSkillRoot {
     reason: Option<String>,
 }
 
+impl EffectiveSkillRoot {
+    /// worker spawn 消费：可用（含只读兜底）时给出根路径，Unavailable 给 None。
+    pub fn into_usable_path(self) -> Option<PathBuf> {
+        if self.status == SkillFileRootStatus::Unavailable {
+            None
+        } else {
+            Some(self.path)
+        }
+    }
+}
+
 #[tauri::command]
 pub fn list_skill_files(
     app: tauri::AppHandle,
