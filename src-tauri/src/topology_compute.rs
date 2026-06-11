@@ -1070,9 +1070,10 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
     // 多组双平面行（R2）：规范图二 B 行在上、A 行在下。
     const PLANE_B_Y: f64 = 160.0;
     const PLANE_A_Y: f64 = 360.0;
-    // R8：同 lane 堆叠 ES 的纵向错位（朝行间走廊方向：A 行向上、B 行向下），
-    // floating 直线不穿内侧节点盒；幅度由几何间隙测试驱动（双线段断言）。
-    const LANE_STAGGER: f64 = 130.0;
+    // R8：ring≥1 溢出 ES 沿列纵向延伸（背离行间走廊：A 行向下、B 行向上），
+    // 间距取平面行距（200）——对角连线足够陡才不穿内列节点盒（几何间隙
+    // 测试驱动：背离方向 ≥149 才可行，朝走廊方向窗口仅 [97,103] 过脆）。
+    const COLUMN_EXTEND_PITCH: f64 = PLANE_A_Y - PLANE_B_Y;
     // 空/未知 group 的退化输入：独立溢出行，保确定性与坐标唯一。
     const OVERFLOW_Y: f64 = 780.0;
 
@@ -1135,8 +1136,9 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
         numeric_node_id += 1;
     }
     let mut within_group: HashMap<String, usize> = HashMap::new();
-    // 多组外端 lane 游标：(挂左侧, 平面 B 行) → 已堆叠数。
-    let mut lane_cursor: HashMap<(bool, bool), usize> = HashMap::new();
+    // 多组外端槽位占用：挂侧 → 已占 (ring, 平面 B 行)。规范图 4-5：同侧 ES
+    // 先纵向占满两平面行（同 x 成列），占满后沿列背离走廊延伸（ring）。
+    let mut side_slots: HashMap<bool, HashSet<(usize, bool)>> = HashMap::new();
     let mut overflow_cursor: usize = 0;
     let mut es_ordinal: i64 = 1;
     for es in &ordered_es {
@@ -1161,28 +1163,34 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
                 single_hop_sw_center - (ES_PITCH / 2.0) * (row_len.saturating_sub(1)) as f64;
             IntermediatePosition { x: row_start + ES_PITCH * idx as f64, y: row_y }
         } else {
-            // 规范图二：y 对齐 primary 平面行；同 (侧, 行) lane 沿外端向外堆叠。
+            // 规范图 4-5：优先对齐 primary 平面行；该行被占则让位到另一行
+            // （同 x 纵向成列），两行占满后沿列背离走廊延伸。R2 的「y 对齐
+            // primary 行」仅在行空闲时成立——双 ES 同主接时成列形态优先。
             let side_left = gidx < left_group_count;
             let primary_plane_b = switch_by_id
                 .get(&es.attachment.primary.switch_id)
                 .map(|s| s.plane == "B")
                 .unwrap_or(false);
-            let k = {
-                let counter = lane_cursor.entry((side_left, primary_plane_b)).or_insert(0);
-                let value = *counter;
-                *counter += 1;
-                value
+            let slots = side_slots.entry(side_left).or_default();
+            let (ring, row_b) = {
+                let mut r = 0usize;
+                loop {
+                    if !slots.contains(&(r, primary_plane_b)) {
+                        break (r, primary_plane_b);
+                    }
+                    if !slots.contains(&(r, !primary_plane_b)) {
+                        break (r, !primary_plane_b);
+                    }
+                    r += 1;
+                }
             };
-            let x = if side_left {
-                left_edge_x - ES_PITCH * k as f64
+            slots.insert((ring, row_b));
+            let x = if side_left { left_edge_x } else { right_edge_x };
+            // ring=0 严格对齐平面行；ring>0 沿列背离走廊延伸（R8）。
+            let y = if row_b {
+                PLANE_B_Y - COLUMN_EXTEND_PITCH * ring as f64
             } else {
-                right_edge_x + ES_PITCH * k as f64
-            };
-            // k=0 严格对齐 primary 平面行；k>0 朝走廊错位（R8）。
-            let y = if primary_plane_b {
-                PLANE_B_Y + LANE_STAGGER * k as f64
-            } else {
-                PLANE_A_Y - LANE_STAGGER * k as f64
+                PLANE_A_Y + COLUMN_EXTEND_PITCH * ring as f64
             };
             IntermediatePosition { x, y }
         };
@@ -2732,20 +2740,19 @@ mod tests {
         assert_eq!(sw1x, sw2x, "group g1 switches stack vertically");
         assert_eq!(sw3x, sw4x, "group g2 switches stack vertically");
         assert!(sw1x < sw3x, "groups spread along x by declaration order");
-        // R8：lane 首台（k=0）严格对齐 primary 平面行；堆叠台（k=1）朝走廊错位。
+        // 规范图 4-5：首台对齐 primary 平面行；同主接的第二台让位到另一平面行。
         for id in ["e1", "e3"] {
-            assert_eq!(dp_pos(&topo, id).1, sw1y, "{} (k=0) must align to primary plane row", id);
+            assert_eq!(dp_pos(&topo, id).1, sw1y, "{} must align to primary plane row", id);
         }
         for id in ["e2", "e4"] {
-            let dy = dp_pos(&topo, id).1 - sw1y;
-            assert!(dy != 0.0, "{} (k=1) must be staggered off the plane row", id);
+            assert_eq!(dp_pos(&topo, id).1, sw2y, "{} must take the free plane-B row", id);
         }
         // g1 在左外端、g2 在右外端。
         assert!(dp_pos(&topo, "e1").0 < sw1x && dp_pos(&topo, "e2").0 < sw1x);
         assert!(dp_pos(&topo, "e3").0 > sw3x && dp_pos(&topo, "e4").0 > sw3x);
-        // 同 lane 堆叠：间距 ≥ ES_PITCH。
-        assert!((dp_pos(&topo, "e1").0 - dp_pos(&topo, "e2").0).abs() >= 180.0);
-        assert!((dp_pos(&topo, "e3").0 - dp_pos(&topo, "e4").0).abs() >= 180.0);
+        // 规范图 4-5：组内两台 ES 纵向成列（同 x）。
+        assert_eq!(dp_pos(&topo, "e1").0, dp_pos(&topo, "e2").0, "left ES column");
+        assert_eq!(dp_pos(&topo, "e3").0, dp_pos(&topo, "e4").0, "right ES column");
     }
 
     fn dual_plane_three_group_params() -> serde_json::Value {
@@ -2831,14 +2838,14 @@ mod tests {
 
     #[test]
     fn dual_plane_stacked_lane_edges_clear_inner_nodes() {
-        // R8/AE3：同 lane 堆叠时，外侧 ES 的 primary 与 backup 两条中心连线段
-        // 均不得穿过内侧 ES 节点盒（126×56，margin 8）。
+        // R8/AE3：成列双 ES 的交叉连线（规范图 4-5 X 形）不得穿过同列另一台
+        // ES 的节点盒（126×56，margin 8）。
         let (topo, _) = initialize_topology(&InitializeIntent {
             template_id: "dual-plane-redundant".into(),
             params: dual_plane_two_hop_params(),
         })
         .unwrap();
-        // e1 = lane k=0（内侧）、e2 = lane k=1（外侧）；两者 primary→sw1、backup→sw2。
+        // e1 = A 行、e2 = 让位 B 行（同列）；两者 primary→sw1、backup→sw2。
         let inner = dp_pos(&topo, "e1");
         let outer = dp_pos(&topo, "e2");
         let sw1 = dp_pos(&topo, "sw1");
@@ -2852,6 +2859,38 @@ mod tests {
                 target,
                 inner
             );
+        }
+    }
+
+    #[test]
+    fn dual_plane_third_es_overflow_ring_clears_column_nodes() {
+        // 两平面行占满后第三台 ES 沿列背离走廊延伸（ring1，同 x）；
+        // 其 primary/backup 连线不得穿过列内两台 ES 的节点盒。
+        let mut params = dual_plane_two_hop_params();
+        let mut es = params["endSystems"].as_array().unwrap().clone();
+        es.push(json!({
+            "id": "e5", "groupId": "g1",
+            "attachment": {"primary": {"switchId": "sw1", "plane": "A"}, "backup": {"switchId": "sw2", "plane": "B"}}
+        }));
+        params["endSystems"] = json!(es);
+        let (topo, _) = initialize_topology(&InitializeIntent {
+            template_id: "dual-plane-redundant".into(),
+            params,
+        })
+        .unwrap();
+        let e1 = dp_pos(&topo, "e1");
+        let e2 = dp_pos(&topo, "e2");
+        let e5 = dp_pos(&topo, "e5");
+        assert_eq!(e5.0, e1.0, "ring1 stays in the column (same x)");
+        assert!(e5.1 > e1.1, "ring1 A-row ES extends away from the corridor (below A row)");
+        for (label, target) in [("primary", dp_pos(&topo, "sw1")), ("backup", dp_pos(&topo, "sw2"))] {
+            for (inner_label, inner) in [("e1", e1), ("e2", e2)] {
+                assert!(
+                    !seg_intersects_rect(e5, target, inner, 63.0, 28.0, 8.0),
+                    "ring1 ES {} edge ({:?}->{:?}) crosses {} box at {:?}",
+                    label, e5, target, inner_label, inner
+                );
+            }
         }
     }
 
