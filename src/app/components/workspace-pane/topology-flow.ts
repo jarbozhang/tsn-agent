@@ -52,8 +52,25 @@ export function planeClassName(plane: LinkStyleMeta["plane"]): string {
 export interface TsnEdgeData {
   leftLabel?: string;
   rightLabel?: string;
+  /** 同节点同方位的边序数：端口标签沿出射方向分层外推，防相邻交点标签重叠。 */
+  leftOrd?: number;
+  rightOrd?: number;
   /** React Flow Edge.data 的结构性要求；不影响已命名字段的类型推断。 */
   [key: string]: unknown;
+}
+
+/** 节点渲染尺寸近似（.tsn-node max-width/实测高）；序数只需初始布局的粗方位。 */
+const NODE_W = 126;
+const NODE_H = 56;
+
+/** 出射方位：与 rectIntersection 同准则（Δ 按节点宽高归一化，非 45° 分界）。 */
+function roughSide(from: { x: number; y: number }, to: { x: number; y: number }): string {
+  const nx = (to.x - from.x) / NODE_W;
+  const ny = (to.y - from.y) / NODE_H;
+  if (Math.abs(nx) >= Math.abs(ny)) {
+    return nx >= 0 ? "right" : "left";
+  }
+  return ny >= 0 ? "bottom" : "top";
 }
 
 export type TsnNodeKind = "switch" | "endSystem" | "controller";
@@ -70,6 +87,23 @@ export function nodeTypeToken(nodeType: string | null): TsnNodeKind {
 }
 
 export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): { nodes: Node[]; edges: Edge[] } {
+  // 标签防撞序数：按 DB 初始坐标统计每个节点每个方位的边数（linkSeq 序确定性）。
+  const centers = new Map(
+    snapshot.nodes.map((node) => [node.imac, { x: node.x + NODE_W / 2, y: node.y + NODE_H / 2 }]),
+  );
+  const sideCounter = new Map<string, number>();
+  const takeOrd = (imac: number, otherImac: number): number => {
+    const from = centers.get(imac);
+    const to = centers.get(otherImac);
+    if (!from || !to) {
+      return 0;
+    }
+    const key = `${imac}:${roughSide(from, to)}`;
+    const ord = sideCounter.get(key) ?? 0;
+    sideCounter.set(key, ord + 1);
+    return ord;
+  };
+
   return {
     nodes: snapshot.nodes.map((node) => ({
       id: String(node.imac),
@@ -86,6 +120,9 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): { no
       const data: TsnEdgeData = {
         leftLabel: meta.leftLabel,
         rightLabel: meta.rightLabel,
+        // 仅有标签的端点占用层级槽位，无标签端不推远后续标签。
+        leftOrd: meta.leftLabel ? takeOrd(link.srcImac, link.dstImac) : 0,
+        rightOrd: meta.rightLabel ? takeOrd(link.dstImac, link.srcImac) : 0,
       };
       return {
         id: linkRowId(link),

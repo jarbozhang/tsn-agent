@@ -505,6 +505,23 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
     expect(legacy.leftLabel).toBe("p1");
     expect(legacy.rightLabel).toBe("p2");
   });
+
+  it("同节点同方位的标签序数递增，无标签端不占槽（标签防撞分层）", () => {
+    const snapshot: TopologyRowSnapshot = {
+      sessionId: "s1",
+      nodes: [node(1, 120, 300), node(10, 90, 60)],
+      links: [
+        { linkSeq: 0, name: null, srcImac: 10, dstImac: 1, stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}' },
+        { linkSeq: 1, name: null, srcImac: 10, dstImac: 1, stylesJson: '{"leftLabel":"P1","rightLabel":"P1"}' },
+        { linkSeq: 2, name: null, srcImac: 10, dstImac: 1, stylesJson: "broken" },
+      ],
+    };
+    const { edges } = topologySnapshotToReactFlow(snapshot);
+    const [d0, d1, d2] = edges.map((e) => e.data as TsnEdgeData);
+    expect([d0.leftOrd, d0.rightOrd]).toEqual([0, 0]);
+    expect([d1.leftOrd, d1.rightOrd]).toEqual([1, 1]);
+    expect([d2.leftOrd, d2.rightOrd]).toEqual([0, 0]);
+  });
 });
 
 describe("floatingEdgeAnchors（U3 交点纯函数）", () => {
@@ -551,8 +568,11 @@ describe("floatingEdgeAnchors（U3 交点纯函数）", () => {
     }
   });
 
-  it("portLabelPoint 沿出射方向外推", () => {
+  it("portLabelPoint 沿出射方向外推，序数 ord 分层推远", () => {
     expect(portLabelPoint(100, 50, "top" as never)).toEqual({ x: 100, y: 36 });
     expect(portLabelPoint(100, 50, "right" as never)).toEqual({ x: 116, y: 50 });
+    expect(portLabelPoint(100, 50, "top" as never, 1)).toEqual({ x: 100, y: 23 });
+    expect(portLabelPoint(100, 50, "bottom" as never, 2)).toEqual({ x: 100, y: 90 });
+    expect(portLabelPoint(100, 50, "right" as never, 1)).toEqual({ x: 136, y: 50 });
   });
 });
