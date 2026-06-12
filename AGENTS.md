@@ -26,6 +26,8 @@
   - `docs/staged-agent-workflow.md`
   - `docs/diagnostics-log-contract.md`
   - `docs/testing.md`
+- 历史问题解决方案库：`docs/solutions/`（按类别组织，YAML frontmatter 含 `module`/`tags`/`problem_type`，在已有文档覆盖的领域实现或排障时可检索）。
+- 共享领域词汇：`CONCEPTS.md`（实体、命名流程、状态概念的项目特定含义，初次接触代码库或讨论领域概念时可查阅）。
 
 ## 关键代码入口
 
