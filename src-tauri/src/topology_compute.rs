@@ -90,15 +90,46 @@ pub struct TopologyWarningOut {
 // ============================================================================
 
 pub fn describe_templates_catalog() -> Value {
-    json!({
-        "templateCount": 3,
-        "templateIds": ["generic-line", "generic-ring", "dual-plane-redundant"],
-        "templates": [
-            generic_line_descriptor(),
-            generic_ring_descriptor(),
-            dual_plane_descriptor(),
-        ],
-    })
+    describe_templates_catalog_filtered(None)
+}
+
+/// R7：可选按场景过滤模板候选集。未知场景值返回空列表 + warning（不报错，
+/// 前向兼容工业等未来场景）；None 返回全量（向后兼容）。
+pub fn describe_templates_catalog_filtered(scenario: Option<&str>) -> Value {
+    let all = [
+        generic_line_descriptor(),
+        generic_ring_descriptor(),
+        dual_plane_descriptor(),
+    ];
+    let templates: Vec<Value> = match scenario {
+        None => all.to_vec(),
+        Some(scenario) => all
+            .iter()
+            .filter(|descriptor| {
+                descriptor["scenarios"]
+                    .as_array()
+                    .map(|list| list.iter().any(|v| v.as_str() == Some(scenario)))
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect(),
+    };
+    let template_ids: Vec<Value> = templates
+        .iter()
+        .map(|descriptor| descriptor["id"].clone())
+        .collect();
+    let mut catalog = json!({
+        "templateCount": templates.len(),
+        "templateIds": template_ids,
+        "templates": templates,
+    });
+    if let Some(scenario) = scenario {
+        catalog["scenario"] = json!(scenario);
+        if catalog["templateCount"] == json!(0) {
+            catalog["warning"] = json!(format!("未知场景 {scenario}，无匹配模板；省略 scenario 参数可获取全量目录。"));
+        }
+    }
+    catalog
 }
 
 fn generic_line_descriptor() -> Value {
@@ -107,6 +138,7 @@ fn generic_line_descriptor() -> Value {
         "name": "通用线型拓扑",
         "description": "多台交换机线型互联，每台交换机接入固定数量端系统。",
         "tags": ["generic", "line", "beginner"],
+        "scenarios": ["generic-tsn", "aerospace-onboard"],
         "params": generic_distributed_params(),
         "example": {
             "switchCount": 4,
@@ -122,6 +154,7 @@ fn generic_ring_descriptor() -> Value {
         "name": "通用环形拓扑",
         "description": "多台交换机环形互联，每台交换机接入固定数量端系统。",
         "tags": ["generic", "ring", "redundant"],
+        "scenarios": ["generic-tsn", "aerospace-onboard"],
         "params": generic_distributed_params(),
         "example": {
             "switchCount": 4,
@@ -137,6 +170,7 @@ fn dual_plane_descriptor() -> Value {
         "name": "通用双平面冗余拓扑",
         "description": "A/B 两个交换机平面，端系统显式双归属接入成对 switch group。",
         "tags": ["generic", "dual-plane", "dual-homed", "redundant"],
+        "scenarios": ["aerospace-onboard"],
         "params": [
             { "name": "planes", "type": "tuple", "required": true,
               "description": "固定两个平面，P0 只支持 A/B。",
@@ -2520,6 +2554,28 @@ mod tests {
         assert!(ids.iter().any(|v| v == "generic-line"));
         assert!(ids.iter().any(|v| v == "generic-ring"));
         assert!(ids.iter().any(|v| v == "dual-plane-redundant"));
+    }
+
+    #[test]
+    fn describe_templates_scenario_filter_matches_r7_matrix() {
+        // R7：每个 descriptor 都有非空 scenarios；过滤按归属矩阵收窄候选集。
+        let full = describe_templates_catalog_filtered(None);
+        for descriptor in full["templates"].as_array().unwrap() {
+            let scenarios = descriptor["scenarios"].as_array().unwrap();
+            assert!(!scenarios.is_empty(), "{} 必须声明场景归属", descriptor["id"]);
+        }
+
+        let aero = describe_templates_catalog_filtered(Some("aerospace-onboard"));
+        assert_eq!(aero["templateCount"], 3, "宇航场景含全部三模板（ring 双场景归属）");
+
+        let generic = describe_templates_catalog_filtered(Some("generic-tsn"));
+        assert_eq!(generic["templateCount"], 2);
+        let ids = generic["templateIds"].as_array().unwrap();
+        assert!(!ids.iter().any(|v| v == "dual-plane-redundant"));
+
+        let unknown = describe_templates_catalog_filtered(Some("industrial"));
+        assert_eq!(unknown["templateCount"], 0);
+        assert!(unknown["warning"].as_str().unwrap().contains("industrial"));
     }
 
     #[test]

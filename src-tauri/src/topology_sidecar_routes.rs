@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use crate::topology_backfill::{legacy_class_path, legacy_node_type};
 use crate::topology_compute::{
-    build_topology_artifacts, describe_templates_catalog, describe_topology_artifacts,
+    build_topology_artifacts, describe_topology_artifacts,
     initialize_topology as compute_initialize, validate_intermediate_topology,
     validate_topology_artifacts, InitializeIntent,
 };
@@ -96,14 +96,24 @@ pub struct SessionOnlyRequest {
     session_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DescribeTemplatesRequest {
+    session_id: String,
+    /// R7：可选场景过滤——只返回该场景适用模板；省略返回全量。
+    scenario: Option<String>,
+}
+
 pub async fn describe_templates(
     State(state): State<Arc<RouteState>>,
-    Json(req): Json<SessionOnlyRequest>,
+    Json(req): Json<DescribeTemplatesRequest>,
 ) -> Response {
     if let Err(resp) = require_session(&state.pool, &req.session_id).await {
         return resp;
     }
-    ok_summary(describe_templates_catalog())
+    ok_summary(crate::topology_compute::describe_templates_catalog_filtered(
+        req.scenario.as_deref(),
+    ))
 }
 
 // ---------- describe_artifacts ----------

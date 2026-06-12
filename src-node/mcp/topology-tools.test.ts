@@ -104,6 +104,21 @@ describe("topology MCP tool registry", () => {
     });
   });
 
+  it("describe_templates forwards the optional scenario filter in the sidecar body", async () => {
+    fetchSidecarMock.mockResolvedValueOnce({
+      ok: true as const,
+      status: 200,
+      body: { ok: true, summary: { templateCount: 3 } },
+    });
+
+    await parseToolText(
+      runTopologyTool("topology.describe_templates", { scenario: "aerospace-onboard" }),
+    );
+
+    const { body } = lastFetchCall();
+    expect(body.scenario).toBe("aerospace-onboard");
+  });
+
   it("initialize forwards templateId + params and propagates sidecar errors", async () => {
     fetchSidecarMock.mockResolvedValueOnce({
       ok: true as const,

@@ -36,9 +36,14 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.describe_templates",
       allowedToolName: "mcp__tsn_topology__topology_describe_templates",
       title: "Describe topology templates",
-      description: "Return the deterministic P0 topology template catalog.",
-      inputSchema: {},
-      handler: async (args) => callSidecarTool("/db/topology/describe_templates", args, {}),
+      description: "Return the deterministic P0 topology template catalog. Pass scenario to filter templates applicable to the active scenario; omit for the full catalog.",
+      inputSchema: {
+        scenario: z.string().optional(),
+      },
+      // 注意：body 须显式转发 scenario——callSidecarTool 第三参才是发往 sidecar 的 body。
+      handler: async (args) => callSidecarTool("/db/topology/describe_templates", args, {
+        scenario: pickString(args, "scenario"),
+      }),
     },
     {
       name: "topology.initialize",
