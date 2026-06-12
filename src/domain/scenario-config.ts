@@ -2,6 +2,8 @@ export const WORKFLOW_STEPS = ["topology", "time-sync", "flow-template", "planni
 
 export type WorkflowStep = (typeof WORKFLOW_STEPS)[number];
 
+// verify-skills.mjs 正则锚点：此 union 须保持单行（R9 对账 reference 文件名）；
+// 改名/换行前同步 scripts/verify-skills.mjs。
 export type ScenarioConfigId = "generic-tsn" | "aerospace-onboard";
 
 export interface ScenarioFlowTemplate {
@@ -20,12 +22,9 @@ export interface ScenarioConfig {
   id: ScenarioConfigId;
   displayName: string;
   stageLabels: Record<WorkflowStep, string>;
+  // 拓扑推荐默认已收口到 skill 场景 reference（R10）：唯一事实源是
+  // .claude/skills/tsn-topology/references/<场景id>.md，此处不再复制。
   defaults: {
-    topology: {
-      switchCount: number;
-      endSystemsPerSwitch: number;
-      dataRateMbps: number;
-    };
     timeSyncSummary: string;
   };
   flowTemplates: ScenarioFlowTemplate[];
@@ -52,11 +51,6 @@ export const SCENARIO_CONFIGS: Record<ScenarioConfigId, ScenarioConfig> = {
       "planning-export": "模拟仿真",
     },
     defaults: {
-      topology: {
-        switchCount: 4,
-        endSystemsPerSwitch: 5,
-        dataRateMbps: 1_000,
-      },
       timeSyncSummary: "默认假设全网已完成时间同步，后续仿真配置再细化 gPTP 主时钟和端口关系。",
     },
     flowTemplates: [
@@ -88,11 +82,6 @@ export const SCENARIO_CONFIGS: Record<ScenarioConfigId, ScenarioConfig> = {
       "planning-export": "模拟仿真",
     },
     defaults: {
-      topology: {
-        switchCount: 4,
-        endSystemsPerSwitch: 5,
-        dataRateMbps: 1_000,
-      },
       timeSyncSummary: "默认采用全网统一时钟假设，优先保留 GM 选择、同步域和从端口关系的后续扩展位置。",
     },
     flowTemplates: [

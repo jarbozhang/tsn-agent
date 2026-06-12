@@ -90,24 +90,67 @@ pub struct TopologyWarningOut {
 // ============================================================================
 
 pub fn describe_templates_catalog() -> Value {
-    json!({
-        "templateCount": 3,
-        "templateIds": ["generic-line", "generic-ring", "dual-plane-redundant"],
-        "templates": [
-            generic_line_descriptor(),
-            generic_ring_descriptor(),
-            dual_plane_descriptor(),
-        ],
-    })
+    describe_templates_catalog_filtered(None)
+}
+
+/// R7：可选按场景过滤模板候选集。未知场景值返回空列表 + warning（不报错，
+/// 前向兼容工业等未来场景）；None 返回全量（向后兼容）。
+pub fn describe_templates_catalog_filtered(scenario: Option<&str>) -> Value {
+    // verify-skills.mjs 正则锚点：`let all = [...]` 清单与各 descriptor 函数内
+    // 首个 "id" 字段（必须先于 example 的伪 id）被 R9 对账消费——改名/重排前
+    // 同步 scripts/verify-skills.mjs。
+    let all = [
+        generic_line_descriptor(),
+        generic_ring_descriptor(),
+        dual_plane_descriptor(),
+    ];
+    let templates: Vec<Value> = match scenario {
+        None => all.to_vec(),
+        Some(scenario) => all
+            .iter()
+            .filter(|descriptor| {
+                descriptor["scenarios"]
+                    .as_array()
+                    .map(|list| list.iter().any(|v| v.as_str() == Some(scenario)))
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect(),
+    };
+    let template_ids: Vec<Value> = templates
+        .iter()
+        .map(|descriptor| descriptor["id"].clone())
+        .collect();
+    let mut catalog = json!({
+        "templateCount": templates.len(),
+        "templateIds": template_ids,
+        "templates": templates,
+    });
+    if let Some(scenario) = scenario {
+        catalog["scenario"] = json!(scenario);
+        if catalog["templateCount"] == json!(0) {
+            catalog["warning"] = json!(format!("未知场景 {scenario}，无匹配模板；省略 scenario 参数可获取全量目录。"));
+        }
+    }
+    catalog
 }
 
 fn generic_line_descriptor() -> Value {
+    let mut params = generic_distributed_params();
+    if let Some(list) = params.as_array_mut() {
+        list.push(json!({
+            "name": "endSystemPlacement", "type": "enum",
+            "values": ["per-switch", "ends-only"], "required": false,
+            "description": "端系统挂载策略：per-switch（缺省，每台交换机均匀挂载）；ends-only（端系统仅挂链两端各 1 台，endSystemsPerSwitch 必须为 1；switchCount ≥ 5 时画布蛇形折叠，对应规范图 5-1 五跳线性）。",
+        }));
+    }
     json!({
         "id": "generic-line",
         "name": "通用线型拓扑",
-        "description": "多台交换机线型互联，每台交换机接入固定数量端系统。",
+        "description": "多台交换机线型互联；端系统按策略均匀挂载或仅挂链两端（五跳线性）。",
         "tags": ["generic", "line", "beginner"],
-        "params": generic_distributed_params(),
+        "scenarios": ["generic-tsn", "aerospace-onboard"],
+        "params": params,
         "example": {
             "switchCount": 4,
             "endSystemsPerSwitch": 2,
@@ -122,6 +165,7 @@ fn generic_ring_descriptor() -> Value {
         "name": "通用环形拓扑",
         "description": "多台交换机环形互联，每台交换机接入固定数量端系统。",
         "tags": ["generic", "ring", "redundant"],
+        "scenarios": ["generic-tsn", "aerospace-onboard"],
         "params": generic_distributed_params(),
         "example": {
             "switchCount": 4,
@@ -137,6 +181,7 @@ fn dual_plane_descriptor() -> Value {
         "name": "通用双平面冗余拓扑",
         "description": "A/B 两个交换机平面，端系统显式双归属接入成对 switch group。",
         "tags": ["generic", "dual-plane", "dual-homed", "redundant"],
+        "scenarios": ["aerospace-onboard"],
         "params": [
             { "name": "planes", "type": "tuple", "required": true,
               "description": "固定两个平面，P0 只支持 A/B。",
@@ -323,12 +368,49 @@ pub fn initialize_topology(
         END_SYSTEMS_PER_SWITCH_MAX,
         "$.params.endSystemsPerSwitch",
     )?;
-    let topology = create_generic_distributed_topology(
-        &intent.template_id,
-        switch_count as usize,
-        end_systems_per_switch as usize,
-        data_rate,
-    );
+    // R10：endSystemPlacement 仅 generic-line 支持 ends-only；该模式下
+    // endSystemsPerSwitch 必须为 1（不做语义重载，错值早失败）。
+    let ends_only = match params_obj.get("endSystemPlacement") {
+        None => false,
+        Some(Value::String(s)) if s == "per-switch" => false,
+        Some(Value::String(s)) if s == "ends-only" => {
+            if intent.template_id != "generic-line" {
+                return Err(vec![TopologyErrorOut::new(
+                    "INVALID_TEMPLATE_PARAM",
+                    "endSystemPlacement \"ends-only\" 仅 generic-line 模板支持。",
+                    "$.params.endSystemPlacement",
+                )
+                .requires_clarification()]);
+            }
+            if end_systems_per_switch != 1 {
+                return Err(vec![TopologyErrorOut::new(
+                    "INVALID_TEMPLATE_PARAM",
+                    "ends-only 模式下 endSystemsPerSwitch 必须为 1（端系统仅挂链两端各 1 台）。",
+                    "$.params.endSystemsPerSwitch",
+                )
+                .requires_clarification()]);
+            }
+            true
+        }
+        Some(_) => {
+            return Err(vec![TopologyErrorOut::new(
+                "INVALID_TEMPLATE_PARAM",
+                "endSystemPlacement 取值仅支持 \"per-switch\" 或 \"ends-only\"。",
+                "$.params.endSystemPlacement",
+            )
+            .requires_clarification()]);
+        }
+    };
+    let topology = if ends_only {
+        create_generic_line_ends_only_topology(switch_count as usize, data_rate)
+    } else {
+        create_generic_distributed_topology(
+            &intent.template_id,
+            switch_count as usize,
+            end_systems_per_switch as usize,
+            data_rate,
+        )
+    };
 
     let summary = InitializeSummary {
         template_id: intent.template_id.clone(),
@@ -433,6 +515,140 @@ fn normalize_data_rate(value: Option<&Value>) -> Result<i64, Vec<TopologyErrorOu
         .requires_clarification()]);
     }
     Ok(n)
+}
+
+/// R10/R11：generic-line ends-only（规范图 5-1 五跳线性）。端系统仅挂链两端
+/// 各 1 台；switchCount ≥ 5 时蛇形折叠（boustrophedon：行容量 ceil(N/2)、
+/// 行向交替、折返处上下对齐），<5 单行直线。端口用 per-node first-free 游标
+/// （ends-only 打破均匀挂载的定偏移前提）。布局常量沿用 generic 行 y=220、
+/// x 步距 300、ES 外伸 220、折叠行距 200（对图校准：图 5-1 转 png）。
+fn create_generic_line_ends_only_topology(
+    switch_count: usize,
+    data_rate: i64,
+) -> IntermediateTopology {
+    const ROW_Y: f64 = 220.0;
+    const ROW_PITCH: f64 = 200.0;
+    const X_BASE: f64 = 80.0;
+    const X_PITCH: f64 = 300.0;
+    const ES_GAP: f64 = 220.0;
+    const FOLD_THRESHOLD: usize = 5;
+
+    let folded = switch_count >= FOLD_THRESHOLD;
+    let row_capacity = if folded { switch_count.div_ceil(2) } else { switch_count };
+
+    // 蛇形坐标：行 0 自左向右；行 1 自右向左（首元素与行 0 末元素同 x 对齐折返）。
+    let switch_position = |index: usize| -> IntermediatePosition {
+        let row = index / row_capacity;
+        let col = index % row_capacity;
+        let x = if row % 2 == 0 {
+            X_BASE + X_PITCH * col as f64
+        } else {
+            let row0_last_x = X_BASE + X_PITCH * (row_capacity as f64 - 1.0);
+            row0_last_x - X_PITCH * col as f64
+        };
+        IntermediatePosition { x, y: ROW_Y + ROW_PITCH * row as f64 }
+    };
+
+    let mut nodes: Vec<IntermediateNode> = Vec::new();
+    let mut links: Vec<IntermediateLink> = Vec::new();
+    let mut numeric_node_id: i64 = 0;
+    let mut numeric_link_id: i64 = 0;
+
+    for switch_index in 1..=switch_count {
+        nodes.push(IntermediateNode {
+            id: format!("sw{}", switch_index),
+            numeric_id: numeric_node_id,
+            name: format!("SW-{}", switch_index),
+            node_type: IntermediateNodeType::Switch,
+            ports: create_ports(2),
+            position: switch_position(switch_index - 1),
+            mac_address: None,
+            ip_address: None,
+        });
+        numeric_node_id += 1;
+    }
+
+    // 两端端系统：e1 挂 sw1、e2 挂 swN（N=1 时同挂 sw1）。ES 沿行向外伸。
+    let first_pos = switch_position(0);
+    let last_pos = switch_position(switch_count - 1);
+    let last_row = (switch_count - 1) / row_capacity;
+    let e1_pos = IntermediatePosition { x: first_pos.x - ES_GAP, y: first_pos.y };
+    // 末行行向：偶数行向右伸，奇数行（反向行）向左伸。
+    let e2_pos = if last_row % 2 == 0 {
+        IntermediatePosition { x: last_pos.x + ES_GAP, y: last_pos.y }
+    } else {
+        IntermediatePosition { x: last_pos.x - ES_GAP, y: last_pos.y }
+    };
+    // es2 的 ip_octet 取 max(2) 防 switchCount=1 时与 es1（octet=1）撞出重复 IP。
+    for (ordinal, (id, name, pos, ip_octet)) in [
+        ("es1", "ES-1", e1_pos, 1usize),
+        ("es2", "ES-2", e2_pos, switch_count.max(2)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        nodes.push(IntermediateNode {
+            id: id.to_string(),
+            numeric_id: numeric_node_id,
+            name: name.to_string(),
+            node_type: IntermediateNodeType::EndSystem,
+            ports: create_ports(1),
+            position: pos,
+            mac_address: Some(derive_mac_address(ordinal as i64 + 1)),
+            ip_address: Some(format!("10.0.{}.1", ip_octet)),
+        });
+        numeric_node_id += 1;
+    }
+
+    // 端口 first-free 游标（dual-plane 先例）：链路按 ES 接入 → 骨干 顺序生成。
+    let mut port_cursor: HashMap<String, usize> = HashMap::new();
+    let mut next_port = |node: &str| -> String {
+        let counter = port_cursor.entry(node.to_string()).or_insert(0);
+        let value = *counter;
+        *counter += 1;
+        format!("P{}", value)
+    };
+
+    let last_switch = format!("sw{}", switch_count);
+    for (es_id, sw_id) in [("es1", "sw1".to_string()), ("es2", last_switch)] {
+        let es_port = next_port(es_id);
+        let sw_port = next_port(&sw_id);
+        links.push(create_link(numeric_link_id, es_id, &es_port, &sw_id, &sw_port, data_rate));
+        numeric_link_id += 1;
+    }
+    for index in 1..switch_count {
+        let upstream = format!("sw{}", index);
+        let downstream = format!("sw{}", index + 1);
+        let up_port = next_port(&upstream);
+        let down_port = next_port(&downstream);
+        links.push(create_link(
+            numeric_link_id,
+            &upstream,
+            &up_port,
+            &downstream,
+            &down_port,
+            data_rate,
+        ));
+        numeric_link_id += 1;
+    }
+
+    IntermediateTopology {
+        schema_version: INTERMEDIATE_TOPOLOGY_SCHEMA_VERSION.to_string(),
+        metadata: IntermediateTopologyMetadata {
+            template_id: Some("generic-line".to_string()),
+            template_params: Some(json!({
+                "switchCount": switch_count,
+                "endSystemsPerSwitch": 1,
+                "endSystemPlacement": "ends-only",
+                "dataRateMbps": data_rate,
+            })),
+            layout: Some(if folded { "line-serpentine".into() } else { "line".into() }),
+            source: Some("template".into()),
+        },
+        nodes,
+        links,
+        diagnostics: Vec::new(),
+    }
 }
 
 fn create_generic_distributed_topology(
@@ -2522,6 +2738,218 @@ mod tests {
         assert!(ids.iter().any(|v| v == "dual-plane-redundant"));
     }
 
+    fn ends_only_intent(switch_count: i64, es_per_switch: i64) -> InitializeIntent {
+        InitializeIntent {
+            template_id: "generic-line".into(),
+            params: json!({
+                "switchCount": switch_count,
+                "endSystemsPerSwitch": es_per_switch,
+                "dataRateMbps": 1000,
+                "endSystemPlacement": "ends-only",
+            }),
+        }
+    }
+
+    #[test]
+    fn ends_only_five_hop_matches_spec_figure_5_1() {
+        // AE3：7 节点（5 SW + 2 ES）6 链路、ES 仅两端、两行蛇形坐标快照。
+        let (topo, summary) = initialize_topology(&ends_only_intent(5, 1)).unwrap();
+        assert_eq!(summary.node_count, 7);
+        assert_eq!(summary.link_count, 6);
+        assert_eq!(summary.switch_count, 5);
+        assert_eq!(summary.end_system_count, 2);
+
+        let pos = |id: &str| {
+            let node = topo.nodes.iter().find(|n| n.id == id).expect("node");
+            (node.position.x, node.position.y)
+        };
+        // 行 1 自左向右；行 2 蛇形反向（sw4 与 sw3 同 x 折返）；ES 沿行外伸。
+        assert_eq!(pos("sw1"), (80.0, 220.0));
+        assert_eq!(pos("sw2"), (380.0, 220.0));
+        assert_eq!(pos("sw3"), (680.0, 220.0));
+        assert_eq!(pos("sw4"), (680.0, 420.0));
+        assert_eq!(pos("sw5"), (380.0, 420.0));
+        assert_eq!(pos("es1"), (-140.0, 220.0));
+        assert_eq!(pos("es2"), (160.0, 420.0));
+
+        // 链路结构：e1—sw1、e2—sw5、sw1..sw5 级联（无环）。
+        let connects = |a: &str, b: &str| {
+            topo.links.iter().any(|l| {
+                (l.source.node_id == a && l.target.node_id == b)
+                    || (l.source.node_id == b && l.target.node_id == a)
+            })
+        };
+        assert!(connects("es1", "sw1"));
+        assert!(connects("es2", "sw5"));
+        for i in 1..5 {
+            assert!(connects(&format!("sw{}", i), &format!("sw{}", i + 1)));
+        }
+        assert!(!connects("sw5", "sw1"), "线性不闭环");
+
+        // 防穿框：每条链路中心连线不得穿过任何非端点节点盒（126×56，margin 8）。
+        for link in &topo.links {
+            let from = pos(&link.source.node_id);
+            let to = pos(&link.target.node_id);
+            for node in &topo.nodes {
+                if node.id == link.source.node_id || node.id == link.target.node_id {
+                    continue;
+                }
+                let center = (node.position.x, node.position.y);
+                assert!(
+                    !seg_intersects_rect(from, to, center, 63.0, 28.0, 8.0),
+                    "link {}-{} crosses node {}",
+                    link.source.node_id,
+                    link.target.node_id,
+                    node.id
+                );
+            }
+        }
+
+        // 确定性 + 无坐标重叠。
+        let (topo2, _) = initialize_topology(&ends_only_intent(5, 1)).unwrap();
+        let coords: Vec<_> = topo.nodes.iter().map(|n| (n.position.x, n.position.y)).collect();
+        let coords2: Vec<_> = topo2.nodes.iter().map(|n| (n.position.x, n.position.y)).collect();
+        assert_eq!(coords, coords2, "同参两次坐标全等");
+        for (i, a) in coords.iter().enumerate() {
+            for b in coords.iter().skip(i + 1) {
+                assert_ne!(a, b, "任意两节点不得同坐标");
+            }
+        }
+
+        // 落库前结构校验兜底。
+        let report =
+            validate_intermediate_topology(&serde_json::to_value(&topo).unwrap_or(Value::Null));
+        assert!(report.ok, "validate_intermediate must pass: {:?}", report.errors);
+    }
+
+    #[test]
+    fn ends_only_below_fold_threshold_stays_single_row() {
+        let (topo, summary) = initialize_topology(&ends_only_intent(3, 1)).unwrap();
+        assert_eq!(summary.node_count, 5);
+        assert_eq!(summary.link_count, 4);
+        let ys: std::collections::BTreeSet<i64> =
+            topo.nodes.iter().map(|n| n.position.y as i64).collect();
+        assert_eq!(ys.len(), 1, "未达折叠阈值保持单行");
+        let e2 = topo.nodes.iter().find(|n| n.id == "es2").unwrap();
+        let sw3 = topo.nodes.iter().find(|n| n.id == "sw3").unwrap();
+        assert!(e2.position.x > sw3.position.x, "单行时 es2 向右外伸");
+    }
+
+    #[test]
+    fn ends_only_even_and_max_fold_hold_invariants() {
+        // 偶数折叠（6 → 3+3）与上限 12（6+6）的反向行算式、防穿框、唯一性、
+        // 校验兜底（坐标快照只钉规范图 5-1 的 N=5，其余只验不变量）。
+        for switch_count in [1i64, 2, 6, 12] {
+            let (topo, summary) = initialize_topology(&ends_only_intent(switch_count, 1)).unwrap();
+            assert_eq!(summary.node_count, switch_count as usize + 2);
+            assert_eq!(summary.link_count, switch_count as usize + 1);
+
+            let pos = |id: &str| {
+                let node = topo.nodes.iter().find(|n| n.id == id).expect("node");
+                (node.position.x, node.position.y)
+            };
+            for link in &topo.links {
+                let from = pos(&link.source.node_id);
+                let to = pos(&link.target.node_id);
+                for node in &topo.nodes {
+                    if node.id == link.source.node_id || node.id == link.target.node_id {
+                        continue;
+                    }
+                    assert!(
+                        !seg_intersects_rect(
+                            from,
+                            to,
+                            (node.position.x, node.position.y),
+                            63.0,
+                            28.0,
+                            8.0
+                        ),
+                        "N={switch_count}: link {}-{} crosses {}",
+                        link.source.node_id,
+                        link.target.node_id,
+                        node.id
+                    );
+                }
+            }
+
+            let coords: Vec<_> = topo.nodes.iter().map(|n| (n.position.x, n.position.y)).collect();
+            for (i, a) in coords.iter().enumerate() {
+                for b in coords.iter().skip(i + 1) {
+                    assert_ne!(a, b, "N={switch_count}: 任意两节点不得同坐标");
+                }
+            }
+
+            // IP 唯一性（N=1 时 es1/es2 同挂 sw1，octet 必须仍不同）。
+            let ips: Vec<_> = topo.nodes.iter().filter_map(|n| n.ip_address.clone()).collect();
+            let unique: std::collections::BTreeSet<_> = ips.iter().collect();
+            assert_eq!(ips.len(), unique.len(), "N={switch_count}: IP 不得重复");
+
+            let report =
+                validate_intermediate_topology(&serde_json::to_value(&topo).unwrap_or(Value::Null));
+            assert!(report.ok, "N={switch_count}: {:?}", report.errors);
+        }
+    }
+
+    #[test]
+    fn ends_only_rejects_invalid_parameter_combinations() {
+        // endSystemsPerSwitch 必须为 1（不做语义重载）。
+        let errors = initialize_topology(&ends_only_intent(5, 2)).unwrap_err();
+        assert!(errors.iter().any(|e| e.path == "$.params.endSystemsPerSwitch"));
+
+        // ends-only 仅 generic-line 支持。
+        let mut ring = ends_only_intent(5, 1);
+        ring.template_id = "generic-ring".into();
+        let errors = initialize_topology(&ring).unwrap_err();
+        assert!(errors.iter().any(|e| e.path == "$.params.endSystemPlacement"));
+
+        // 非法枚举值。
+        let intent = InitializeIntent {
+            template_id: "generic-line".into(),
+            params: json!({
+                "switchCount": 5, "endSystemsPerSwitch": 1, "dataRateMbps": 1000,
+                "endSystemPlacement": "middle",
+            }),
+        };
+        let errors = initialize_topology(&intent).unwrap_err();
+        assert!(errors.iter().any(|e| e.path == "$.params.endSystemPlacement"));
+
+        // 显式 per-switch 与缺省等价（向后兼容，ring 也接受）。
+        let mut ring_default = ends_only_intent(4, 2);
+        ring_default.template_id = "generic-ring".into();
+        ring_default.params["endSystemPlacement"] = json!("per-switch");
+        assert!(initialize_topology(&ring_default).is_ok());
+    }
+
+    #[test]
+    fn describe_templates_scenario_filter_matches_r7_matrix() {
+        // R7：每个 descriptor 都有非空 scenarios；过滤按归属矩阵收窄候选集。
+        let full = describe_templates_catalog_filtered(None);
+        for descriptor in full["templates"].as_array().unwrap() {
+            let scenarios = descriptor["scenarios"].as_array().unwrap();
+            assert!(!scenarios.is_empty(), "{} 必须声明场景归属", descriptor["id"]);
+        }
+
+        let aero = describe_templates_catalog_filtered(Some("aerospace-onboard"));
+        assert_eq!(aero["templateCount"], 3, "宇航场景含全部三模板（ring 双场景归属）");
+        // 匹配场景与全量均不得携带 warning（否则 agent 每次过滤都收到误导警告）。
+        assert!(aero.get("warning").is_none());
+        assert!(full.get("warning").is_none());
+        assert!(full.get("scenario").is_none());
+
+        let generic = describe_templates_catalog_filtered(Some("generic-tsn"));
+        assert_eq!(generic["templateCount"], 2);
+        let ids = generic["templateIds"].as_array().unwrap();
+        assert!(!ids.iter().any(|v| v == "dual-plane-redundant"));
+
+        let unknown = describe_templates_catalog_filtered(Some("industrial"));
+        assert_eq!(unknown["templateCount"], 0);
+        assert!(unknown["warning"].as_str().unwrap().contains("industrial"));
+        // 未知场景回显 scenario，空结果是空数组而非 null。
+        assert_eq!(unknown["scenario"], json!("industrial"));
+        assert!(unknown["templates"].as_array().unwrap().is_empty());
+        assert!(unknown["templateIds"].as_array().unwrap().is_empty());
+    }
+
     #[test]
     fn initialize_generic_line_produces_chain_topology() {
         let topology = build_minimal_generic_line();
@@ -3310,6 +3738,10 @@ mod tests {
                 end_systems_clause
             )),
             "zod endSystemsPerSwitch bounds drifted from Rust END_SYSTEMS_PER_SWITCH_MIN/MAX ({end_systems_clause})"
+        );
+        assert!(
+            zod_src.contains(r#"endSystemPlacement: z.enum(["per-switch", "ends-only"]).optional()"#),
+            "zod endSystemPlacement enum drifted from Rust placement parsing (per-switch/ends-only)"
         );
     }
 

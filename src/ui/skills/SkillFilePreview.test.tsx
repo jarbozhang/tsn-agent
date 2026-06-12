@@ -39,6 +39,12 @@ function createService(overrides: Partial<SkillFileService> = {}): SkillFileServ
       content,
       editable: true,
     })),
+    restoreFactorySkills: vi.fn().mockImplementation(async (dryRun: boolean) => ({
+      dryRun,
+      restored: ["tsn-topology/SKILL.md"],
+      removed: ["tsn-topology/package.json"],
+      preserved: ["tsn-topology/my-notes.md"],
+    })),
     describeTopologyTemplates: vi.fn().mockResolvedValue({
       templateCount: 3,
       templateIds: ["generic-line", "generic-ring", "dual-plane-redundant"],
@@ -58,6 +64,8 @@ describe("SkillFilePreview", () => {
     expect(await screen.findByText("原始 skill 内容")).toBeInTheDocument();
     expect(service.listFiles).toHaveBeenCalledWith("tsn-topology");
     expect(service.readFile).toHaveBeenCalledWith("tsn-topology", "SKILL.md");
+    // 可编辑（available）状态不渲染只读提示条。
+    expect(screen.queryByText(/当前为只读指引/)).not.toBeInTheDocument();
   });
 
   it("edits and saves small text files", async () => {
@@ -112,14 +120,14 @@ describe("SkillFilePreview", () => {
     expect(screen.getByText("暂无目录")).toBeInTheDocument();
   });
 
-  it("shows readonly factory notice instead of a disabled editor", async () => {
+  it("shows readonly fallback notice instead of a disabled editor", async () => {
     const service = createService({
       readFile: vi.fn().mockResolvedValue({
         skillId: "tsn-topology",
         path: "SKILL.md",
         content: "只读内容",
         editable: false,
-        readonlyReason: "只读 skill 资源不可编辑。",
+        readonlyReason: "可写 skill 副本不可用（无法创建可写目录），当前为内置只读副本。",
       }),
     });
 
@@ -127,8 +135,8 @@ describe("SkillFilePreview", () => {
 
     expect(await screen.findByText("只读内容")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "编辑文件" })).not.toBeInTheDocument();
-    expect(screen.getByText(/出厂只读指引/)).toBeInTheDocument();
-    expect(screen.getByText(/只读 skill 资源不可编辑/)).toBeInTheDocument();
+    expect(screen.getByText(/当前为只读指引/)).toBeInTheDocument();
+    expect(screen.getByText(/可写 skill 副本不可用/)).toBeInTheDocument();
   });
 
   it("renders the topology legal-domain from the catalog", async () => {
@@ -179,6 +187,115 @@ describe("SkillFilePreview", () => {
     render(<SkillFilePreview skillId="tsn-topology" service={service} />);
 
     expect(await screen.findByText(/清空将使 agent 失去领域指引/)).toBeInTheDocument();
+  });
+
+  it("restores factory skills via dry-run preview and inline confirmation", async () => {
+    const user = userEvent.setup();
+    const service = createService();
+
+    render(<SkillFilePreview skillId="tsn-topology" service={service} />);
+
+    await screen.findByText("原始 skill 内容");
+    await user.click(screen.getByRole("button", { name: /恢复内置版本/ }));
+
+    // dry-run 清单内联确认：恢复/删除/自建三段。
+    const dialog = await screen.findByRole("alertdialog", { name: "恢复内置版本确认" });
+    expect(service.restoreFactorySkills).toHaveBeenCalledWith(true);
+    expect(dialog).toHaveTextContent("恢复 1 个文件：tsn-topology/SKILL.md");
+    expect(dialog).toHaveTextContent("删除 1 个出厂已移除文件：tsn-topology/package.json");
+    expect(dialog).toHaveTextContent("自建文件不受影响：tsn-topology/my-notes.md");
+
+    await user.click(screen.getByRole("button", { name: "确认恢复" }));
+
+    await waitFor(() => {
+      expect(service.restoreFactorySkills).toHaveBeenCalledWith(false);
+    });
+    expect(await screen.findByText(/已恢复内置版本（恢复 1 个、删除 1 个文件）/)).toBeInTheDocument();
+    // 恢复后刷新文件列表（初次加载 + 恢复后各一次）。
+    await waitFor(() => {
+      expect(service.listFiles).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("disables confirmation when the dry-run plan is empty", async () => {
+    const user = userEvent.setup();
+    const service = createService({
+      restoreFactorySkills: vi.fn().mockResolvedValue({
+        dryRun: true,
+        restored: [],
+        removed: [],
+        preserved: [],
+      }),
+    });
+
+    render(<SkillFilePreview skillId="tsn-topology" service={service} />);
+    await screen.findByText("原始 skill 内容");
+    await user.click(screen.getByRole("button", { name: /恢复内置版本/ }));
+
+    const dialog = await screen.findByRole("alertdialog", { name: "恢复内置版本确认" });
+    expect(dialog).toHaveTextContent("没有需要恢复的文件（已与内置版本一致）");
+    expect(screen.getByRole("button", { name: "确认恢复" })).toBeDisabled();
+    // 确认按钮禁用：不会触发 dryRun=false 的二次调用。
+    expect(service.restoreFactorySkills).toHaveBeenCalledTimes(1);
+    expect(service.restoreFactorySkills).toHaveBeenCalledWith(true);
+  });
+
+  it("locks file editing while the restore confirmation is open", async () => {
+    const user = userEvent.setup();
+    const service = createService();
+
+    render(<SkillFilePreview skillId="tsn-topology" service={service} />);
+    await screen.findByText("原始 skill 内容");
+    await user.click(screen.getByRole("button", { name: /恢复内置版本/ }));
+    await screen.findByRole("alertdialog", { name: "恢复内置版本确认" });
+
+    // 确认窗口期编辑入口禁用（防确认清单与实际恢复集合漂移）。
+    expect(screen.getByRole("button", { name: "编辑文件" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.getByRole("button", { name: "编辑文件" })).toBeEnabled();
+  });
+
+  it("cancels the restore confirmation without touching disk", async () => {
+    const user = userEvent.setup();
+    const service = createService();
+
+    render(<SkillFilePreview skillId="tsn-topology" service={service} />);
+
+    await screen.findByText("原始 skill 内容");
+    await user.click(screen.getByRole("button", { name: /恢复内置版本/ }));
+    await screen.findByRole("alertdialog", { name: "恢复内置版本确认" });
+    await user.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(service.restoreFactorySkills).toHaveBeenCalledTimes(1);
+    expect(service.restoreFactorySkills).toHaveBeenCalledWith(true);
+  });
+
+  it("surfaces restore errors and disables restore on readonly roots", async () => {
+    const user = userEvent.setup();
+    const failing = createService({
+      restoreFactorySkills: vi.fn().mockRejectedValue(new Error("内置 skill 资源不可用，无法恢复内置版本。")),
+    });
+
+    render(<SkillFilePreview skillId="tsn-topology" service={failing} />);
+    await screen.findByText("原始 skill 内容");
+    await user.click(screen.getByRole("button", { name: /恢复内置版本/ }));
+    expect(await screen.findByText(/内置 skill 资源不可用/)).toBeInTheDocument();
+
+    // 只读根（播种失败回退）下按钮禁用。
+    const readonly = createService({
+      listFiles: vi.fn().mockResolvedValue({
+        skillId: "tsn-topology",
+        status: "readonly",
+        files: [{ path: "SKILL.md", kind: "file", sizeBytes: 10, canPreview: true, canEdit: false }],
+      }),
+    });
+    render(<SkillFilePreview skillId="tsn-topology" service={readonly} />);
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button", { name: /恢复内置版本/ });
+      expect(buttons[buttons.length - 1]).toBeDisabled();
+    });
   });
 
   it("does not render the legal-domain section for non-topology skills", async () => {

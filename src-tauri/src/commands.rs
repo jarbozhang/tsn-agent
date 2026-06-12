@@ -105,6 +105,18 @@ fn run_claude_agent_blocking(
     let run_id = request.run_id.clone().unwrap_or_else(create_run_id);
     let app_session_id = request.app_session_id.clone();
     let audit_dir = agent_audit_dir(&app);
+    // 同源（R2）：worker 与编辑器消费同一有效 skill 根决策（含 app-data 懒播种）。
+    let (skill_root, skill_root_reason) = {
+        let effective = crate::skill_files::effective_skill_root(&app);
+        let reason = effective.diagnostics_reason().map(str::to_string);
+        // 混合态守卫：根可用但 worker 消费的 SKILL.md 缺失（个别目录播种失败）时
+        // 视同不可用——走 cwd 兜底（打包态=内置工厂副本），与编辑器 per-id 回退
+        // 显示的内容对齐，避免「界面看得到指引、agent 只注入骨架」的反向不同源。
+        let path = effective
+            .into_usable_path()
+            .filter(|root| root.join("tsn-topology").join("SKILL.md").exists());
+        (path, reason)
+    };
     let prompt_chars = request.prompt.chars().count();
     let context_chars = request
         .conversation_context
@@ -124,8 +136,24 @@ fn run_claude_agent_blocking(
             "promptChars": prompt_chars,
             "contextChars": context_chars,
             "auditDir": audit_dir.as_ref().map(|path| path.display().to_string()),
+            "skillRoot": skill_root.as_ref().map(|path| path.display().to_string()),
         }),
     );
+    if skill_root.is_none() {
+        // skill 根不可用（或可用但缺 SKILL.md）时 payload 携带 skillRoot:null，
+        // worker 端 typeof 守卫视同缺省走 cwd 兜底。注意该兜底在打包态会成功读到
+        // 内置工厂副本、不触发 skill_guidance_unavailable——界面编辑与 agent 消费
+        // 可能不同源，必须留 warn 痕迹供排查。
+        log_worker_event(
+            &app,
+            app_session_id.as_deref(),
+            &run_id,
+            "warn",
+            "skill 根解析不可用，本次运行回退 worker cwd 兜底（打包态等价于内置工厂副本）",
+            None,
+            serde_json::json!({ "reason": skill_root_reason }),
+        );
+    }
     // Plan v3 U3+U4b：注入 sidecar url + token + session_id 给 worker，
     // worker 再透传给 MCP child 的 `env`（避免 SDK env passthrough bug，见 Spike B）。
     let (sidecar_url, sidecar_token, app_session_id_for_env) = {
@@ -146,6 +174,7 @@ fn run_claude_agent_blocking(
         "runId": run_id,
         "appSessionId": request.app_session_id,
         "auditDir": audit_dir,
+        "skillRoot": skill_root,
         "resumeSessionId": request.resume_session_id,
         "conversationContext": request.conversation_context,
         "stageRunnerInput": request.stage_runner_input,
@@ -769,26 +798,37 @@ mod tests {
     #[test]
     fn tauri_bundle_includes_all_stage_skill_resources() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir.parent().expect("repo root");
         let tauri_config_path = manifest_dir.join("tauri.conf.json");
-        let tauri_config = std::fs::read_to_string(tauri_config_path).expect("tauri config");
+        let tauri_config: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(tauri_config_path).expect("tauri config"))
+                .expect("tauri config json");
 
-        assert!(tauri_config.contains("../.claude/skills/tsn-topology/SKILL.md"));
-        assert!(tauri_config.contains("../.claude/skills/tsn-topology/package.json"));
-        assert!(tauri_config.contains("../.claude/skills/tsn-flow-planning/SKILL.md"));
-        // rules.md 已并入 SKILL.md 并删除，不应再打包。
-        assert!(!tauri_config.contains("../.claude/skills/tsn-topology/docs/rules.md"));
-        // legacy builder 脚本闭包已下线，不应再打包（topology 参数事实源收口）。
-        assert!(!tauri_config.contains("../.claude/skills/tsn-topology/tools/topology-builder.js"));
-        assert!(
-            !tauri_config.contains("../.claude/skills/tsn-topology/tools/run-topology-skill.js")
+        // skills 走整目录映射（R13）：新增 reference 不需要逐文件登记。
+        let resources = tauri_config["bundle"]["resources"]
+            .as_object()
+            .expect("bundle resources map");
+        assert_eq!(
+            resources.get("../.claude/skills/").and_then(|v| v.as_str()),
+            Some(".claude/skills/")
         );
-        assert!(!tauri_config.contains("../.claude/skills/tsn-topology/tools/validate-topology.js"));
-        assert!(!tauri_config
-            .contains("../.claude/skills/tsn-topology/tools/validate-mac-forwarding-table.js"));
-        assert!(!tauri_config.contains(
-            "../.claude/skills/tsn-topology/tools/render-mac-forwarding-html.js"
-        ));
-        assert!(!tauri_config.contains("../src-node/dist/tsn-topology-server.mjs"));
+        for source in resources.keys() {
+            assert!(
+                !source.starts_with("../.claude/skills/tsn-"),
+                "stale per-file skill mapping: {source}"
+            );
+        }
+
+        // package.json 已出厂移除（R1a），磁盘上不得回潮。
+        assert!(!repo_root.join(".claude/skills/tsn-topology/package.json").exists());
+        // 场景 reference 必须真实存在，目录映射才有内容可打包。
+        assert!(repo_root
+            .join(".claude/skills/tsn-topology/references/generic-tsn.md")
+            .exists());
+        assert!(repo_root
+            .join(".claude/skills/tsn-topology/references/aerospace-onboard.md")
+            .exists());
+        assert!(!tauri_config.to_string().contains("../src-node/dist/tsn-topology-server.mjs"));
     }
 
     #[test]

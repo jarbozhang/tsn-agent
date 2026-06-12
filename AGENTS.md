@@ -26,6 +26,8 @@
   - `docs/staged-agent-workflow.md`
   - `docs/diagnostics-log-contract.md`
   - `docs/testing.md`
+- 历史问题解决方案库：`docs/solutions/`（按类别组织，YAML frontmatter 含 `module`/`tags`/`problem_type`，在已有文档覆盖的领域实现或排障时可检索）。
+- 共享领域词汇：`CONCEPTS.md`（实体、命名流程、状态概念的项目特定含义，初次接触代码库或讨论领域概念时可查阅）。
 
 ## 关键代码入口
 
@@ -37,7 +39,7 @@
 - `src/project/project-state.ts`：workflow state、阶段状态、确认、请求修改、旧 session 归一化。
 - `src/sessions/session-repository.ts`、`src-tauri/src/session_store.rs`：Web localStorage 与 Tauri SQLite 会话保存。
 - `src/diagnostics/*`、`src/ui/diagnostics/DiagnosticsDrawer.tsx`：脱敏诊断日志和日志抽屉。
-- `src-node/claude-agent-worker.mjs`：Tauri 中通过本机 Node worker 调用官方 `@anthropic-ai/claude-agent-sdk`。
+- `src-node/claude-agent-worker.mjs`：Tauri 中通过本机 Node worker 调用官方 `@anthropic-ai/claude-agent-sdk`。spawn 约定：秘密走进程 env（`TSN_AGENT_DB_RPC_TOKEN` 等，避免被 worker 审计序列化），非敏感配置走 argv JSON payload（`cwd`/`auditDir`/`runId`/`skillRoot`）。`skillRoot` 是 skills 父根目录（`skill_files.rs::effective_skill_root` 决策：debug 仓库 → app-data 播种副本 → Resource 只读），worker 据此读 SKILL.md 注入；缺省回退 `cwd/.claude/skills`。注意与 `TSN_AGENT_SKILL_OUTPUT_DIR` 区分——后者是 worker 给 agent 子进程的运行期输出 scratch 目录，不是 skill 源。
 
 ### Plan v3（topology MCP single-DB）Phase A 新增代码入口
 
@@ -117,6 +119,7 @@
 - 单元测试：`npm test`
 - 浏览器端到端：`npm run e2e`
 - Tauri/Rust 测试：`npm run cargo:test`
+- worker 构建：`npm run build:worker`——`src-node/` 源码改动后必跑；dev 与 release 跑的都是 dist 产物，不重建则验证的是旧代码
 - Tauri 开发入口：`npm run tauri dev`
 - Vite Web 开发入口：`npm run dev`
 

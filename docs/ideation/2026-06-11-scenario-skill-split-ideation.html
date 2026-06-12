@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ideation: 场景体系 + 5 跳线性 + skill 按场景拆分</title>
+<style>
+  :root {
+    --ink: #1a2332; --muted: #5b6577; --line: #dde3ec; --bg: #ffffff;
+    --accent: #fa541c; --accent-dim: #fff0e8;
+    --axis-a: #1d5fa8; --axis-b: #0f7b6c; --axis-c: #7c3aed; --axis-d: #b45309;
+    --card: #f8fafc; --warn-bg: #fff7ed; --warn-line: #fdba74;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; max-width: 880px; padding: 32px 24px 64px;
+         color: var(--ink); background: var(--bg); font-size: 15px; line-height: 1.75;
+         font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", sans-serif; }
+  h1 { font-size: 26px; line-height: 1.3; margin: 8px 0 4px; }
+  h2 { font-size: 19px; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 16px; margin: 28px 0 8px; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
+         background: #f1f4f8; padding: 1px 5px; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; margin: 12px 0; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--card); }
+  .meta { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .meta b { color: var(--ink); }
+  .axis-chip { display: inline-block; font-size: 11.5px; font-weight: 600; color: #fff;
+               border-radius: 4px; padding: 1px 8px; vertical-align: 1px; }
+  .ax-a { background: var(--axis-a); } .ax-b { background: var(--axis-b); }
+  .ax-c { background: var(--axis-c); } .ax-d { background: var(--axis-d); }
+  .idea { border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px 14px; margin: 18px 0;
+          background: var(--card); }
+  .idea h3 { margin: 0 0 10px; }
+  .idea dl { margin: 0; }
+  .idea dt { font-weight: 700; font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .idea dd { margin: 2px 0 0 0; }
+  .badges { float: right; font-size: 12.5px; color: var(--muted); }
+  .jump { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+          padding: 10px 16px; font-size: 14px; }
+  .jump a { color: var(--ink); text-decoration: none; }
+  .jump a:hover { color: var(--accent); }
+  .callout { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px;
+             padding: 12px 16px; margin: 16px 0; font-size: 14px; }
+  .fig { margin: 14px 0 6px; text-align: center; }
+  .fig svg { max-width: 100%; height: auto; }
+  .figcap { font-size: 12.5px; color: var(--muted); text-align: center; margin-top: 4px; }
+  footer.composition-signal { margin-top: 48px; padding-top: 12px; border-top: 1px solid var(--line);
+          color: var(--muted); font-size: 12px; }
+  ul { padding-left: 22px; } li { margin: 3px 0; }
+</style>
+</head>
+<body>
+
+<h1>Ideation: 场景体系 + 5 跳线性拓扑 + skill 按场景拆分</h1>
+<p class="meta">
+  <b>date</b> 2026-06-11 ·
+  <b>topic</b> scenario-skill-split ·
+  <b>mode</b> repo-grounded<br>
+  <b>focus</b> 支持规范图 5-1 的 5 跳线性拓扑（宇航场景）；保持通用 + 宇航两场景、场景下多拓扑、预留工业；
+  topology skill 拆为主 SKILL.md 索引 + per-scenario reference；移除 skill 内 package.json
+</p>
+
+<div class="callout">
+<b>两个改变全局的核查发现</b>（3 个独立子代理交叉核实）：<br>
+① <b>前提校正</b>——「worker 不知场景、按场景注入不可行」是错的：<code>scenarioConfigId</code> 已经经
+<code>agent-adapter.ts:160 → commands.rs payload → claude-agent-worker.mjs:94</code> 送达
+<code>buildSystemPromptForStage</code> 第一参数，只是当前以 <code>_stageRunnerInput</code> 弃用。按场景确定性注入一行可达。<br>
+② <b>发布阻断</b>——播种是目录粒度「已存在即跳过」（<code>skill_files.rs:331</code>）：本次拆分是第一个「向已播种目录新增文件」的特性，
+不升级播种粒度，<b>所有存量 release 安装升级后拿不到 references/ 与新索引</b>——拆分对老用户静默不生效。
+</div>
+
+<h2>Grounding Context</h2>
+<ul>
+  <li><b>场景现状</b>：<code>src/domain/scenario-config.ts</code> 已有 generic-tsn（通用）+ aerospace-onboard（宇航）；
+      消费方为 UI 文案与 <code>stageRunnerInput.scenarioConfigId</code>。其 <code>defaults.topology</code> 为零消费死配置，
+      且与 SKILL.md 推荐默认已漂移（endSystemsPerSwitch 5 vs 2）。</li>
+  <li><b>模板 catalog</b>（<code>topology_compute.rs:92-196</code>）：generic-line / generic-ring / dual-plane-redundant（已实现）。
+      模板与场景无机器可读关联——靠 87 行 SKILL.md 决策树散文，且决策树按用户措辞分支、从不引用场景 id。</li>
+  <li><b>注入链路</b>：worker 整文件读 <code>skillRoot/tsn-topology/SKILL.md</code> 拼单字符串注入（sentinel 分隔；
+      string[] 会崩 redactSecrets）；agent 工具白名单含 Read + 8 个 MCP 工具；skillRoot 经 payload 同源（刚 merge）。</li>
+  <li><b>5 跳线性</b>（规范图 5-1 + 5SW_2NIC 配置）：E1→SW1→…→SW5→E2，端系统仅两端，S 形折叠两行；
+      generic-line 表达不了「仅两端挂 ES」。</li>
+  <li><b>官方规范背书</b>：SKILL.md + references/ 是 Anthropic Agent Skills 官方 Pattern 2（bigquery-skill 同构先例）；
+      SKILL.md 建议 &lt;500 行；references 一层深；package.json 不在规范内（残留，删除正确）。</li>
+  <li><b>既有决策张力</b>：2026-06-09 ideation Rejection #4（不拆 reference）被本次显式反转（论据：官方 Pattern 2 + 场景扩展预期）；
+      Rejection #1（能参数化就不建新模板）在 5 跳线性裁决中得到遵循。</li>
+</ul>
+
+<h2>Topic Axes</h2>
+<ul>
+  <li><span class="axis-chip ax-a">A</span> 场景体系结构（场景→模板映射数据模型、工业预留位）</li>
+  <li><span class="axis-chip ax-b">B</span> 5 跳线性拓扑生成（参数化 vs 新模板、S 形布局、测试关卡）</li>
+  <li><span class="axis-chip ax-c">C</span> skill 拆分与注入策略（主索引 + references、休眠风险、注入方式）</li>
+  <li><span class="axis-chip ax-d">D</span> 打包 / 播种 / 编辑链路适配（verify-skills、tauri.conf、播种升级、删 package.json）</li>
+</ul>
+
+<h2>Ranked Ideas</h2>
+<nav class="jump">
+  <a href="#i1">1. 播种升级为文件粒度三态判定</a> ·
+  <a href="#i2">2. worker 按场景确定性注入</a> ·
+  <a href="#i3">3. 内容切分三层判据</a> ·
+  <a href="#i4">4. 场景→模板映射机器化</a> ·
+  <a href="#i5">5. 5 跳线性参数化 + 蛇形布局</a> ·
+  <a href="#i6">6. 打包目录映射 + 纯文本契约</a> ·
+  <a href="#i7">7. 规范图黄金测试管线</a>
+</nav>
+
+<div class="idea" id="i1">
+<h3><span class="badges">置信 90% · 复杂度 Medium</span>1. 播种升级为文件粒度三态判定（出厂 manifest + 哈希）——拆分的发布前置 <span class="axis-chip ax-d">D</span></h3>
+<dl>
+<dt>Description</dt>
+<dd>播种时写出厂 manifest（文件 → 出厂内容哈希）；此后每次解析逐文件三态判定：app-data 缺失 → 补播；
+存在且哈希 == 出厂值（用户没改）→ 随新版本静默更新；用户改过 → 保留不动。
+deferred 的「重置为内置版本」按钮退化为「按 manifest 恢复」的免费副产品。</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> skill_files.rs:331「目录已播种即跳过」——存量安装升级永远拿不到本次新增的 references/*.md 与新版索引 SKILL.md；
+<code>external:</code> dpkg conffile md5sums 数据库 + RPM .rpmnew 的成熟三态语义（包升级 = app 升级、conffile = skill 文件、md5sums = manifest）。</dd>
+<dt>Rationale</dt>
+<dd>七个子代理 idea 收敛到同一结论：不解决播种粒度，拆分 + 5 跳指引 + 删 package.json 对所有老用户全部不生效且无报错
+（worker 读到旧单体 SKILL.md 是合法路径）。这是本批唯一「不做等于没发布」的链路项。manifest 方案同时解决「新增文件送达」与
+「未编辑文件的内容升级」（文件粒度补缺只解决前者——存量用户的 SKILL.md 本身要从 87 行单体换形为索引）。</dd>
+<dt>Downsides</dt>
+<dd>manifest 自身是新状态文件（损坏/缺失需兜底语义：缺 manifest 视同全部「用户改过」保守不动）；
+比纯文件补缺多一层哈希对账逻辑。被拒的替代：overlay/COW 双层文件系统更优雅但推翻刚 merge 的播种架构、读路径双端全改。</dd>
+</dl>
+<div class="fig">
+<svg viewBox="0 0 640 150" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif" font-size="12">
+  <rect x="10" y="55" width="150" height="40" rx="6" fill="#fff" stroke="#b45309"/>
+  <text x="85" y="79" text-anchor="middle">逐文件对账</text>
+  <line x1="160" y1="75" x2="230" y2="30" stroke="#5b6577" marker-end="url(#ar)"/>
+  <line x1="160" y1="75" x2="230" y2="75" stroke="#5b6577" marker-end="url(#ar)"/>
+  <line x1="160" y1="75" x2="230" y2="120" stroke="#5b6577" marker-end="url(#ar)"/>
+  <rect x="235" y="12" width="180" height="34" rx="6" fill="#f0fdf4" stroke="#0f7b6c"/>
+  <text x="325" y="33" text-anchor="middle">app-data 缺失 → 补播新文件</text>
+  <rect x="235" y="58" width="180" height="34" rx="6" fill="#f0fdf4" stroke="#0f7b6c"/>
+  <text x="325" y="79" text-anchor="middle">哈希==出厂 → 静默更新</text>
+  <rect x="235" y="104" width="180" height="34" rx="6" fill="#fff7ed" stroke="#b45309"/>
+  <text x="325" y="125" text-anchor="middle">用户改过 → 保留不动</text>
+  <rect x="450" y="58" width="180" height="34" rx="6" fill="#fff" stroke="#7c3aed" stroke-dasharray="4 3"/>
+  <text x="540" y="79" text-anchor="middle">重置按钮 = 按 manifest 恢复</text>
+  <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5b6577"/></marker></defs>
+</svg>
+<div class="figcap">dpkg conffile 式三态：新文件可送达、改进可送达、用户编辑不丢</div>
+</div>
+</div>
+
+<div class="idea" id="i2">
+<h3><span class="badges">置信 85% · 复杂度 Medium</span>2. worker 按场景确定性注入：主索引 + 当前场景 reference + 绝对路径表 <span class="axis-chip ax-c">C</span></h3>
+<dl>
+<dt>Description</dt>
+<dd>worker 把目前弃用的 <code>_stageRunnerInput</code> 用起来：按 <code>scenarioConfigId</code> 拼接「主 SKILL.md 索引 + 当前场景 reference」
+单字符串注入（仍走 sentinel 契约）；未知/缺失场景沿 fallback 链回退通用（i18n locale 回退语义，给工业预留现成机制）。
+注入正文末尾由 worker 运行时追加「可用参考文件」绝对路径表（枚举 <code>skillRoot/tsn-topology/references/*.md</code>），
+agent 会话中途需要其他场景时可直接 Read——路径具体到可执行，不靠索引里的相对路径祈祷。</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> agent-adapter.ts:160 → worker:94/376 链路核实（场景 id 已送达、形参弃用）；
+claude-agent-worker.mjs:363 allowedTools 已含 Read；release 下 agent 自行猜路径会读到 Resource 工厂副本
+（与刚修的「反向不同源」bb1e59b 同病）。</dd>
+<dt>Rationale</dt>
+<dd>「全量拼接（为不在场的场景付 token）vs 索引 + 赌 agent 自觉 Read（可靠性）」的两难因前提校正直接消失：
+活跃场景指引确定在场、非活跃场景零 token、注入体积与场景数解耦。绝对路径表堵死拆分后 PR#21 休眠病的复发条件
+（references 默认不在注入路径上）。</dd>
+<dt>Downsides</dt>
+<dd>worker 增加一次目录枚举与场景文件选择逻辑（含 fail-open：场景文件读不到 → 注入索引 + 审计警告）；
+会话中途切场景依赖 agent 主动 Read（小概率路径，可接受）。</dd>
+</dl>
+<div class="fig">
+<svg viewBox="0 0 660 130" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif" font-size="12">
+  <rect x="5" y="45" width="135" height="40" rx="6" fill="#fff" stroke="#1d5fa8"/>
+  <text x="72" y="64" text-anchor="middle">scenarioConfigId</text>
+  <text x="72" y="78" text-anchor="middle" fill="#5b6577" font-size="10">(已在 payload，弃用中)</text>
+  <line x1="140" y1="65" x2="195" y2="65" stroke="#5b6577" marker-end="url(#ar2)"/>
+  <rect x="200" y="20" width="170" height="90" rx="6" fill="#f8fafc" stroke="#7c3aed"/>
+  <text x="285" y="42" text-anchor="middle" font-weight="bold">worker 拼接</text>
+  <text x="285" y="62" text-anchor="middle">索引 + 场景 reference</text>
+  <text x="285" y="80" text-anchor="middle">+ 绝对路径表</text>
+  <text x="285" y="98" text-anchor="middle" fill="#5b6577" font-size="10">单字符串 · sentinel 契约不变</text>
+  <line x1="370" y1="65" x2="425" y2="65" stroke="#5b6577" marker-end="url(#ar2)"/>
+  <rect x="430" y="45" width="100" height="40" rx="6" fill="#fff" stroke="#0f7b6c"/>
+  <text x="480" y="69" text-anchor="middle">system prompt</text>
+  <rect x="545" y="45" width="110" height="40" rx="6" fill="#fff" stroke="#b45309" stroke-dasharray="4 3"/>
+  <text x="600" y="63" text-anchor="middle" font-size="11">其他场景文件</text>
+  <text x="600" y="78" text-anchor="middle" font-size="11">agent 按需 Read</text>
+  <defs><marker id="ar2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5b6577"/></marker></defs>
+</svg>
+<div class="figcap">场景 push 为主、绝对路径 Read 为兜底；工业缺文件沿链回退通用</div>
+</div>
+</div>
+
+<div class="idea" id="i3">
+<h3><span class="badges">置信 85% · 复杂度 Small-Medium</span>3. 内容切分三层判据：协议不变量上移骨架，索引装「背的」，reference 装「翻的」 <span class="axis-chip ax-c">C</span></h3>
+<dl>
+<dt>Description</dt>
+<dd>拆分时按内容性质三层归位，判据各一句话：<b>协议不变量</b>（「不要写 stage-result」「重试逐字节复用」——用户改坏会破坏 worker 对账）
+上移进 <code>SYSTEM_PROMPT_SKELETON</code> 代码常量，脱离可编辑面；<b>主 SKILL.md</b> = agent 调第一个工具之前就必须知道的
+（领域语义表、回复边界、场景路由表）；<b>per-scenario reference</b> = 确定场景之后才消费的（该场景模板选择、推荐参数、规范图 preset）。
+配套一行 UI 标注：Skill 面板每个文件注明消费方式（「每次运行注入」/「按场景注入」/「agent 按需读取」）。</dd>
+<dt>Basis</dt>
+<dd><code>external:</code> 航空 QRH/FCOM 双级体系——memory item（闭卷背诵）vs read-do checklist（翻开照做）的切分准则；
+<code>direct:</code> 现 SKILL.md 87 行中「当前边界/回复边界」（15-22 行等）与「场景决策树/推荐默认」（41-68 行）性质迥异同权限混装，
+骨架常量与 SKILL.md 已存在两处维护同类禁令的漂移。</dd>
+<dt>Rationale</dt>
+<dd>官方 Pattern 2 只给文件结构、没给内容归属判据——没有判据，拆分时每段文字去哪会变成无尽 review 扯皮；
+且只按场景拆会把「用户一改就崩」的协议复制进 3 份 reference，错误面 ×3。这条判据让「可编辑指引事实源」的承诺只覆盖改了也安全的内容。</dd>
+<dt>Downsides</dt>
+<dd>骨架常量扩大意味着这部分指引不再可热编辑（这恰是目的，但要在迁移时逐条确认哪些真是协议、哪些其实是可调指引——错划会把本想让用户调的东西锁死）。</dd>
+</dl>
+<div class="fig">
+<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif" font-size="12">
+  <rect x="10" y="15" width="190" height="90" rx="6" fill="#f1f4f8" stroke="#5b6577"/>
+  <text x="105" y="36" text-anchor="middle" font-weight="bold">骨架（代码常量）</text>
+  <text x="105" y="58" text-anchor="middle">协议不变量</text>
+  <text x="105" y="78" text-anchor="middle" fill="#5b6577" font-size="10.5">改坏会破坏对账 → 不可编辑</text>
+  <rect x="225" y="15" width="190" height="90" rx="6" fill="#fff0e8" stroke="#fa541c"/>
+  <text x="320" y="36" text-anchor="middle" font-weight="bold">主 SKILL.md（索引）</text>
+  <text x="320" y="58" text-anchor="middle">开工前必知 + 场景路由</text>
+  <text x="320" y="78" text-anchor="middle" fill="#5b6577" font-size="10.5">每次运行注入</text>
+  <rect x="440" y="15" width="190" height="90" rx="6" fill="#f0fdf4" stroke="#0f7b6c"/>
+  <text x="535" y="36" text-anchor="middle" font-weight="bold">references/&lt;场景&gt;.md</text>
+  <text x="535" y="58" text-anchor="middle">定场景后才消费</text>
+  <text x="535" y="78" text-anchor="middle" fill="#5b6577" font-size="10.5">按场景注入 / 按需 Read</text>
+</svg>
+<div class="figcap">QRH 准则：背的进脑子（骨架/索引），翻的留手册（reference）</div>
+</div>
+</div>
+
+<div class="idea" id="i4">
+<h3><span class="badges">置信 80% · 复杂度 Medium</span>4. 场景→模板映射机器化：descriptor <code>scenarios</code> 字段 + reference 内命名 preset 表 + 三方对账 lint <span class="axis-chip ax-a">A</span></h3>
+<dl>
+<dt>Description</dt>
+<dd>三件套：① catalog 每个模板 descriptor 加 <code>scenarios</code> 数组（复用既有 tags 机制，多对多天然支持——generic-line 同时属两场景）；
+② per-scenario reference 的主体是命名 preset 表：「规范图 5-1 / 5SW_2NIC」→ {templateId + 完整参数 JSON + 布局说明}——用户说「按图 5-1 来」
+agent 查行照填，规范符合从概率行为变查表；③ verify-skills 加三方对账 lint：reference 引用的 templateId 必须在 catalog、
+声明了场景的模板必须被该场景 reference 承载、场景 reference 文件名 == ScenarioConfigId（工业预留 = 这条命名契约本身，本期零占位文件）。</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> descriptor 已有 tags 数组（topology_compute.rs:109/125/139）但全链路零消费；SKILL.md:12 已确立
+「合法域以 describe_templates 为准」的单源先例——场景适配是同一模式延伸；<code>external:</code> Cisco Validated Designs
+（行业指南 = 场景 reference、公共构件库 = 模板 catalog、named design = preset 行）。</dd>
+<dt>Rationale</dt>
+<dd>映射留在散文里，每加模板/场景就多一处人肉同步且无校验；机器化后「工业场景上线」= 写一个 reference 文件 + 模板打标签，
+agent 一次 describe_templates 同时拿到合法域与场景适配。preset 表同时是「场景下多种拓扑结构」的可枚举落点。</dd>
+<dt>Downsides</dt>
+<dd>preset 放 reference（可编辑、文档化）意味着用户可改坏 preset 参数——由 catalog 参数校验兜底（错参 → requires_clarification，不会静默生成错拓扑）；
+scenarios 字段与 reference 的双向覆盖断言需要 lint 解析 markdown，verify-skills 复杂度上升一档。</dd>
+</dl>
+<div class="fig">
+<svg viewBox="0 0 660 150" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif" font-size="12">
+  <rect x="10" y="20" width="200" height="110" rx="6" fill="#f8fafc" stroke="#1d5fa8"/>
+  <text x="110" y="40" text-anchor="middle" font-weight="bold">Rust catalog</text>
+  <text x="110" y="62" text-anchor="middle" font-size="11">generic-line · scenarios:[通用,宇航]</text>
+  <text x="110" y="80" text-anchor="middle" font-size="11">generic-ring · scenarios:[通用]</text>
+  <text x="110" y="98" text-anchor="middle" font-size="11">dual-plane · scenarios:[宇航]</text>
+  <text x="110" y="118" text-anchor="middle" fill="#5b6577" font-size="10">结构 + 合法域（场景中立构件）</text>
+  <rect x="450" y="20" width="200" height="110" rx="6" fill="#f0fdf4" stroke="#0f7b6c"/>
+  <text x="550" y="40" text-anchor="middle" font-weight="bold">references/aerospace.md</text>
+  <text x="550" y="62" text-anchor="middle" font-size="11">「图 4-5 双跳」→ dual-plane+参数</text>
+  <text x="550" y="80" text-anchor="middle" font-size="11">「图 5-1 五跳」→ line+ends-only</text>
+  <text x="550" y="98" text-anchor="middle" font-size="11">推荐默认 · 场景叙事</text>
+  <text x="550" y="118" text-anchor="middle" fill="#5b6577" font-size="10">命名 preset（CVD 式）</text>
+  <line x1="210" y1="75" x2="450" y2="75" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="330" y="66" text-anchor="middle" fill="#7c3aed" font-size="11.5" font-weight="bold">verify-skills 三方对账 lint</text>
+  <text x="330" y="92" text-anchor="middle" fill="#5b6577" font-size="10.5">templateId 必须存在 · 场景声明必须被承载</text>
+</svg>
+<div class="figcap">结构归 catalog、场景语义归 reference，漂移由闸抓而非人肉</div>
+</div>
+</div>
+
+<div class="idea" id="i5">
+<h3><span class="badges">置信 85% · 复杂度 Medium</span>5. 5 跳线性 = generic-line + <code>endSystemPlacement</code> 参数 + boustrophedon 蛇形布局 <span class="axis-chip ax-b">B</span></h3>
+<dl>
+<dt>Description</dt>
+<dd>不开新模板（遵循 Rejection #1）：generic-line 加可选参数 <code>endSystemPlacement: "per-switch" | "ends-only"</code>
+（缺省 per-switch 全向后兼容），ends-only 时 ES 仅挂链两端。布局不加旋钮：线型族按 switchCount 与画布纵横比的确定性公式
+触发蛇形折叠（boustrophedon——3D 打印 infill / 扫地机覆盖路径的标准算法：固定宽度内回折、行向交替、U 弯换行），
+5 跳折成两行正好对齐规范图 5-1，12 跳自动多折几行。测试关卡先行：5SW_2NIC 确定性坐标快照 + 折返链路 slab 防穿框断言 +
+「对图不对文」校验（直接对照转出的 5-1 png）。宇航归属经 idea 4 的 preset 表达（模板保持场景中立）。</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> generic_distributed_params（topology_compute.rs:198-208）仅三个均匀参数、表达不了仅两端挂载；
+END_SYSTEMS_PER_SWITCH_MIN=1 硬编码均匀挂载假设；<code>external:</code> boustrophedon 覆盖路径分解（确定性蛇形算法，任意长度自适应）。</dd>
+<dt>Rationale</dt>
+<dd>参数化让 line 族复用既有八关卡管线（descriptor→zod→validate→排序规范→确定性测试→validate_intermediate→SKILL→drift 守护）的已付成本；
+蛇形公式一次解决 5 跳和未来任意长链，不为一张图硬编码坐标。被拒的替代：挂载向量新模板（PROFINET 式）与 explicit 模板更通用但 YAGNI——
+显式列表风格已有 dual-plane 承载，真需求出现再升级。</dd>
+<dt>Downsides</dt>
+<dd>generic-line 生成器内出现布局分支（直线 vs 蛇形），确定性测试矩阵增加一档；ends-only 打破「每台 SW 接入数相同」的端口定偏移前提，
+端口分配需改 first-free 游标（dual-plane 已有先例）。折返处节点距离近，标签防撞需复用按侧分层机制。</dd>
+</dl>
+<div class="fig">
+<svg viewBox="0 0 660 170" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif" font-size="12">
+  <rect x="10" y="30" width="70" height="34" rx="6" fill="#fff0e8" stroke="#fa541c"/><text x="45" y="51" text-anchor="middle">E1</text>
+  <rect x="110" y="30" width="70" height="34" rx="6" fill="#f1f4f8" stroke="#334155"/><text x="145" y="51" text-anchor="middle">SW1</text>
+  <rect x="210" y="30" width="70" height="34" rx="6" fill="#f1f4f8" stroke="#334155"/><text x="245" y="51" text-anchor="middle">SW2</text>
+  <rect x="310" y="30" width="70" height="34" rx="6" fill="#f1f4f8" stroke="#334155"/><text x="345" y="51" text-anchor="middle">SW3</text>
+  <rect x="210" y="110" width="70" height="34" rx="6" fill="#f1f4f8" stroke="#334155"/><text x="245" y="131" text-anchor="middle">SW4</text>
+  <rect x="110" y="110" width="70" height="34" rx="6" fill="#f1f4f8" stroke="#334155"/><text x="145" y="131" text-anchor="middle">SW5</text>
+  <rect x="10" y="110" width="70" height="34" rx="6" fill="#fff0e8" stroke="#fa541c"/><text x="45" y="131" text-anchor="middle">E2</text>
+  <line x1="80" y1="47" x2="110" y2="47" stroke="#5b6577"/><line x1="180" y1="47" x2="210" y2="47" stroke="#5b6577"/>
+  <line x1="280" y1="47" x2="310" y2="47" stroke="#5b6577"/>
+  <path d="M345,64 L345,87 L245,87 L245,110" fill="none" stroke="#5b6577"/>
+  <line x1="210" y1="127" x2="180" y2="127" stroke="#5b6577"/><line x1="110" y1="127" x2="80" y2="127" stroke="#5b6577"/>
+  <text x="455" y="55" font-size="11.5" fill="#5b6577">ends-only：ES 仅链两端</text>
+  <text x="455" y="75" font-size="11.5" fill="#5b6577">蛇形：行向交替 + U 弯换行</text>
+  <text x="455" y="95" font-size="11.5" fill="#5b6577">行距沿用 200 / ES_PITCH 180</text>
+  <text x="455" y="115" font-size="11.5" fill="#5b6577">12 跳 → 同一公式自动多行</text>
+</svg>
+<div class="figcap">规范图 5-1 的 S 形即 boustrophedon 公式在 switchCount=5 的取值</div>
+</div>
+</div>
+
+<div class="idea" id="i6">
+<h3><span class="badges">置信 80% · 复杂度 Small-Medium</span>6. 打包链路换整目录映射 + skill 目录纯文本白名单契约（含删 package.json 与残留清理） <span class="axis-chip ax-d">D</span></h3>
+<dl>
+<dt>Description</dt>
+<dd>tauri.conf.json 资源从逐文件映射改为 skills 整目录映射（新增 reference 零 conf 改动）；verify-skills 职责反转：
+「逐文件断言映射」→「目录映射存在 + 文件 git 跟踪 + 正向白名单（skill 目录只允许 SKILL.md 与 references/*.md 文本文件）」；
+commands.rs:805 的逐文件点名断言（package.json 正向断言 + 5 条 legacy 黑名单）整体替换为结构性断言（目录映射存在 + 磁盘无 package.json）。
+顺带清理同类残留：scenario-config.ts 的 defaults.topology 死配置（零消费且已与 SKILL.md 漂移：endSystemsPerSwitch 5 vs 2）。</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> tauri.conf.json:36-41 逐文件映射（:37 即待删的 package.json 行）；verify-skills.mjs:41-52 逐文件断言；
+grep 验证 defaults.topology 零消费方、与 SKILL.md:46 漂移；<code>external:</code> Tauri 2 bundle resources 支持目录映射
+（落地前需 5 分钟核实尾斜杠/递归语义——本 idea 唯一外部不确定点）。</dd>
+<dt>Rationale</dt>
+<dd>本次要删 1 个文件 + 加约 3 个文件，是「每加一个文件交三处同步税」的第一现场；目录映射 + 白名单把整类问题
+（漏映射、悬空映射、误放脚本、二进制混入）一次吃掉，未来 Phase B 各阶段 skill 目录自动继承。逐文件黑名单随历史线性增长且只防已知病。</dd>
+<dt>Downsides</dt>
+<dd>白名单收紧后未来想放合法新类型文件（如 examples/）需改闸规则一次；目录映射语义若与预期不符（不递归等）需回退逐文件并接受同步税。</dd>
+</dl>
+</div>
+
+<div class="idea" id="i7">
+<h3><span class="badges">置信 75% · 复杂度 Medium</span>7. 规范图配置目录 → 表驱动黄金测试管线 <span class="axis-chip ax-b">B</span></h3>
+<dl>
+<dt>Description</dt>
+<dd>把刚入库的 <code>docs/prototypes/典型组网测试配置/</code>（2SW_6NIC / 4SW_4NIC / 5SW_2NIC）变成生成器确定性测试的 fixture 源：
+每张规范图一行表驱动数据（templateId + 参数 + 期望节点数/邻接关系/ES 挂载位置），断言模板输出与规范拓扑同构。
+以后每对标一张新规范图 = 配置进目录 + 表加一行。</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> 三套规范配置已入库（commit 64e0af2）；topology_compute.rs 测试区已有布局断言先例
+（行内间距断言、slab 相交检测、dual_plane spec projection 测试）。</dd>
+<dt>Rationale</dt>
+<dd>「画布对标规范图」目前靠真机肉眼验收（本周成列布局 bug 正是真机才被抓出）；fixture 管线把规范符合性变成回归资产——
+改布局常量时 CI 自动守住已验收图形，工业规范图进来时验收成本近乎为零。</dd>
+<dt>Downsides</dt>
+<dd>规范 json 的 sync_type 码表跨配置不一致（4SW_4NIC 的 type=4 是 SW、5SW_2NIC 的 type=2 是 SW），fixture 解析层要做适配映射；
+同构断言（邻接而非坐标逐点比对）需要一次性设计，避免把手拖过的自由坐标误当规范。</dd>
+</dl>
+</div>
+
+<h2>Rejection Summary</h2>
+<table>
+<tr><th>被拒/合并 idea</th><th>原因</th></tr>
+<tr><td>overlay/COW 双层文件系统取代播种（2 个变体）</td><td>被 #1 manifest 三态替代——更优雅但推翻刚 merge 的播种架构，编辑器/worker 读路径双端全改，性价比低</td></tr>
+<tr><td>纯文件粒度补缺播种（3 个变体）</td><td>并入 #1 为其子集——只解决「新文件送达」，不解决「未编辑文件的内容升级」（SKILL.md 本身要换形为索引）</td></tr>
+<tr><td>纯 pull 注入（索引 + 全靠 agent Read）</td><td>赌 agent 自觉，多一次工具往返且 Read 失败静默降级不可观测；其绝对路径表部分并入 #2</td></tr>
+<tr><td>全量拼接所有 references</td><td>为不在场的场景付 token 且场景间互相干扰；260 行尚可但随 Phase B 各阶段指引线性膨胀</td></tr>
+<tr><td>preset 进 Rust catalog（防误编辑）</td><td>与 boss「场景文档承载」意图相悖；可编辑性即拆分的目的之一，防错由参数校验兜底（#4 采 reference 方案）</td></tr>
+<tr><td>ScenarioConfig 注册表挂 templateIds</td><td>与 descriptor scenarios 字段构成双源——选 catalog 单源（#4），scenario-config 维持 UI 配置职责</td></tr>
+<tr><td>reference frontmatter 即场景注册表</td><td>对账机制并入 #4 的 lint；frontmatter 作注册表会与 scenario-config.ts 形成第二事实源</td></tr>
+<tr><td>多对多「适用关系」独立关系表</td><td>被 #4 preset 表实质吸收（preset 行即关系行）</td></tr>
+<tr><td>linear-chain 挂载向量新模板（PROFINET 式）</td><td>ends-only 枚举已覆盖图 5-1；向量形态 YAGNI，真需求（工业 PROFINET 任意挂载）出现再升级参数形态</td></tr>
+<tr><td>explicit/custom 显式列表通用模板</td><td>显式列表风格已有 dual-plane 承载；为「任意规范图」泛化是 YAGNI，且把布局责任推给 agent 反而降质</td></tr>
+<tr><td>endSystemPlacement 的 per-switch map 形态</td><td>超出图 5-1 需求；二值枚举够用且保留升级空间（map 是其超集，向后兼容可加）</td></tr>
+<tr><td>「布局制度数」模板判据 / S 形几何雷区清单 / 参数化吃三图</td><td>裁决性内容与测试关卡并入 #5 的 rationale 与验收口径</td></tr>
+<tr><td>i18n fallback 链 / QRH 切分判据 / 可编辑性边界 / 运行时路径清单（5 个变体）</td><td>机制与判据分别并入 #2（fallback、路径表）与 #3（内容三层归位）</td></tr>
+<tr><td>describe_templates scenarios 过滤规则 / manifest 审核双向断言 / 场景路由键（4 个变体）</td><td>并入 #4 三件套（字段 + lint + 路由经 #2 注入）</td></tr>
+<tr><td>幽灵 SKILL_IDS 清理</td><td>保留——id-only 预留是仓库既有预留模式（tsn-time-sync/tsn-inet-export 即 Phase B 占位），与工业场景命名契约同构</td></tr>
+<tr><td>Skill 面板消费方式标注</td><td>缩为 #3 的配套一行（独立成项不过会议门槛）</td></tr>
+<tr><td>defaults.topology 升格为机器可读默认源</td><td>反向裁决：它是零消费死配置且形状只能表达 generic 族（dual-plane/5跳塞不进），删除并入 #6；默认值事实源维持 SKILL/reference</td></tr>
+</table>
+
+<footer class="composition-signal">Composed 2026-06-11 by ce-ideate (run a3f7c2e1) · grounding: 仓库扫描 + 既往学习检索 + Agent Skills 官方规范调研 · 48 raw ideas / 6 frames → 7 survivors</footer>
+</body>
+</html>

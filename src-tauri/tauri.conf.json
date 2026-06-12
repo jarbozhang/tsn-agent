@@ -33,9 +33,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../.claude/skills/tsn-topology/SKILL.md": ".claude/skills/tsn-topology/SKILL.md",
-      "../.claude/skills/tsn-topology/package.json": ".claude/skills/tsn-topology/package.json",
-      "../.claude/skills/tsn-flow-planning/SKILL.md": ".claude/skills/tsn-flow-planning/SKILL.md",
+      "../.claude/skills/": ".claude/skills/",
       "../CHANGELOG.md": "CHANGELOG.md",
       "../src-node/dist/claude-agent-worker.mjs": "src-node/claude-agent-worker.mjs"
     },

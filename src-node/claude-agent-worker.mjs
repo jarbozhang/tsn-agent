@@ -1,5 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -46,6 +46,11 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
   const capturedStageResults = [];
   const stageResultPath = resolvedOptions.stageResultPath ?? await createStageResultPath();
   const skillOutputDir = resolvedOptions.skillOutputDir ?? await createSkillOutputDir(stageResultPath);
+  // 同源（R2）：skill 指引读取根优先取 Tauri 决策的有效根（payload skillRoot，
+  // release 下指向 app-data 播种副本），缺省回退 cwd 下仓库/资源路径。
+  const skillRoot = typeof resolvedOptions.skillRoot === "string" && resolvedOptions.skillRoot.length > 0
+    ? resolvedOptions.skillRoot
+    : join(cwd, ".claude", "skills");
   const topologyMcpServerPath = resolvedOptions.topologyMcpServerPath ?? resolveTopologyMcpServerPath(cwd);
   // Plan v3 U4b + Spike B：MCP child env 必须显式声明（Node child_process.spawn
   // 显式 env 字段语义是 REPLACE 不是 merge）；CLAUDECODE 必须不带过去防嵌套
@@ -86,7 +91,8 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
       }
     : undefined;
   const stageRunnerInputPath = await writeStageRunnerInputFile(stageResultPath, resolvedOptions.stageRunnerInput);
-  const { systemPrompt, skillReadWarning } = await buildSystemPromptForStage(resolvedOptions.stageRunnerInput, cwd);
+  const { systemPrompt, skillReadWarning, scenarioReference, scenarioReferenceWarning } =
+    await buildSystemPromptForStage(resolvedOptions.stageRunnerInput, skillRoot);
   const finalPrompt = buildPrompt(
     userPrompt,
     resolvedOptions.conversationContext,
@@ -128,6 +134,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     appSessionId: resolvedOptions.appSessionId,
     runId: resolvedOptions.runId,
     cwd,
+    skillRoot,
     userPrompt,
     prompt: finalPrompt,
     conversationContext: resolvedOptions.conversationContext,
@@ -136,9 +143,13 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     stageResultPath,
     skillOutputDir,
     sdkOptions,
+    scenarioReference,
   });
   if (skillReadWarning) {
     recordAuditTimeline(auditLog, skillReadWarning);
+  }
+  if (scenarioReferenceWarning) {
+    recordAuditTimeline(auditLog, scenarioReferenceWarning);
   }
   let currentPromptRunId = "initial";
   const handleSdkMessage = (message) => {
@@ -362,19 +373,25 @@ function buildAllowedToolsForStage(_stageRunnerInput, hasTopologyMcpConfig) {
 
 // system prompt 骨架：仅守安全/正确性约束（必走 MCP、固定阶段顺序、不自编拓扑
 // JSON、不写 stage-result、无仿真 runner），领域指引由注入的 SKILL.md 承载。
-const SYSTEM_PROMPT_SKELETON = "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。工程状态只接受结构化校验结果。拓扑初始化、校验、artifact 构建、inspect 和 apply_operations 必须通过 tsn_topology MCP 工具调用 sidecar，所有工具结果都已是结构化领域响应。artifact、端口表、MAC 表和完整 changeSet 不得再在自然语言里复述。不要写 TSN_AGENT_STAGE_RESULT_PATH，不要用自然语言重新构建拓扑。固定阶段顺序是拓扑、时间同步、流量规划、模拟仿真；拓扑确认后必须进入时间同步。当前应用没有接入 OMNeT++/远程仿真 runner，不能声称已启动仿真、SSH 执行或稍后通知结果。已有拓扑用 tsn_topology inspect + apply_operations 增量编辑，initialize 仅用于从 0 生成或换模板（误用会整表重排已确认拓扑）。";
+// R4/KTD8：协议不变量（用户改坏会破坏对账/产生数据损坏的规则）全部收口在此，
+// 不进可编辑 skill 文件。迁移自 SKILL.md：①initialize 后不复检 validate；
+// ②apply_operations 超时重试逐字节复用（重新分配 linkSeq 会产生重复平行链路）。
+const SYSTEM_PROMPT_SKELETON = "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。工程状态只接受结构化校验结果。拓扑初始化、校验、artifact 构建、inspect 和 apply_operations 必须通过 tsn_topology MCP 工具调用 sidecar，所有工具结果都已是结构化领域响应。artifact、端口表、MAC 表和完整 changeSet 不得再在自然语言里复述。不要写 TSN_AGENT_STAGE_RESULT_PATH，不要用自然语言重新构建拓扑。固定阶段顺序是拓扑、时间同步、流量规划、模拟仿真；拓扑确认后必须进入时间同步。当前应用没有接入 OMNeT++/远程仿真 runner，不能声称已启动仿真、SSH 执行或稍后通知结果。已有拓扑用 tsn_topology inspect + apply_operations 增量编辑，initialize 仅用于从 0 生成或换模板（误用会整表重排已确认拓扑）。initialize 已内置结构校验并落库，之后不要再调用 topology_validate 复检（它只接受完整拓扑 JSON，不接受 mutationId）。apply_operations 超时重试时逐字节复用上一次的同一 operations（相同 imac/linkSeq），不要重新分配——重新分配 linkSeq 会产生重复的平行链路。最终工程状态只接受应用层合成的结构化结果，不要自行编写 stage result。";
 
 // SKILL.md 正文每次运行注入骨架之后，用固定 sentinel 分隔，便于切分骨架段与注入段。
 const SKILL_GUIDANCE_SENTINEL = "<<<SKILL_GUIDANCE>>>";
+// R6：场景 reference 注入段的第二 sentinel（骨架 → 索引 → 场景 reference）。
+// 注入保持单字符串拼接——string[] 形态会崩 redactSecrets。
+const SCENARIO_REFERENCE_SENTINEL = "<<<SCENARIO_REFERENCE>>>";
+// 未知/缺失场景回退到通用场景（与 SKILL.md 场景路由表一致）。
+const FALLBACK_SCENARIO_ID = "generic-tsn";
 
-async function buildSystemPromptForStage(_stageRunnerInput, cwd) {
-  const skillPath = join(cwd, ".claude", "skills", "tsn-topology", "SKILL.md");
+async function buildSystemPromptForStage(stageRunnerInput, skillRoot) {
+  const skillPath = join(skillRoot, "tsn-topology", "SKILL.md");
 
+  let guidance;
   try {
-    const guidance = await readFile(skillPath, "utf8");
-    return {
-      systemPrompt: `${SYSTEM_PROMPT_SKELETON}\n\n${SKILL_GUIDANCE_SENTINEL}\n${guidance}`,
-    };
+    guidance = await readFile(skillPath, "utf8");
   } catch (error) {
     return {
       systemPrompt: SYSTEM_PROMPT_SKELETON,
@@ -386,6 +403,89 @@ async function buildSystemPromptForStage(_stageRunnerInput, cwd) {
       },
     };
   }
+
+  // R6 按场景确定性注入：requested 场景 reference → 回退 generic-tsn → 仅索引。
+  // 全链 fail-open：reference 缺失降级注入，不阻断运行。
+  const referenceDir = join(skillRoot, "tsn-topology", "references");
+  const requestedScenario =
+    typeof stageRunnerInput?.scenarioConfigId === "string" && stageRunnerInput.scenarioConfigId.length > 0
+      ? stageRunnerInput.scenarioConfigId
+      : null;
+  // 场景 id 进文件路径前做格式校验：畸形值（如含 ../ 的路径遍历）按未知场景
+  // 走 generic-tsn 回退，不参与 join。
+  const isSafeScenarioId = requestedScenario !== null && /^[a-z0-9][a-z0-9-]*$/.test(requestedScenario);
+  const candidates = isSafeScenarioId && requestedScenario !== FALLBACK_SCENARIO_ID
+    ? [requestedScenario, FALLBACK_SCENARIO_ID]
+    : [FALLBACK_SCENARIO_ID];
+
+  let referenceBody = null;
+  let resolvedScenario = null;
+  const referenceReadErrors = [];
+  for (const scenario of candidates) {
+    try {
+      referenceBody = await readFile(join(referenceDir, `${scenario}.md`), "utf8");
+      resolvedScenario = scenario;
+      break;
+    } catch (error) {
+      // 逐级降级：记录失败原因供审计，尝试下一个候选。
+      referenceReadErrors.push({ scenario, error: normalizeError(error) });
+    }
+  }
+
+  // 审计字段：真机排查「agent 拿到的是哪个场景指引」直接看此对象。
+  const scenarioReference = {
+    requestedScenario,
+    resolvedScenario,
+    referencePath: resolvedScenario ? join(referenceDir, `${resolvedScenario}.md`) : null,
+    fallback: resolvedScenario !== null && resolvedScenario !== requestedScenario,
+  };
+  // 降级路径产生 timeline 事件（与 skillReadWarning 同管道）：reference 全缺是
+  // 播种半失败的典型症状，仅靠审计头字段排查不醒目。
+  const scenarioReferenceWarning = referenceBody === null
+    ? {
+        type: "skill_reference_unavailable",
+        level: "warn",
+        requestedScenario,
+        referenceDir,
+        errors: referenceReadErrors,
+      }
+    : scenarioReference.fallback
+      ? {
+          type: "skill_reference_fallback",
+          level: "info",
+          requestedScenario,
+          resolvedScenario,
+          errors: referenceReadErrors,
+        }
+      : undefined;
+
+  if (referenceBody === null) {
+    return {
+      systemPrompt: `${SYSTEM_PROMPT_SKELETON}\n\n${SKILL_GUIDANCE_SENTINEL}\n${guidance}`,
+      scenarioReference,
+      scenarioReferenceWarning,
+    };
+  }
+
+  // 可用参考文件绝对路径表：其余场景按需用 Read 查阅（SKILL.md 场景路由所述）。
+  let referenceListing = [];
+  try {
+    referenceListing = (await readdir(referenceDir))
+      .filter((name) => name.endsWith(".md"))
+      .sort()
+      .map((name) => `- ${name.replace(/\.md$/, "")}: ${join(referenceDir, name)}`);
+  } catch {
+    // 目录列举失败不阻断注入。
+  }
+  const pathTable = referenceListing.length > 0
+    ? `\n\n可用参考文件（其余场景用 Read 工具按绝对路径查阅）：\n${referenceListing.join("\n")}`
+    : "";
+
+  return {
+    systemPrompt: `${SYSTEM_PROMPT_SKELETON}\n\n${SKILL_GUIDANCE_SENTINEL}\n${guidance}\n\n${SCENARIO_REFERENCE_SENTINEL}\n${referenceBody}${pathTable}`,
+    scenarioReference,
+    scenarioReferenceWarning,
+  };
 }
 
 export function buildPrompt(
@@ -505,6 +605,10 @@ async function createAgentRunAuditLog(input) {
         conversationContext: input.conversationContext,
       }),
       cwd: input.cwd,
+      // skill 指引实际读取根（真机排查「agent 用的指引对不对」直接看此字段）。
+      skillRoot: input.skillRoot ?? null,
+      // 场景 reference 注入结果（requested/resolved/fallback，R6 审计）。
+      scenarioReference: input.scenarioReference ?? null,
       prompt: redactSecrets(input.prompt),
       userPrompt: redactSecrets(input.userPrompt),
       conversationContext: typeof input.conversationContext === "string" ? redactSecrets(input.conversationContext) : null,
@@ -1467,6 +1571,7 @@ export async function runWorker(rawInput) {
     appSessionId: typeof input.appSessionId === "string" ? input.appSessionId : undefined,
     runId: typeof input.runId === "string" ? input.runId : undefined,
     auditDir: typeof input.auditDir === "string" ? input.auditDir : undefined,
+    skillRoot: typeof input.skillRoot === "string" ? input.skillRoot : undefined,
     onEvent: (event) => {
       if (typeof input.runId !== "string" || !input.runId) {
         return;

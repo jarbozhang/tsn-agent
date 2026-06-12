@@ -36,9 +36,14 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.describe_templates",
       allowedToolName: "mcp__tsn_topology__topology_describe_templates",
       title: "Describe topology templates",
-      description: "Return the deterministic P0 topology template catalog.",
-      inputSchema: {},
-      handler: async (args) => callSidecarTool("/db/topology/describe_templates", args, {}),
+      description: "Return the deterministic P0 topology template catalog. Pass scenario to filter templates applicable to the active scenario; omit for the full catalog.",
+      inputSchema: {
+        scenario: z.string().optional(),
+      },
+      // 注意：body 须显式转发 scenario——callSidecarTool 第三参才是发往 sidecar 的 body。
+      handler: async (args) => callSidecarTool("/db/topology/describe_templates", args, {
+        scenario: pickString(args, "scenario"),
+      }),
     },
     {
       name: "topology.initialize",
@@ -82,7 +87,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       allowedToolName: "mcp__tsn_topology__topology_validate",
       title: "Validate intermediate topology",
       description:
-        "Validate a FULL IntermediateTopology JSON (must include schemaVersion/nodes/links) and return structured errors. "
+        "Validate a full topology draft JSON (must include schemaVersion/nodes/links) and return structured errors. "
         + "Do NOT call this after topology.initialize: initialize already validates and persists, and its return "
         + "(mutationId/summary) is not a topology. Use topology.inspect to read persisted rows.",
       inputSchema: {
@@ -398,6 +403,9 @@ export function initializeInputSchema(): z.ZodRawShape {
         switchCount: z.number().int().min(1).max(12).optional(),
         endSystemsPerSwitch: z.number().int().min(1).max(24).optional(),
         dataRateMbps: z.number().int().optional(),
+        // R10：ends-only 仅 generic-line 支持且 endSystemsPerSwitch 必须为 1——
+        // 语义约束由 Rust 校验给出精确错误，zod 只收窄枚举形态。
+        endSystemPlacement: z.enum(["per-switch", "ends-only"]).optional(),
       }).strict(),
       dualPlaneParamsSchema,
     ]).optional(),
