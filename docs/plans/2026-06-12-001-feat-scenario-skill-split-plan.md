@@ -1,7 +1,7 @@
 ---
 title: "feat: 场景体系 + skill 按场景拆分 + 5 跳线性拓扑"
 type: feat
-status: active
+status: completed
 date: 2026-06-12
 origin: docs/brainstorms/2026-06-12-scenario-skill-split-requirements.md
 ---
