@@ -210,6 +210,108 @@ describe("claude-agent-worker", () => {
     expect(capturedSystemPrompt).toContain("工程状态只接受结构化校验结果");
   });
 
+  // R6 按场景确定性注入：骨架 → <<<SKILL_GUIDANCE>>> 索引 → <<<SCENARIO_REFERENCE>>> 场景 reference。
+  async function makeScenarioSkillRoot({ scenarios = {} } = {}) {
+    const rootDir = await mkdtemp(join(tmpdir(), "tsn-agent-scenario-root-"));
+    const skillDir = join(rootDir, "tsn-topology");
+    const referenceDir = join(skillDir, "references");
+    await mkdir(referenceDir, { recursive: true });
+    await writeFile(join(skillDir, "SKILL.md"), "[INDEX-PROBE] 主索引正文", "utf8");
+    for (const [scenarioId, body] of Object.entries(scenarios)) {
+      await writeFile(join(referenceDir, `${scenarioId}.md`), body, "utf8");
+    }
+    return { rootDir, referenceDir };
+  }
+
+  async function captureScenarioPrompt(skillRoot, stageRunnerInput) {
+    let capturedSystemPrompt;
+    const query = async function* (input) {
+      capturedSystemPrompt = input.options.systemPrompt;
+      yield { type: "result", structured_output: { assistantText: "ok" } };
+    };
+    await runClaude("我需要4个交换机", { cwd: "/tmp/project", skillRoot, stageRunnerInput }, query);
+    return capturedSystemPrompt;
+  }
+
+  it("injects the matching scenario reference after the scenario sentinel", async () => {
+    const { rootDir, referenceDir } = await makeScenarioSkillRoot({
+      scenarios: {
+        "generic-tsn": "[REF-GENERIC] 通用指引",
+        "aerospace-onboard": "[REF-AEROSPACE] 宇航指引",
+      },
+    });
+
+    const prompt = await captureScenarioPrompt(rootDir, {
+      userIntent: "x",
+      stage: "topology",
+      scenarioConfigId: "aerospace-onboard",
+    });
+
+    const [head, scenarioSegment] = prompt.split("<<<SCENARIO_REFERENCE>>>");
+    expect(head).toContain("[INDEX-PROBE] 主索引正文");
+    expect(scenarioSegment).toContain("[REF-AEROSPACE] 宇航指引");
+    expect(scenarioSegment).not.toContain("[REF-GENERIC]");
+    // 绝对路径表列出全部场景文件，供 Read 跨场景查阅。
+    expect(scenarioSegment).toContain(join(referenceDir, "generic-tsn.md"));
+    expect(scenarioSegment).toContain(join(referenceDir, "aerospace-onboard.md"));
+  });
+
+  it("injects the generic reference for the generic scenario", async () => {
+    const { rootDir } = await makeScenarioSkillRoot({
+      scenarios: {
+        "generic-tsn": "[REF-GENERIC] 通用指引",
+        "aerospace-onboard": "[REF-AEROSPACE] 宇航指引",
+      },
+    });
+
+    const prompt = await captureScenarioPrompt(rootDir, {
+      userIntent: "x",
+      stage: "topology",
+      scenarioConfigId: "generic-tsn",
+    });
+
+    const scenarioSegment = prompt.split("<<<SCENARIO_REFERENCE>>>")[1];
+    expect(scenarioSegment).toContain("[REF-GENERIC] 通用指引");
+    expect(scenarioSegment).not.toContain("[REF-AEROSPACE]");
+  });
+
+  it("falls back to the generic reference for an unknown scenario", async () => {
+    const { rootDir } = await makeScenarioSkillRoot({
+      scenarios: { "generic-tsn": "[REF-GENERIC] 通用指引" },
+    });
+
+    const prompt = await captureScenarioPrompt(rootDir, {
+      userIntent: "x",
+      stage: "topology",
+      scenarioConfigId: "industrial-future",
+    });
+
+    expect(prompt.split("<<<SCENARIO_REFERENCE>>>")[1]).toContain("[REF-GENERIC] 通用指引");
+  });
+
+  it("treats a missing scenarioConfigId as the generic scenario", async () => {
+    const { rootDir } = await makeScenarioSkillRoot({
+      scenarios: { "generic-tsn": "[REF-GENERIC] 通用指引" },
+    });
+
+    const prompt = await captureScenarioPrompt(rootDir, { userIntent: "x", stage: "topology" });
+
+    expect(prompt.split("<<<SCENARIO_REFERENCE>>>")[1]).toContain("[REF-GENERIC] 通用指引");
+  });
+
+  it("injects only the index when no scenario reference is on disk", async () => {
+    const { rootDir } = await makeScenarioSkillRoot();
+
+    const prompt = await captureScenarioPrompt(rootDir, {
+      userIntent: "x",
+      stage: "topology",
+      scenarioConfigId: "aerospace-onboard",
+    });
+
+    expect(prompt).toContain("[INDEX-PROBE] 主索引正文");
+    expect(prompt).not.toContain("<<<SCENARIO_REFERENCE>>>");
+  });
+
   it("does not synthesize a topology stage result from assistant-authored topology JSON without an MCP tool call", () => {
     // 机制层 AE3：agent 在 assistantText 里输出整份拓扑 JSON、不调任何 MCP 工具，
     // trusted-signal 提取器只认 MCP tool_result 的 mutationId → 返回空。
