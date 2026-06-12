@@ -798,26 +798,37 @@ mod tests {
     #[test]
     fn tauri_bundle_includes_all_stage_skill_resources() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir.parent().expect("repo root");
         let tauri_config_path = manifest_dir.join("tauri.conf.json");
-        let tauri_config = std::fs::read_to_string(tauri_config_path).expect("tauri config");
+        let tauri_config: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(tauri_config_path).expect("tauri config"))
+                .expect("tauri config json");
 
-        assert!(tauri_config.contains("../.claude/skills/tsn-topology/SKILL.md"));
-        assert!(tauri_config.contains("../.claude/skills/tsn-topology/package.json"));
-        assert!(tauri_config.contains("../.claude/skills/tsn-flow-planning/SKILL.md"));
-        // rules.md 已并入 SKILL.md 并删除，不应再打包。
-        assert!(!tauri_config.contains("../.claude/skills/tsn-topology/docs/rules.md"));
-        // legacy builder 脚本闭包已下线，不应再打包（topology 参数事实源收口）。
-        assert!(!tauri_config.contains("../.claude/skills/tsn-topology/tools/topology-builder.js"));
-        assert!(
-            !tauri_config.contains("../.claude/skills/tsn-topology/tools/run-topology-skill.js")
+        // skills 走整目录映射（R13）：新增 reference 不需要逐文件登记。
+        let resources = tauri_config["bundle"]["resources"]
+            .as_object()
+            .expect("bundle resources map");
+        assert_eq!(
+            resources.get("../.claude/skills/").and_then(|v| v.as_str()),
+            Some(".claude/skills/")
         );
-        assert!(!tauri_config.contains("../.claude/skills/tsn-topology/tools/validate-topology.js"));
-        assert!(!tauri_config
-            .contains("../.claude/skills/tsn-topology/tools/validate-mac-forwarding-table.js"));
-        assert!(!tauri_config.contains(
-            "../.claude/skills/tsn-topology/tools/render-mac-forwarding-html.js"
-        ));
-        assert!(!tauri_config.contains("../src-node/dist/tsn-topology-server.mjs"));
+        for source in resources.keys() {
+            assert!(
+                !source.starts_with("../.claude/skills/tsn-"),
+                "stale per-file skill mapping: {source}"
+            );
+        }
+
+        // package.json 已出厂移除（R1a），磁盘上不得回潮。
+        assert!(!repo_root.join(".claude/skills/tsn-topology/package.json").exists());
+        // 场景 reference 必须真实存在，目录映射才有内容可打包。
+        assert!(repo_root
+            .join(".claude/skills/tsn-topology/references/generic-tsn.md")
+            .exists());
+        assert!(repo_root
+            .join(".claude/skills/tsn-topology/references/aerospace-onboard.md")
+            .exists());
+        assert!(!tauri_config.to_string().contains("../src-node/dist/tsn-topology-server.mjs"));
     }
 
     #[test]

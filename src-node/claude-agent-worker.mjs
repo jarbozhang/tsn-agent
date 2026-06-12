@@ -368,7 +368,10 @@ function buildAllowedToolsForStage(_stageRunnerInput, hasTopologyMcpConfig) {
 
 // system prompt 骨架：仅守安全/正确性约束（必走 MCP、固定阶段顺序、不自编拓扑
 // JSON、不写 stage-result、无仿真 runner），领域指引由注入的 SKILL.md 承载。
-const SYSTEM_PROMPT_SKELETON = "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。工程状态只接受结构化校验结果。拓扑初始化、校验、artifact 构建、inspect 和 apply_operations 必须通过 tsn_topology MCP 工具调用 sidecar，所有工具结果都已是结构化领域响应。artifact、端口表、MAC 表和完整 changeSet 不得再在自然语言里复述。不要写 TSN_AGENT_STAGE_RESULT_PATH，不要用自然语言重新构建拓扑。固定阶段顺序是拓扑、时间同步、流量规划、模拟仿真；拓扑确认后必须进入时间同步。当前应用没有接入 OMNeT++/远程仿真 runner，不能声称已启动仿真、SSH 执行或稍后通知结果。已有拓扑用 tsn_topology inspect + apply_operations 增量编辑，initialize 仅用于从 0 生成或换模板（误用会整表重排已确认拓扑）。";
+// R4/KTD8：协议不变量（用户改坏会破坏对账/产生数据损坏的规则）全部收口在此，
+// 不进可编辑 skill 文件。迁移自 SKILL.md：①initialize 后不复检 validate；
+// ②apply_operations 超时重试逐字节复用（重新分配 linkSeq 会产生重复平行链路）。
+const SYSTEM_PROMPT_SKELETON = "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。工程状态只接受结构化校验结果。拓扑初始化、校验、artifact 构建、inspect 和 apply_operations 必须通过 tsn_topology MCP 工具调用 sidecar，所有工具结果都已是结构化领域响应。artifact、端口表、MAC 表和完整 changeSet 不得再在自然语言里复述。不要写 TSN_AGENT_STAGE_RESULT_PATH，不要用自然语言重新构建拓扑。固定阶段顺序是拓扑、时间同步、流量规划、模拟仿真；拓扑确认后必须进入时间同步。当前应用没有接入 OMNeT++/远程仿真 runner，不能声称已启动仿真、SSH 执行或稍后通知结果。已有拓扑用 tsn_topology inspect + apply_operations 增量编辑，initialize 仅用于从 0 生成或换模板（误用会整表重排已确认拓扑）。initialize 已内置结构校验并落库，之后不要再调用 topology_validate 复检（它只接受完整拓扑 JSON，不接受 mutationId）。apply_operations 超时重试时逐字节复用上一次的同一 operations（相同 imac/linkSeq），不要重新分配——重新分配 linkSeq 会产生重复的平行链路。最终工程状态只接受应用层合成的结构化结果，不要自行编写 stage result。";
 
 // SKILL.md 正文每次运行注入骨架之后，用固定 sentinel 分隔，便于切分骨架段与注入段。
 const SKILL_GUIDANCE_SENTINEL = "<<<SKILL_GUIDANCE>>>";

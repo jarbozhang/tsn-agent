@@ -1,3 +1,9 @@
+// skill 构建闸（build:worker 前置）。职责（plan 2026-06-12-001 U7/R9/R13）：
+// ① skills 整目录资源映射存在（per-file 映射税已移除——新增 reference 零打包配置改动）；
+// ② skill 目录纯文本白名单（只允许 SKILL.md 与 references/*.md，防脚本/二进制/残留回流）；
+// ③ frontmatter / worker 声明 / git 跟踪既有校验保留；
+// ④ R9 三方对账：reference 文件名 == 已注册 ScenarioConfigId；preset 表 `templateId`
+//    必须存在于 Rust catalog；声明了场景的模板必须在该场景 reference 的 preset 表有行。
 import { access, readdir, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { execFile } from "node:child_process";
@@ -5,6 +11,8 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const skillRoot = ".claude/skills";
+const DIRECTORY_RESOURCE_SOURCE = "../.claude/skills/";
+const DIRECTORY_RESOURCE_TARGET = ".claude/skills/";
 
 async function main() {
   const skillNames = await listProjectSkills();
@@ -19,6 +27,16 @@ async function main() {
 
   if (!workerAllowsSkill(workerSource)) {
     errors.push("src-node/claude-agent-worker.mjs must allow the Skill tool when project skills are configured.");
+  }
+
+  // ① 整目录映射（R13）：单条目覆盖全部 skill 文件，悬空 per-file 映射不允许残留。
+  if (resources[DIRECTORY_RESOURCE_SOURCE] !== DIRECTORY_RESOURCE_TARGET) {
+    errors.push(`src-tauri/tauri.conf.json must map "${DIRECTORY_RESOURCE_SOURCE}" to "${DIRECTORY_RESOURCE_TARGET}".`);
+  }
+  for (const source of Object.keys(resources)) {
+    if (source !== DIRECTORY_RESOURCE_SOURCE && source.startsWith("../.claude/skills/")) {
+      errors.push(`src-tauri/tauri.conf.json has a stale per-file skill mapping "${source}"; the directory mapping covers it.`);
+    }
   }
 
   for (const skillName of skillNames) {
@@ -40,10 +58,11 @@ async function main() {
 
     const skillFiles = await listSkillFiles(`${skillRoot}/${skillName}`);
     for (const filePath of skillFiles) {
-      const resourceSource = `../${filePath}`;
-      const resourceTarget = `${filePath}`;
-      if (resources[resourceSource] !== resourceTarget) {
-        errors.push(`src-tauri/tauri.conf.json must map "${resourceSource}" to "${resourceTarget}".`);
+      // ② 纯文本白名单：skill 目录只允许 SKILL.md 与 references/*.md。
+      const relative = filePath.slice(`${skillRoot}/${skillName}/`.length);
+      const allowed = relative === "SKILL.md" || /^references\/[^/]+\.md$/.test(relative);
+      if (!allowed) {
+        errors.push(`${filePath} is not allowed; skill directories may only contain SKILL.md and references/*.md.`);
       }
 
       if (await isGitIgnored(filePath)) {
@@ -51,6 +70,9 @@ async function main() {
       }
     }
   }
+
+  // ④ R9 三方对账（tsn-topology 场景体系）。
+  errors.push(...await verifyScenarioAccounting());
 
   if (errors.length > 0) {
     for (const error of errors) {
@@ -61,6 +83,124 @@ async function main() {
   }
 
   console.log(`verify:skills: ${skillNames.join(", ")} ok`);
+}
+
+// R9 对账：catalog（Rust 源，KTD7 防过匹配锚点）↔ scenario-config.ts ↔ references。
+async function verifyScenarioAccounting() {
+  const errors = [];
+  const rustSource = await readFile("src-tauri/src/topology_compute.rs", "utf8");
+  const scenarioSource = await readFile("src/domain/scenario-config.ts", "utf8");
+
+  // 模板目录成员锚点：describe_templates_catalog_filtered 的 `let all = [...]`
+  // descriptor 函数清单（templateIds 是运行时计算值，源码无字面量数组可锚）。
+  const allMatch = rustSource.match(/let all = \[([\s\S]*?)\];/);
+  const descriptorFns = allMatch
+    ? [...allMatch[1].matchAll(/(\w+_descriptor)\(\)/g)].map((m) => m[1])
+    : [];
+  if (descriptorFns.length === 0) {
+    errors.push("topology_compute.rs `let all = [...]` descriptor anchor extracted no entries; update verify-skills anchors.");
+    return errors;
+  }
+
+  // 每个 descriptor 函数块取首个 "id"（descriptor 自身 id 是 json! 首字段，
+  // 先于 example 内嵌的伪 id）与首个 "scenarios"。不全文裸匹配 "id"——
+  // dual-plane example 内嵌十余个伪 id，裸锚点会静默放绿。
+  const templateScenarios = new Map();
+  for (const fnName of descriptorFns) {
+    const fnStart = rustSource.indexOf(`fn ${fnName}() -> Value {`);
+    if (fnStart === -1) {
+      errors.push(`descriptor function "${fnName}" referenced by catalog but not found; update verify-skills anchors.`);
+      continue;
+    }
+    const nextFn = rustSource.indexOf("\nfn ", fnStart + 1);
+    const block = rustSource.slice(fnStart, nextFn === -1 ? rustSource.length : nextFn);
+    const idMatch = block.match(/"id":\s*"([^"]+)"/);
+    const scenariosMatch = block.match(/"scenarios":\s*\[([^\]]*)\]/);
+    if (!idMatch) {
+      errors.push(`descriptor "${fnName}" has no "id" field; update verify-skills anchors.`);
+      continue;
+    }
+    const scenarios = scenariosMatch
+      ? [...scenariosMatch[1].matchAll(/"([^"]+)"/g)].map((m) => m[1])
+      : [];
+    templateScenarios.set(idMatch[1], scenarios);
+  }
+  const templateIds = [...templateScenarios.keys()];
+  if (templateIds.length !== descriptorFns.length) {
+    errors.push(`scenario accounting extracted ${templateIds.length} descriptors (expected ${descriptorFns.length}); update verify-skills anchors.`);
+    return errors;
+  }
+  for (const [templateId, scenarios] of templateScenarios) {
+    if (scenarios.length === 0) {
+      errors.push(`template "${templateId}" must declare a non-empty scenarios list in topology_compute.rs.`);
+    }
+  }
+
+  // 已注册场景 id：ScenarioConfigId union 单行锚点。
+  const unionMatch = scenarioSource.match(/export type ScenarioConfigId\s*=\s*([^;]+);/);
+  const scenarioIds = unionMatch
+    ? [...unionMatch[1].matchAll(/"([^"]+)"/g)].map((m) => m[1])
+    : [];
+  if (scenarioIds.length === 0) {
+    errors.push("scenario-config.ts ScenarioConfigId anchor extracted no ids; update verify-skills anchors.");
+    return errors;
+  }
+
+  // reference 文件名 == 已注册 ScenarioConfigId；每个被声明的场景必须有 reference。
+  const referenceDir = `${skillRoot}/tsn-topology/references`;
+  let referenceFiles = [];
+  try {
+    referenceFiles = (await readdir(referenceDir)).filter((name) => name.endsWith(".md"));
+  } catch {
+    errors.push(`${referenceDir} must exist with per-scenario reference files.`);
+    return errors;
+  }
+  for (const file of referenceFiles) {
+    const scenarioId = file.replace(/\.md$/, "");
+    if (!scenarioIds.includes(scenarioId)) {
+      errors.push(`${referenceDir}/${file} does not match any registered ScenarioConfigId (${scenarioIds.join(", ")}).`);
+    }
+  }
+
+  // preset 表 `templateId` 锚点：markdown 表格行内反引号代码字段。
+  const presetTemplateIdsByScenario = new Map();
+  for (const file of referenceFiles) {
+    const content = await readFile(`${referenceDir}/${file}`, "utf8");
+    const ids = new Set();
+    for (const line of content.split(/\r?\n/)) {
+      if (!line.trimStart().startsWith("|")) {
+        continue;
+      }
+      for (const match of line.matchAll(/`([a-z0-9-]+)`/g)) {
+        ids.add(match[1]);
+      }
+    }
+    presetTemplateIdsByScenario.set(file.replace(/\.md$/, ""), ids);
+
+    for (const id of ids) {
+      if (id.startsWith("generic-") || id.startsWith("dual-")) {
+        if (!templateIds.includes(id)) {
+          errors.push(`${referenceDir}/${file} references unknown templateId \`${id}\` (catalog: ${templateIds.join(", ")}).`);
+        }
+      }
+    }
+  }
+
+  // 声明了场景的模板必须被该场景 reference 的 preset 表承载。
+  for (const [templateId, scenarios] of templateScenarios) {
+    for (const scenario of scenarios) {
+      const presetIds = presetTemplateIdsByScenario.get(scenario);
+      if (!presetIds) {
+        errors.push(`template "${templateId}" declares scenario "${scenario}" but ${referenceDir}/${scenario}.md is missing.`);
+        continue;
+      }
+      if (!presetIds.has(templateId)) {
+        errors.push(`template "${templateId}" declares scenario "${scenario}" but ${referenceDir}/${scenario}.md has no preset row for it.`);
+      }
+    }
+  }
+
+  return errors;
 }
 
 async function listSkillFiles(skillDir) {
