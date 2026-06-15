@@ -4,6 +4,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { TOPOLOGY_TOOL_NAMES } from "../../src/topology/topology-service";
 
 // Plan v3 U4b complete: 所有 handler 走 sidecar HTTP；测试 hoist mock fetchSidecar
@@ -458,7 +459,7 @@ describe("topology MCP tool registry", () => {
     await writeFile(fixturePath, "", "utf8");
 
     try {
-      expect(isCliEntrypoint(fixturePath, new URL(fixturePath, "file:").href)).toBe(true);
+      expect(isCliEntrypoint(fixturePath, pathToFileURL(fixturePath).href)).toBe(true);
     } finally {
       await rm(fixtureDir, { recursive: true, force: true });
     }
