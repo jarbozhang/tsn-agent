@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation: TSN Agent harness 选型 — 替代 Claude Code</title>
+<style>
+  :root{
+    --bg:#f7f6f3; --surface:#fffdf9; --ink:#23211c; --muted:#6b6760;
+    --line:#e4e0d7; --accent:#9a5b2e; --accent-soft:#f3e7da;
+    --good:#3f6f4a; --good-soft:#e4efe6; --warn:#9a6a1e; --warn-soft:#f4ebd8;
+    --bad:#9a3b3b; --bad-soft:#f3e1e1; --info:#3a5f80; --info-soft:#e2ecf4;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;}
+  .wrap{max-width:920px;margin-inline:auto;padding:48px 24px 80px}
+  header.doc{border-bottom:2px solid var(--line);padding-bottom:20px;margin-bottom:32px}
+  h1{font-size:30px;line-height:1.25;margin:0 0 12px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .meta .pill{font-size:12.5px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);
+    background:var(--surface);color:var(--muted)}
+  .meta .pill b{color:var(--ink);font-weight:600}
+  h2{font-size:21px;margin:44px 0 14px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  h3{font-size:17px;margin:0 0 6px}
+  p{max-width:72ch}
+  section>p,section>ul{max-width:72ch}
+  strong{color:inherit}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:0.9em;
+    background:#efece5;padding:1px 5px;border-radius:4px}
+  .lede{font-size:16.5px;color:var(--muted);max-width:74ch}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--accent-soft);font-weight:600}
+  td .ok{color:var(--good);font-weight:600}
+  td .no{color:var(--bad);font-weight:600}
+  td .mid{color:var(--warn);font-weight:600}
+  .axes{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+  .axes li{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 14px}
+  .axes b{color:var(--accent)}
+  .jump{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:8px 0 22px}
+  .jump ol{margin:6px 0 0;padding-left:22px;columns:2;column-gap:28px}
+  .jump a{color:var(--accent);text-decoration:none}
+  .jump a:hover{text-decoration:underline}
+  article.idea{background:var(--surface);border:1px solid var(--line);border-radius:12px;
+    padding:20px 22px;margin:0 0 18px;scroll-margin-top:16px}
+  .idrow{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+  .idchip{font-size:12px;font-weight:700;background:var(--accent);color:#fff;border-radius:6px;
+    padding:2px 8px;letter-spacing:.02em}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 12px}
+  .chip{font-size:12px;border-radius:999px;padding:3px 9px;border:1px solid var(--line);background:#fff}
+  .chip.direct{background:var(--good-soft);color:var(--good);border-color:#cfe2d3}
+  .chip.external{background:var(--info-soft);color:var(--info);border-color:#cfdded}
+  .chip.reasoned{background:var(--warn-soft);color:var(--warn);border-color:#e8dcc0}
+  .chip.conf{background:var(--accent-soft);color:var(--accent);border-color:#e7d2bf}
+  .chip.cx{background:#eceae3;color:var(--muted)}
+  .field{margin:9px 0}
+  .field .lbl{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  .field p{margin:3px 0 0}
+  .down{background:var(--bad-soft);border:1px solid #e8cccc;border-radius:8px;padding:9px 13px;margin-top:10px}
+  .down .lbl{color:var(--bad)}
+  figure{margin:14px 0;text-align:center}
+  figure svg{max-width:100%;height:auto}
+  figcaption{font-size:12.5px;color:var(--muted);margin-top:6px}
+  .rec{background:var(--accent-soft);border:1px solid #e7d2bf;border-radius:12px;padding:18px 22px;margin:10px 0 6px}
+  .rec h3{color:var(--accent)}
+  footer.composition-signal{margin-top:48px;padding-top:16px;border-top:1px solid var(--line);
+    font-size:12.5px;color:var(--muted)}
+  footer.composition-signal code{background:none;padding:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <h1>Ideation：为 TSN Agent 选 agent harness —— 替代 Claude Code</h1>
+  <p class="lede">本地部署 Qwen3.6 的前提下，用什么成熟开源 harness 驱动"工具型领域 agent"，既能嵌入 Tauri 分发，又不靠脆弱的"提示词+自写 loop"。</p>
+  <div class="meta">
+    <span class="pill"><b>日期</b> <time datetime="2026-06-15">2026-06-15</time></span>
+    <span class="pill"><b>主题</b> agent-harness-selection</span>
+    <span class="pill"><b>模式</b> repo-grounded</span>
+    <span class="pill"><b>约束</b> 开源 · 本地模型 · 可嵌入 · 成熟 loop · 不自写 loop</span>
+  </div>
+</header>
+
+<section>
+  <h2>Grounding Context</h2>
+  <p><strong>本项目 agent 的真实画像</strong>是一个"工具型领域 agent"——模型 + 8 个 topology MCP 工具（<code>topology_initialize / inspect / apply_operations / validate / build_artifacts …</code>，后端全走 HTTP sidecar）+ <code>SKILL.md</code> 领域指引（TSN 拓扑），多轮、工具密集；<strong>不是通用 coding agent</strong>，不需要 Read/bash/web。</p>
+  <p><strong>必须满足的集成点</strong>（来自 worker 代码核实）：① 工具调用协议——<code>{id,name,args,phase,status,result}</code> 透传 + id 去重；② <code>SKILL.md</code> 注入 system prompt（三段 sentinel 拼接，<strong>harness 无关</strong>，任何能接受自定义 system prompt 的 harness 都能复用）；③ 流式 <code>tool_call</code> 事件喂前端折叠卡片；④ 三态 fail-closed 校验 + sanitizer/audit 边界（业务产物绝不进 log、大结果绝不回流 prompt）；⑤ 接本地 OpenAI 兼容端点；⑥ 模型 pin，不继承个人设置。</p>
+  <p><strong>关键切口已现成</strong>：worker 的 <code>runClaude(prompt, options, queryFn = query)</code> —— <code>query</code> 本就是<strong>可注入参数</strong>；<code>agent-types</code>/<code>agent-adapter</code>/<code>sanitizer</code> 是稳定进程边界，当初设计流式卡片时就刻意留了"客户端无关事件契约"为换后端铺路。换 harness = 只替换 worker 内部 <code>query</code> 调用 + <code>for await</code> 消息循环，<strong>领域逻辑整体保留</strong>。</p>
+  <p><strong>当前 Claude Agent SDK 的负担</strong>：208MB native binary（打包/分发噩梦，本次一连串 Windows 崩溃的根源）；<code>~/.claude</code> 认证强依赖（无法分发）；SDK 内部 spawn MCP 子进程、失败无恢复。</p>
+  <p><strong>跨 harness 必须保住的硬不变量</strong>：正确性靠<strong>代码层强制</strong>（工具白名单 + trusted-signal 提取器）而非 prompt；写库动作<strong>一步闭环</strong>，不依赖模型多步编排（换到能力弱的本地 Qwen 时这条更要命）。</p>
+</section>
+
+<section>
+  <h2>Topic Axes</h2>
+  <ul class="axes">
+    <li><b>嵌入与分发</b> — 运行时/语言/体积：能否作为库塞进 Tauri 的 Node worker（而非整体 binary）</li>
+    <li><b>本地模型 + 工具可靠性</b> — 接 OpenAI 兼容端点 + guided/structured 工具调用兜底（弱模型能否稳定调工具）</li>
+    <li><b>MCP 与域逻辑复用</b> — 能否直接复用现有 topology MCP server，少改域逻辑</li>
+    <li><b>迁移风险与切口</b> — 改动面大小、可逆性、对既有不变量的保护</li>
+    <li><b>模型韧性</b> — 是否留可换/可对比模型的缝，降低单押注 Qwen 的风险</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Ranked Ideas</h2>
+  <nav class="jump">
+    <strong>方案速览（点击跳转）</strong>
+    <ol>
+      <li><a href="#i1">窄切口迁移：只换 worker 的 query + loop</a></li>
+      <li><a href="#i2">Vercel AI SDK v6 作为 harness（首选）</a></li>
+      <li><a href="#i3">推理层 XGrammar：工具可靠性的第一道防线</a></li>
+      <li><a href="#i4">先做 Qwen 能力 spike，再定 harness</a></li>
+      <li><a href="#i5">mastra 作为 harness（框架化次选）</a></li>
+      <li><a href="#i6">LLMProvider 抽象：Qwen/Claude 双接、可对比</a></li>
+      <li><a href="#i7">@openai/agents JS（轻量备选）</a></li>
+    </ol>
+  </nav>
+
+  <article class="idea" id="i1">
+    <div class="idrow"><span class="idchip">I1</span><h3>窄切口迁移：只替换 worker 内部的 <code>query</code> + 消息循环</h3></div>
+    <div class="chips"><span class="chip direct">direct</span><span class="chip conf">置信 90%</span><span class="chip cx">复杂度 Medium</span></div>
+    <div class="field"><div class="lbl">Axis</div><p>迁移风险与切口</p></div>
+    <div class="field"><div class="lbl">方案</div><p>不重写整条 runtime。保持 <code>agent-types</code> 契约、<code>agent-adapter</code> 三态边界、<code>sanitizer</code>/audit、客户端无关 <code>tool_call</code> 事件契约、以及独立的 topology MCP server 全部不动；只把 worker 内部 <code>runClaude</code> 里的 <code>queryFn = query</code>（Claude SDK）换成新 harness 的调用，并把那个 <code>for await (const message of …)</code> 循环按新 harness 的事件流重写。</p></div>
+    <div class="field"><div class="lbl">Basis</div><p><code>direct:</code> worker.mjs:32 <code>runClaude(userPrompt, options, queryFn = query)</code> 已把 SDK 入口设计成可注入参数；记忆明确记录"客户端无关工具事件契约是为换 Qwen 后端刻意设计的抽象缝"。</p></div>
+    <div class="field"><div class="lbl">为何关键</div><p>这是其余所有方案的<strong>地基</strong>——它把"换 harness"的爆炸半径锁死在 worker 一个文件内，领域逻辑（topology/sidecar/三态/卡片）零改动。是确定性最高、风险最低的元决策。</p></div>
+    <figure>
+      <svg viewBox="0 0 760 220" role="img" aria-label="窄切口迁移示意：保留层与替换层">
+        <rect x="0" y="0" width="760" height="220" fill="#fffdf9"/>
+        <text x="20" y="26" font-size="13" fill="#6b6760" font-weight="700">保留（域逻辑边界，零改动）</text>
+        <rect x="20" y="38" width="340" height="40" rx="8" fill="#e4efe6" stroke="#cfe2d3"/>
+        <text x="36" y="63" font-size="13" fill="#23211c">前端卡片 ← agent-adapter（三态 fail-closed）</text>
+        <rect x="20" y="86" width="340" height="40" rx="8" fill="#e4efe6" stroke="#cfe2d3"/>
+        <text x="36" y="111" font-size="13" fill="#23211c">agent-types 契约 · sanitizer/audit 边界</text>
+        <rect x="20" y="134" width="340" height="40" rx="8" fill="#e4efe6" stroke="#cfe2d3"/>
+        <text x="36" y="159" font-size="13" fill="#23211c">topology MCP server（独立进程，HTTP sidecar）</text>
+        <text x="420" y="26" font-size="13" fill="#9a3b3b" font-weight="700">替换（仅此一层）</text>
+        <rect x="420" y="38" width="320" height="136" rx="8" fill="#f3e1e1" stroke="#e8cccc"/>
+        <text x="436" y="78" font-size="13" fill="#23211c">worker 内部：</text>
+        <text x="436" y="104" font-size="13" fill="#23211c">queryFn = query（Claude SDK）</text>
+        <text x="436" y="124" font-size="14" fill="#9a3b3b" font-weight="700">→ 新 harness 调用</text>
+        <text x="436" y="150" font-size="13" fill="#23211c">for await 消息循环 → 新事件流解析</text>
+      </svg>
+      <figcaption>窄切口：左侧域逻辑全保留，仅替换 worker 内部 LLM 调用与循环。</figcaption>
+    </figure>
+    <div class="down"><div class="lbl">代价</div><p>新 harness 的工具暴露面、env 注入、会话续接（<code>resume</code> 无等价物，需用已有 <code>buildConversationContext</code> 喂多轮）要逐项对应；<code>summarizeSdkOptionsForAudit</code> 需按新 option 形态重写。</p></div>
+  </article>
+
+  <article class="idea" id="i2">
+    <div class="idrow"><span class="idchip">I2</span><h3>Vercel AI SDK v6（<code>ai</code>）作为 harness —— 首选</h3></div>
+    <div class="chips"><span class="chip direct">direct</span><span class="chip conf">置信 85%</span><span class="chip cx">复杂度 Medium</span></div>
+    <div class="field"><div class="lbl">Axis</div><p>嵌入与分发 / 本地模型 + 工具可靠性</p></div>
+    <div class="field"><div class="lbl">方案</div><p>用 TypeScript 的 Vercel AI SDK v6 当 harness：<code>createOpenAICompatible(baseURL)</code> 直指本地 vLLM/SGLang 端点；<code>ToolLoopAgent</code>（内置 <code>stopWhen</code>）跑成熟的多轮工具循环；<code>@ai-sdk/mcp</code> 稳定版直接挂现有 topology MCP server；<code>experimental_toToolCallRepair</code> 在工具调用失败时自定义修复（含切更强模型重生成参数）。</p></div>
+    <div class="field"><div class="lbl">Basis</div><p><code>external:</code> AI SDK v6（2026，月下载 2000 万）原生提供以上能力，是 <strong>TS 生态唯一带原生 tool call repair 的 harness</strong>；<code>direct:</code> worker 本就是 Node，TS harness 嵌入 Tauri Node sidecar 最干净（整体打包 30–80MB，对比 Claude Code 208MB binary）。</p></div>
+    <div class="field"><div class="lbl">为何首选</div><p>同语言（TS/Node）零跨运行时摩擦、体积最轻、loop 成熟（满足"不自写脆弱 loop"）、原生 MCP 复用域逻辑、且独家 repair 给弱模型工具调用兜底。约束命中度最高。</p></div>
+    <div class="down"><div class="lbl">代价</div><p>比 mastra 少一层 agent lifecycle 抽象，事件流/卡片对接要自己组织（但有 <code>ToolLoopAgent</code> 兜底，不是"裸写 loop"）；v6 较新，需锁版本跟踪 API。</p></div>
+  </article>
+
+  <article class="idea" id="i3">
+    <div class="idrow"><span class="idchip">I3</span><h3>推理层 XGrammar guided decoding —— 工具可靠性的<strong>第一道防线</strong></h3></div>
+    <div class="chips"><span class="chip external">external</span><span class="chip conf">置信 88%</span><span class="chip cx">复杂度 Low</span></div>
+    <div class="field"><div class="lbl">Axis</div><p>本地模型 + 工具可靠性</p></div>
+    <div class="field"><div class="lbl">方案</div><p>工具调用可靠性的主力<strong>不在 harness 层，而在推理层</strong>。vLLM / SGLang 已把 XGrammar 设为默认结构化解码后端——只要 harness 把工具的 <code>JSON Schema</code>（<code>response_format: {type:"json_schema", …}</code>）传给本地端点，参数就在 token 生成时被强约束，非法 token 直接屏蔽。harness 的 tool_call_repair 只是事后兜底。</p></div>
+    <div class="field"><div class="lbl">Basis</div><p><code>external:</code> XGrammar-2（2026，单 token &lt;40µs）已是 vLLM/SGLang 默认；推理侧约束与 harness 解耦——这是本项目"35B MoE 能否稳定调 8 个 topology 工具"的决定性好消息。</p></div>
+    <div class="field"><div class="lbl">为何关键</div><p>它把"弱模型工具可靠性"这个最大风险，从"赌 harness/prompt"变成"推理层硬保证"。配 harness 层 repair 形成两道防线，类比<strong>类型系统（编译期约束）+ 运行时异常处理</strong>。</p></div>
+    <figure>
+      <svg viewBox="0 0 700 150" role="img" aria-label="工具可靠性两道防线">
+        <rect x="0" y="0" width="700" height="150" fill="#fffdf9"/>
+        <rect x="20" y="30" width="300" height="90" rx="10" fill="#e2ecf4" stroke="#cfdded"/>
+        <text x="40" y="58" font-size="13" font-weight="700" fill="#3a5f80">第一道 · 推理层</text>
+        <text x="40" y="82" font-size="13" fill="#23211c">vLLM/SGLang XGrammar</text>
+        <text x="40" y="103" font-size="12.5" fill="#6b6760">JSON Schema 约束解码（硬保证）</text>
+        <rect x="380" y="30" width="300" height="90" rx="10" fill="#f4ebd8" stroke="#e8dcc0"/>
+        <text x="400" y="58" font-size="13" font-weight="700" fill="#9a6a1e">第二道 · harness 层</text>
+        <text x="400" y="82" font-size="13" fill="#23211c">tool_call_repair（兜底）</text>
+        <text x="400" y="103" font-size="12.5" fill="#6b6760">失败重试 / 切模型重生成参数</text>
+        <text x="335" y="80" font-size="20" fill="#9a5b2e">→</text>
+      </svg>
+      <figcaption>工具调用可靠性的两道防线：推理层硬约束在前，harness 修复兜底在后。</figcaption>
+    </figure>
+    <div class="down"><div class="lbl">代价</div><p>需在本地推理服务侧正确开启/配置 guided decoding，并保证每个工具的 JSON Schema 干净（现有 Zod schema 可转）；约束解码对超复杂 schema 有少量延迟。</p></div>
+  </article>
+
+  <article class="idea" id="i4">
+    <div class="idrow"><span class="idchip">I4</span><h3>先做 Qwen3.6 能力 spike，再定 harness</h3></div>
+    <div class="chips"><span class="chip reasoned">reasoned</span><span class="chip conf">置信 85%</span><span class="chip cx">复杂度 Low</span></div>
+    <div class="field"><div class="lbl">Axis</div><p>迁移风险与切口</p></div>
+    <div class="field"><div class="lbl">方案</div><p>在投入 harness 迁移工程前，先用本地 Qwen3.6 + 一个最小 OpenAI-兼容 tool loop（或直接 AI SDK 快试）跑通一遍标准 topology 流程（对标 generic-line / dual-plane 真机验收点），重点压测：多步工具编排、零参工具首调用、确认/阶段推进这类靠文本判定的环节。</p></div>
+    <div class="field"><div class="lbl">Basis</div><p><code>reasoned:</code> 记忆明确——本项目大量依赖"模型听话"（多步 MCP 编排、正则纠偏自然语言、零参工具），而 Qwen3.6 35B 能力大概率弱于 Claude Sonnet，这些正是<strong>换弱模型后最先崩</strong>的点。先验证可行性，避免在错误模型上盖楼。</p></div>
+    <div class="field"><div class="lbl">为何关键</div><p>harness 选型再优，模型调不动工具也是空中楼阁。这个前置 spike 用最小成本回答"Qwen3.6 + XGrammar 到底能不能稳定跑这套 8 工具流程"，结果直接决定后续投入与 harness 细节。</p></div>
+    <div class="down"><div class="lbl">代价</div><p>spike 本身要一套最小循环（一次性、可丢），与"不自写生产 loop"不冲突——它是验证而非生产代码。</p></div>
+  </article>
+
+  <article class="idea" id="i5">
+    <div class="idrow"><span class="idchip">I5</span><h3>mastra 作为 harness —— 框架化次选</h3></div>
+    <div class="chips"><span class="chip external">external</span><span class="chip conf">置信 72%</span><span class="chip cx">复杂度 Medium</span></div>
+    <div class="field"><div class="lbl">Axis</div><p>MCP 与域逻辑复用 / 嵌入与分发</p></div>
+    <div class="field"><div class="lbl">方案</div><p>用 TypeScript 原生的 mastra（底层基于 AI SDK）：<code>MCPClient</code> 连现有 topology MCP server、<code>MCPServer</code> 反向暴露；Zod 定义 tool schema、类型安全；内置 trace/eval/observability，一个框架同时管 agent lifecycle + MCP + 可观测。</p></div>
+    <div class="field"><div class="lbl">Basis</div><p><code>external:</code> mastra（TS 原生、2025 末融资快迭代）提供双向 MCP 桥 + 内置工具编排，对"工具型 domain agent + 复用现有 MCP server"契合度极高。</p></div>
+    <div class="field"><div class="lbl">为何次选</div><p>比 I2 多一层"全家桶"抽象（lifecycle + observability 内置）。若希望少自己拼装、要现成的 trace/eval，选它。</p></div>
+    <div class="down"><div class="lbl">代价</div><p>API 仍在变动、无 SOC 2，引入需锁版本；对"单 agent 工具型"场景，它的上层抽象可能偏厚（继承 AI SDK 的 repair 而非自带 grammar 兜底）。</p></div>
+  </article>
+
+  <article class="idea" id="i6">
+    <div class="idrow"><span class="idchip">I6</span><h3>LLMProvider 抽象层：Qwen/Claude 双接、可对比可回退</h3></div>
+    <div class="chips"><span class="chip direct">direct</span><span class="chip reasoned">reasoned</span><span class="chip conf">置信 70%</span><span class="chip cx">复杂度 Medium</span></div>
+    <div class="field"><div class="lbl">Axis</div><p>模型韧性</p></div>
+    <div class="field"><div class="lbl">方案</div><p>在 worker 内把 LLM 调用收敛成一个 <code>LLMProvider</code> 接口（沿用已有 <code>queryFn</code> 注入缝），同一 harness 下既能指向本地 Qwen 端点、也能指向 Claude/其他，配置可切。</p></div>
+    <div class="field"><div class="lbl">Basis</div><p><code>direct:</code> <code>queryFn</code> 已是注入点、事件契约已客户端无关；<code>reasoned:</code> Qwen3.6 能力存疑（见 I4），留一条"质量不够就回退 Claude / 实测对比"的缝，避免单押注一个未验证模型。</p></div>
+    <div class="field"><div class="lbl">为何有价值</div><p>把"选哪个模型"从一次性赌注变成可逆、可 A/B 的工程选项——尤其在 Qwen3.6 真实能力未实测时，这层韧性很划算。</p></div>
+    <div class="down"><div class="lbl">代价</div><p>不同模型的 tool 协议/system prompt 调优有差异，抽象不能太薄；过度通用化有 YAGNI 风险——按"Qwen + 一个回退"两条实现即可，不要预先支持五家。</p></div>
+  </article>
+
+  <article class="idea" id="i7">
+    <div class="idrow"><span class="idchip">I7</span><h3>@openai/agents JS —— 轻量备选</h3></div>
+    <div class="chips"><span class="chip external">external</span><span class="chip conf">置信 60%</span><span class="chip cx">复杂度 Medium</span></div>
+    <div class="field"><div class="lbl">Axis</div><p>嵌入与分发</p></div>
+    <div class="field"><div class="lbl">方案</div><p>OpenAI Agents SDK 的 JS 版：<code>Agent/Runner/Tool</code> 原语简洁，<code>setDefaultOpenAIClient(new OpenAI({baseURL}))</code> + <code>setOpenAIAPI('chat_completions')</code> 接本地端点，MCP 走 stdio/SSE/HTTP。</p></div>
+    <div class="field"><div class="lbl">Basis</div><p><code>external:</code> 官方 TS、原语清晰、可接本地端点 + MCP；体积控制好。作为"mastra 嫌厚、AI SDK 想要更结构化原语"时的中间选项。</p></div>
+    <div class="field"><div class="lbl">为何备选而非首选</div><p>无 grammar 层兜底（靠 I3 推理层补）、MCP session 生命周期要自管；生态成熟度与 repair 能力不及 AI SDK。</p></div>
+    <div class="down"><div class="lbl">代价</div><p>工具可靠性更依赖推理层 XGrammar；MCP/会话管理要多写胶水。</p></div>
+  </article>
+</section>
+
+<section class="rec">
+  <h3>倾向性推荐</h3>
+  <p><strong>主线：I1（窄切口）+ I4（先 Qwen spike）+ I3（推理层 XGrammar）作为地基与前置，harness 首选 I2（Vercel AI SDK v6），并以 I6 的 <code>LLMProvider</code> 抽象保住可回退缝。</strong></p>
+  <p>理由：同为 TS/Node、嵌入最轻、loop 成熟（满足"不自写脆弱 loop"）、原生 MCP 直接复用 topology server、独家 tool repair 兜底；真正的工具可靠性靠推理层 XGrammar 硬保证。mastra（I5）作为"想要全家桶 + observability"的平替随时可换——两者底层同源，切换成本低。<strong>明确弃用 goose（binary 不可嵌入）与 Qwen Code SDK（实验性、接不了本地端点）——这两个正是你最初点名的，调研结论是都不合适。</strong></p>
+</section>
+
+<section>
+  <h2>决策与执行路线</h2>
+  <p>本 ideation 主线（去 Claude Code、迁本地 Qwen + Vercel AI SDK）是<strong>中长期方向</strong>；但 Windows 打包 app 当下完全跑不起来——根因是打包链没把 Claude Code 的 208MB native binary 带进 release bundle，SDK 运行时找不到 <code>claude</code> 可执行，agent 直接无返回（mac 一直只跑 dev 模式、<code>node_modules</code> 里有 binary，所以从没暴露）。需要一个能立刻验证打包态 agent 可用的短期桥。经讨论定<strong>两阶段：先修可用，再做迁移</strong>。</p>
+  <div style="display:flex;gap:14px;flex-wrap:wrap;margin:16px 0">
+    <div class="rec" style="flex:1;min-width:290px;margin:0">
+      <h3>短期 A（当前动作）：往发布包加 Claude Code binary</h3>
+      <p>把平台对应的 <code>claude</code> 打进 tauri resources，worker 用 <code>pathToClaudeCodeExecutable</code> 指向它，让打包态 agent 立刻能跑。<strong>临时桥</strong>：加重 Claude Code 依赖、+208MB/平台、仍需用户侧 <code>~/.claude</code> 认证（仅自用场景成立）。</p>
+    </div>
+    <div class="rec" style="flex:1;min-width:290px;margin:0;background:var(--info-soft);border-color:#cfdded">
+      <h3 style="color:var(--info)">中长期 B：本 ideation 主线</h3>
+      <p>窄切口换 harness（Vercel AI SDK v6）+ 本地 Qwen3.6 + 推理层 XGrammar。去掉 208MB binary 与 <code>~/.claude</code> 依赖，包瘦回几 MB、可分发、数据不出境。</p>
+    </div>
+  </div>
+  <p><strong>A 的操作清单（4 处改动）：</strong>① CI（<code>production-build.yml</code>）每平台 build 前把 <code>node_modules/@anthropic-ai/claude-agent-sdk-{平台}/claude*</code> 复制到固定路径（Windows 是 <code>claude.exe</code>）；② <code>tauri.conf.json</code> 的 <code>resources</code> 带这个 binary；③ <code>commands.rs</code> resolve 打包 binary 路径（复用 verbatim strip）注入 worker payload；④ worker 读出后设进 <code>sdkOptions.pathToClaudeCodeExecutable</code>。本地 mac 先验证机制，再 CI 出 Windows 包真测。</p>
+</section>
+
+<section>
+  <h2>Rejection Summary</h2>
+  <table>
+    <thead><tr><th>候选</th><th>淘汰原因</th></tr></thead>
+    <tbody>
+      <tr><td><strong>goose</strong>（Block，Rust）</td><td>是 CLI/桌面 app 整体 binary，<strong>不是可嵌入的库</strong>，塞不进 Tauri Node worker（正迁 Tauri 但仍是 binary）——你点名的候选，实测不合适</td></tr>
+      <tr><td><strong>Qwen Code SDK</strong>（"qwenpaw"）</td><td>TS SDK 仍<strong>实验性</strong>，且 <strong>baseURL 未暴露、接不了本地 vLLM/SGLang 端点</strong>——你点名的候选，对本地 Qwen 反而不可用</td></tr>
+      <tr><td><strong>LangGraph</strong>（JS / Py）</td><td>状态机图模型概念重，单 domain 工具型 agent overkill；TS 版文档/成熟度落后 Python 约半年（11x 团队已弃用转 mastra）</td></tr>
+      <tr><td><strong>Pydantic AI</strong>（Py）</td><td>结构化输出最强，但 Python 运行时——嵌入 Tauri 需 Python sidecar，带 runtime + pip 依赖，冷启动慢、分发复杂</td></tr>
+      <tr><td><strong>Strands Agents</strong>（AWS，Py）</td><td>生产成熟但 Python sidecar 分发成本同上；本项目无 Python 后端基建</td></tr>
+      <tr><td><strong>smolagents</strong>（HF，Py）</td><td>Python-only + <strong>无原生 MCP</strong>，code-as-action 定位不符</td></tr>
+      <tr><td><strong>CrewAI</strong>（Py）</td><td>角色扮演多 agent 范式，Python-only，不适合单 domain 工具型</td></tr>
+      <tr><td><strong>AutoGen / AG2</strong>（Py）</td><td>对话辩论范式；微软主版置维护态，AG2 为社区 fork</td></tr>
+      <tr><td><strong>Semantic Kernel</strong>（.NET/Py）</td><td>偏企业 Azure/.NET 生态，与并入 Microsoft Agent Framework，运行时不符</td></tr>
+      <tr><td><strong>LlamaIndex</strong></td><td>定位 RAG/检索 pipeline，不是 agentic loop harness</td></tr>
+      <tr><td><strong>Agno / Rivet / xsAI</strong></td><td>Python 框架 / 可视化 node 编辑器 / 资料过少——均不契合"可嵌入工具型 TS harness"</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer class="composition-signal">Composed 2026-06-15 by ce-ideate · 来源：会话内 harness 选型讨论 + codebase/learnings/web 三路 grounding · TSN Agent（<code>tsn-agent</code>）</footer>
+
+</div>
+</body>
+</html>

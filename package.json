@@ -14,7 +14,7 @@
     "verify:skills": "node scripts/verify-skills.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
     "release:prepare:check": "node scripts/prepare-release.mjs --dry-run",
-    "build:worker": "npm run verify:skills && esbuild src-node/claude-agent-worker.mjs --bundle --platform=node --format=esm --outfile=src-node/dist/claude-agent-worker.mjs && esbuild src-node/mcp/tsn-topology-server.ts --bundle --platform=node --format=esm --outfile=src-node/dist/tsn-topology-server.mjs",
+    "build:worker": "npm run verify:skills && esbuild src-node/claude-agent-worker.mjs --bundle --platform=node --format=esm --outfile=src-node/dist/claude-agent-worker.mjs && esbuild src-node/mcp/tsn-topology-server.ts --bundle --platform=node --format=esm --outfile=src-node/dist/tsn-topology-server.mjs && node scripts/copy-claude-binary.mjs",
     "tauri": "npm run build:worker && tauri"
   },
   "dependencies": {

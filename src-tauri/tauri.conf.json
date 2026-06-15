@@ -35,7 +35,8 @@
     "resources": {
       "../.claude/skills/": ".claude/skills/",
       "../CHANGELOG.md": "CHANGELOG.md",
-      "../src-node/dist/claude-agent-worker.mjs": "src-node/claude-agent-worker.mjs"
+      "../src-node/dist/claude-agent-worker.mjs": "src-node/claude-agent-worker.mjs",
+      "../src-node/dist/claude-runtime/": "claude-runtime/"
     },
     "targets": "all"
   }

@@ -107,6 +107,8 @@ fn run_claude_agent_blocking(
     let run_id = request.run_id.clone().unwrap_or_else(create_run_id);
     let app_session_id = request.app_session_id.clone();
     let audit_dir = agent_audit_dir(&app).map(strip_verbatim_prefix);
+    // 打包态：随 app 分发的 claude binary 路径（dev 态 None → SDK 默认用 node_modules 平台包）。
+    let claude_binary_path = find_claude_binary(Some(&app));
     // 同源（R2）：worker 与编辑器消费同一有效 skill 根决策（含 app-data 懒播种）。
     let (skill_root, skill_root_reason) = {
         let effective = crate::skill_files::effective_skill_root(&app);
@@ -178,6 +180,7 @@ fn run_claude_agent_blocking(
         "appSessionId": request.app_session_id,
         "auditDir": audit_dir,
         "skillRoot": skill_root,
+        "claudeBinaryPath": claude_binary_path,
         "resumeSessionId": request.resume_session_id,
         "conversationContext": request.conversation_context,
         "stageRunnerInput": request.stage_runner_input,
@@ -681,6 +684,23 @@ fn find_worker_path(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
         "未找到智能助手运行时 worker：{}。请先运行 npm run build:worker。",
         development_worker_path.display()
     ))
+}
+
+/// 打包态：随 app 分发的 Claude Code native binary（build:worker 复制到 claude-runtime/）。
+/// SDK 默认从 node_modules 平台包（@anthropic-ai/claude-agent-sdk-{platform}）找 claude，
+/// bundle 后不存在，故打包态必须显式提供给 worker 的 pathToClaudeCodeExecutable。
+/// dev 态返回 None —— node_modules 平台包里有 binary，SDK 默认能找到。
+fn find_claude_binary(app: Option<&tauri::AppHandle>) -> Option<PathBuf> {
+    if cfg!(debug_assertions) {
+        return None;
+    }
+    let exe = if cfg!(windows) { "claude.exe" } else { "claude" };
+    let resource_path = app?
+        .path()
+        .resolve(format!("claude-runtime/{exe}"), BaseDirectory::Resource)
+        .ok()?;
+    let resource_path = strip_verbatim_prefix(resource_path);
+    resource_path.exists().then_some(resource_path)
 }
 
 fn repo_root_from_worker(worker_path: &Path) -> PathBuf {

@@ -52,6 +52,12 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     ? resolvedOptions.skillRoot
     : join(cwd, ".claude", "skills");
   const topologyMcpServerPath = resolvedOptions.topologyMcpServerPath ?? resolveTopologyMcpServerPath(cwd);
+  // 打包态：Tauri 注入随 app 分发的 claude binary 路径。SDK 默认从 node_modules 的
+  // 平台包（@anthropic-ai/claude-agent-sdk-{platform}）找 claude，bundle 后不存在，
+  // 故打包态必须显式 pathToClaudeCodeExecutable；dev 态为 undefined，走 SDK 默认。
+  const claudeBinaryPath = typeof resolvedOptions.claudeBinaryPath === "string" && resolvedOptions.claudeBinaryPath.length > 0
+    ? resolvedOptions.claudeBinaryPath
+    : undefined;
   // Plan v3 U4b + Spike B：MCP child env 必须显式声明（Node child_process.spawn
   // 显式 env 字段语义是 REPLACE 不是 merge）；CLAUDECODE 必须不带过去防嵌套
   // session 拒绝。Tauri 端通过 `commands::run_claude_agent` 向 worker 注入
@@ -103,6 +109,8 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
   );
   const sdkOptions = {
     cwd,
+    // 打包态指向随 app 分发的 claude binary；dev 态 undefined → SDK 默认用 node_modules 平台包。
+    ...(claudeBinaryPath ? { pathToClaudeCodeExecutable: claudeBinaryPath } : {}),
     settingSources: ["user", "project"],
     // 显式 pin 模型：settingSources 含 "user" 会继承开发者个人 Claude Code 的
     // 默认模型（如 /model 切到 worker 环境不可用的型号即整轮失败）——产品运行时
@@ -1572,6 +1580,7 @@ export async function runWorker(rawInput) {
     runId: typeof input.runId === "string" ? input.runId : undefined,
     auditDir: typeof input.auditDir === "string" ? input.auditDir : undefined,
     skillRoot: typeof input.skillRoot === "string" ? input.skillRoot : undefined,
+    claudeBinaryPath: typeof input.claudeBinaryPath === "string" ? input.claudeBinaryPath : undefined,
     onEvent: (event) => {
       if (typeof input.runId !== "string" || !input.runId) {
         return;
