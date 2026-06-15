@@ -101,11 +101,12 @@ fn run_claude_agent_blocking(
     validate_context(request.conversation_context.as_deref())?;
 
     let _guard = ClaudeAgentRunGuard::acquire()?;
-    let worker_path = find_worker_path(Some(&app))?;
+    // Windows：Tauri resource resolve 返回 `\\?\` verbatim 路径，node 起不来——去前缀。
+    let worker_path = strip_verbatim_prefix(find_worker_path(Some(&app))?);
     let cwd = repo_root_from_worker(&worker_path);
     let run_id = request.run_id.clone().unwrap_or_else(create_run_id);
     let app_session_id = request.app_session_id.clone();
-    let audit_dir = agent_audit_dir(&app);
+    let audit_dir = agent_audit_dir(&app).map(strip_verbatim_prefix);
     // 同源（R2）：worker 与编辑器消费同一有效 skill 根决策（含 app-data 懒播种）。
     let (skill_root, skill_root_reason) = {
         let effective = crate::skill_files::effective_skill_root(&app);
@@ -115,6 +116,7 @@ fn run_claude_agent_blocking(
         // 显示的内容对齐，避免「界面看得到指引、agent 只注入骨架」的反向不同源。
         let path = effective
             .into_usable_path()
+            .map(strip_verbatim_prefix)
             .filter(|root| root.join("tsn-topology").join("SKILL.md").exists());
         (path, reason)
     };
@@ -625,6 +627,28 @@ fn emit_claude_event(
             tool_call,
         },
     );
+}
+
+/// Tauri 的 `PathResolver::resolve(BaseDirectory::Resource)` 在 Windows 经
+/// `resource_dir` 的裸 `std::fs::canonicalize` 返回 `\\?\` verbatim（扩展长度）路径，
+/// 且 Rust 侧 `resolve_path` 未做 `dunce::simplified`（只有前端 JS 的 resolve_path
+/// command 做了）。Node 解析主模块时无法处理 verbatim 前缀（逐段解析时对盘符 `lstat`
+/// 报 EISDIR），故凡是要交给 node 进程的路径都必须先去掉前缀。
+#[cfg(windows)]
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy().to_string();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path
+    }
+}
+
+#[cfg(not(windows))]
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    path
 }
 
 fn find_worker_path(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
