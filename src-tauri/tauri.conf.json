@@ -38,6 +38,6 @@
       "../src-node/dist/claude-agent-worker.mjs": "src-node/claude-agent-worker.mjs",
       "../src-node/dist/claude-runtime/": "claude-runtime/"
     },
-    "targets": "all"
+    "targets": ["deb", "rpm", "nsis", "msi", "app", "dmg"]
   }
 }
