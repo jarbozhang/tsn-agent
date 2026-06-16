@@ -168,6 +168,9 @@ describe("claude-agent-worker", () => {
     // KTD8 迁入骨架的协议不变量（骨架是唯一载体，回退即丢失）。
     expect(skeleton).toContain("不要再调用 topology_validate 复检");
     expect(skeleton).toContain("逐字节复用上一次的同一 operations");
+    // U5：切阶段工具规则在骨架里（前进=确认按钮、回退=工具）。
+    expect(skeleton).toContain("request_stage_change");
+    expect(skeleton).toContain("不要用该工具前进");
     expect(guidance).toContain("[SKILL-PROBE-v1] 注入指引正文");
   });
 
