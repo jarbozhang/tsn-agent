@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "TSN Agent",
+  "productName": "TSN-Agent",
   "version": "0.4.1",
   "identifier": "com.tsnagent.app",
   "build": {
