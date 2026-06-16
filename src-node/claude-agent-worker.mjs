@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { createTopologyWorkflowStageResult } from "../src/agent/topology-workflow-stage-result";
 
 const TOPOLOGY_MCP_SERVER_NAME = "tsn_topology";
@@ -1607,14 +1608,23 @@ if (await isCliEntryPoint(import.meta.url, process.argv[1])) {
   }
 }
 
-async function isCliEntryPoint(moduleUrl, argvPath) {
+export async function isCliEntryPoint(moduleUrl, argvPath) {
   if (!argvPath) {
     return false;
   }
 
+  // fileURLToPath 正确解码 %20 → 空格并跨平台处理盘符；旧实现 new URL().pathname 保留
+  // %20，遇到含空格的打包路径（"TSN Agent.app"）realpath 必失败、fallback 也失配，
+  // 导致 runWorker 永不执行、worker 静默 exit 0（dev 路径无空格故一直未暴露）。
+  let modulePath;
   try {
-    return await realpath(new URL(moduleUrl).pathname) === await realpath(argvPath);
+    modulePath = fileURLToPath(moduleUrl);
   } catch {
-    return moduleUrl === `file://${argvPath}`;
+    return false;
+  }
+  try {
+    return (await realpath(modulePath)) === (await realpath(argvPath));
+  } catch {
+    return modulePath === argvPath;
   }
 }

@@ -13,7 +13,9 @@ import {
   parseAssistantText,
   redactSecrets,
   runClaude,
+  isCliEntryPoint,
 } from "./claude-agent-worker.mjs";
+import { pathToFileURL } from "node:url";
 import { TOPOLOGY_MCP_ALLOWED_TOOLS as REGISTRY_TOPOLOGY_MCP_ALLOWED_TOOLS } from "./mcp/topology-tools";
 import { createTopologyWorkflowStageResult } from "../src/agent/topology-workflow-stage-result";
 
@@ -53,6 +55,22 @@ async function* messages(items) {
 }
 
 describe("claude-agent-worker", () => {
+  // 回归：打包路径 "TSN Agent.app" 含空格，旧 new URL().pathname 保留 %20 导致 entry
+  // 自检失配、runWorker 永不执行、worker 静默 exit 0（dev 路径无空格故从未暴露）。
+  it("resolves a worker path containing spaces as the CLI entry point (decodes %20)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "TSN Space "));
+    const file = join(dir, "claude-agent-worker.mjs");
+    await writeFile(file, "");
+    const url = pathToFileURL(file).href;
+    expect(url).toContain("%20");
+    expect(await isCliEntryPoint(url, file)).toBe(true);
+  });
+
+  it("does not treat a non-matching argv path as the CLI entry point", async () => {
+    const url = pathToFileURL(join(tmpdir(), "tsn-a", "worker.mjs")).href;
+    expect(await isCliEntryPoint(url, join(tmpdir(), "tsn-b", "worker.mjs"))).toBe(false);
+  });
+
   it("keeps worker MCP allowedTools aligned with the topology registry", () => {
     expect(TOPOLOGY_MCP_ALLOWED_TOOLS).toEqual(REGISTRY_TOPOLOGY_MCP_ALLOWED_TOOLS);
   });
