@@ -1,55 +1,118 @@
 # TSN Agent
 
-## 诊断日志
+> 自然语言驱动的 TSN（时间敏感网络）拓扑规划桌面工具
 
-应用提供按会话归属的诊断日志，用于排查 Claude 交互、会话保存和导出文件刷新问题。点击顶部“日志”按钮可以查看当前会话的日志时间线。
+TSN Agent 是一个 Tauri + React 桌面应用，面向了解 TSN 概念、但不熟悉具体参数配置的工程师。你用一句话描述网络规模——例如「我需要 4 个交换机，每个交换机连接 5 个端系统」——智能助手就会自动生成符合规范的 TSN 拓扑并落库，在画布上实时展示，供你确认和增量编辑。
 
-日志只保存脱敏后的摘要，例如 run id、是否 resume、chunk 统计、session 保存状态、artifact 文件路径和错误摘要。不要把日志当作项目交付产物；`.ned`、`omnetpp.ini`、React Flow JSON、`flow_plan_1.json` 和 manifest 仍然是独立文件边界。详细契约见 `docs/diagnostics-log-contract.md`。
+整个规划按「拓扑 → 时间同步 → 流量规划 → 模拟仿真」四个用户可见阶段推进，每个关键阶段都会展示结构化摘要并等待你确认。
 
-TSN Agent 是一个 Tauri + React 桌面应用 MVP，面向了解 TSN 概念但不熟悉参数配置的新手用户。当前纵向闭环支持输入一句网络规模描述，例如“我需要 4 个交换机，每个交换机连接 5 个端系统”。应用默认按“拓扑、时间同步、流量规划、模拟仿真”四个用户可见阶段推进，每个关键阶段会展示摘要并等待用户确认。稳定阶段 ID 为 `topology`、`time-sync`、`flow-template`、`planning-export`。
+## 核心功能
 
-> **Phase A 状态（2026-06-04）**：`flow-template`（流量规划）和 `planning-export`（模拟仿真）阶段在 Phase A → Phase B 周期内 **UI 灰掉**（aria-disabled + tooltip + inline banner），项目导出整条链路暂时下线，Phase B 回归。当前可用闭环到“拓扑 + 时间同步”。下文“项目导出文件”为 Phase B 目标。
+- **自然语言生成拓扑** — 一句话描述网络规模，智能助手通过 MCP 工具调用本机服务生成拓扑并写入数据库，无需手动配置参数。
+- **拓扑画布** — 基于 React Flow 的交互式画布，浮动连线、节点拖动持久化、按设备类型区分视觉、节点/链路详情面板。
+- **四阶段工作流** — 拓扑、时间同步、流量规划、模拟仿真四个稳定阶段（ID：`topology`、`time-sync`、`flow-template`、`planning-export`），逐阶段确认推进。当前核心闭环聚焦拓扑的生成与增量编辑。
+- **场景系统** — 会话可绑定行业语境（通用 TSN，以及箭载/舰载等专用场景），场景决定智能助手收到的领域 Reference 和可选模板；未知场景按通用场景回退。
+- **可编辑 Skill 指引** — 领域语义、操作流程与推荐参数以可编辑指引形式注入，你可以在应用内修改，下次运行即生效；同时支持一键恢复出厂内容。
+- **会话管理** — 新建、切换、复制、删除、导出、导入会话。导出为单会话 `.db` 切片（含已脱敏的对话、流程进度与拓扑工程），导入后可从原进度续走。
+- **诊断日志** — 按会话归属的脱敏诊断时间线，用于排查智能助手交互、会话保存与文件刷新问题。
+- **跨平台** — 提供 macOS、Windows、Linux 安装包。
 
-拓扑阶段不再把结果合成进会话内嵌的 canonical project；智能助手通过 `tsn_topology` MCP（所有工具走本机 axum sidecar HTTP）将拓扑写入 SQLite P0 表，UI 通过 `session_db_changed` event + `query_topology` Tauri command 实时读取并刷新画布、节点详情和链路详情。详见 `docs/topology-mcp.md`。
+## 工作原理
 
-Phase B 回归后，“模拟仿真”阶段会生成拓扑草案、1 条控制流模板和项目导出文件：
+```
+┌─────────────────────────────────────────────────┐
+│  React UI  (拓扑画布 / 对话 / 会话抽屉)            │
+└───────────────────────┬─────────────────────────┘
+                        │ Tauri IPC（commands + events）
+┌───────────────────────▼─────────────────────────┐
+│  Rust / Tauri                                    │
+│   · 会话与拓扑 SQLite      · axum sidecar (HTTP)  │
+│   · 会话导入导出           · Skill 出厂播种/恢复   │
+└───────────────────────┬─────────────────────────┘
+                        │ spawn（本机 Node 进程）
+┌───────────────────────▼─────────────────────────┐
+│  Node worker  (@anthropic-ai/claude-agent-sdk)   │
+└─────────┬───────────────────────────┬───────────┘
+          │ query()                   │ MCP (stdio)
+┌─────────▼────────┐        ┌─────────▼───────────┐
+│  Claude binary   │        │  tsn_topology MCP    │
+└──────────────────┘        └─────────┬───────────┘
+                                      │ HTTP
+                           ┌──────────▼───────────┐
+                           │  axum sidecar → SQLite│
+                           └──────────────────────┘
+```
 
-- `tsnagent/generated/network.ned`：面向 INET/OMNeT++ 的最小 NED 网络文件，路径与 `tsnagent.generated` package 匹配。
-- `omnetpp.ini`：最小 Cmdenv 运行配置，用于加载生成的 NED 网络。
-- `react-flow-topology.json`：给 React Flow 展示用的拓扑 JSON。
-- `flow_plan_1.json`：兼容现有规划器输入样例的 `base + stream_info` 结构。
-- `manifest.json`：导出文件清单。
+智能助手运行时由 Rust 拉起本机 Node worker，worker 通过官方 `@anthropic-ai/claude-agent-sdk` 调用 Claude，并以 `tsn_topology` MCP 工具操作拓扑——所有工具都走本机 axum sidecar 的 HTTP 接口读写 SQLite。拓扑写入后，UI 通过 `session_db_changed` 事件 + `query_topology` 命令实时刷新画布、节点详情与链路详情。
 
-`flow_plan_result_1.json` 不由 MVP 默认生成；如果外置规划器后续写入该文件，应用只把它识别为外部规划器输出，不解析 GCL/interface 摘要。导出会拒绝 repo 根目录、home 根目录、应用配置目录、根目录和 symlink 目标。`omnetpp.ini` 只承诺能让 INET/OMNeT++ 加载并运行基础拓扑；gPTP、TAS/GCL、调度器选择、业务流应用和规划结果回写仍放在后续 `inet-export` skill 中扩展。
+应用复用你本机的 Claude Code 配置，但不读取也不保存任何 Claude 凭证；SQLite 只保存入库时已脱敏的会话文本、agent 事件摘要与拓扑工程数据。
 
-当前版本仅在 Tauri 桌面版可用：通过本机 Node worker 调用官方 `@anthropic-ai/claude-agent-sdk`，复用用户本机 Claude Code 配置。非 Tauri（Web 浏览器预览 / E2E）环境 fail-closed，返回「需要桌面版」提示，不再有 fake agent 兜底。执行步骤面板会显示阶段 skill、工具可用状态摘要和 artifact 事件；真实 `tool_use/tool_result` 解析仍是后续工作。会话支持新建、切换、复制、删除、导出、导入（导出为单会话切片 `.db` 文件，含完整会话：入库时已脱敏的对话、流程进度与拓扑工程，导入后可从原进度续走）；Tauri 运行时使用 SQLite 保存会话恢复状态与拓扑 P0 表，Web/测试环境使用浏览器 `localStorage` 回退。
+## 技术栈
+
+- **前端**：React 19 · Vite · [@xyflow/react](https://reactflow.dev/)（React Flow）· react-markdown · zod
+- **桌面与后端**：Tauri 2.9（Rust）· axum sidecar · SQLite
+- **智能助手运行时**：Node worker · `@anthropic-ai/claude-agent-sdk` · `@modelcontextprotocol/sdk`
+- **测试**：Vitest · Playwright · `cargo test`
+
+## 安装与下载
+
+从 [GitHub Releases](https://github.com/jarbozhang/tsn-agent/releases) 下载对应平台的安装包：
+
+| 平台 | 安装包 |
+| --- | --- |
+| macOS | `.dmg`（Apple Silicon / Intel） |
+| Windows | `setup.exe`（NSIS）/ `.msi` |
+| Linux | `.deb` / `.rpm` |
+
+**前置要求**：本机需安装 [Claude Code](https://claude.com/claude-code) 并完成登录。应用通过本机 Claude Code 运行智能助手；未登录时会提示「需要桌面版」，不提供模拟兜底。
 
 ## 开发
 
 ```bash
 npm install
+npm run tauri dev      # 启动桌面开发环境
+```
+
+仅前端预览（智能助手在非桌面环境 fail-closed）：
+
+```bash
 npm run dev
 ```
 
-Tauri 开发入口：
+### 测试
 
 ```bash
-npm run tauri dev
+npm test               # 前端单元测试（Vitest）
+npm run e2e            # 端到端测试（Playwright）
+npm run cargo:test     # Rust 测试
+npm run build          # 类型检查 + 构建
 ```
 
-## 测试
+### 构建与发布
 
 ```bash
-npm test
-npm run build
-npm run e2e
-npm run cargo:test
+npm run build:worker   # 打包 Node worker + tsn_topology MCP + 内置 claude binary
+npm run tauri build    # 构建桌面安装包
 ```
 
-测试范围说明见 `docs/testing.md`。
+正式发布走 GitHub Actions（`.github/workflows/production-build.yml`）：推送 `release/**` 分支即触发全平台构建，版本号由 `scripts/prepare-release.mjs` 按 conventional commits 自动推算。
 
-真实 Claude 对接要求本机已安装 Node.js，并且 Claude Code 已完成登录。应用不会读取或保存 Claude Code 凭证，SQLite 只保存脱敏后的会话文本、agent event 摘要、canonical state 和导出清单。
+## 项目结构
 
-## 目录边界
+```
+src/             React 前端（topology 画布 / sessions / agent / skills / diagnostics …）
+src-tauri/       Rust：Tauri commands、axum sidecar、SQLite、会话导入导出、Skill 出厂播种
+src-node/        Node worker（claude-agent-sdk）与 tsn_topology MCP server
+.claude/skills/  出厂 Skill 指引（tsn-topology、tsn-flow-planning）
+docs/            文档（brainstorms / plans / solutions / adr）
+scripts/         构建与发布脚本
+tsn-topology/    独立 skill 仓库的只读迁移参考，不纳入根 Git 管理
+```
 
-`tsn-topology/` 是已有的独立 skill 仓库，当前存在未提交修改。根目录应用把它作为只读迁移参考，不纳入根 Git 管理，也不会在本 MVP 中修改其中内容。
+## 路线图
+
+「模拟仿真」阶段（Phase B）回归后将生成面向 INET/OMNeT++ 的项目导出文件：`network.ned`、`omnetpp.ini`、`react-flow-topology.json`、`flow_plan_1.json` 与导出清单 `manifest.json`。`omnetpp.ini` 仅承诺让 INET/OMNeT++ 加载运行基础拓扑；gPTP、TAS/GCL、调度器选择与业务流应用放在后续 `inet-export` skill 中扩展。
+
+## 许可证
+
+私有项目，暂未开源授权。
