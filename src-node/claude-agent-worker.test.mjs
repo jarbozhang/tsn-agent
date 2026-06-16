@@ -529,11 +529,14 @@ describe("claude-agent-worker", () => {
     expect(payload.stageChangeRequest).toEqual({ targetStage: "time-sync" });
   });
 
-  it("U2: the stage-change tool is whitelisted in every stage (also without topology config)", () => {
+  it("U2: stage-change tool is whitelisted in every stage; topology write tools only in the topology stage", () => {
     const topologyStage = buildAllowedToolsForStage({ stage: "topology" }, true);
-    const timeSyncStage = buildAllowedToolsForStage({ stage: "time-sync" }, false);
+    const timeSyncStage = buildAllowedToolsForStage({ stage: "time-sync" }, true);
     expect(topologyStage).toContain(REQUEST_STAGE_CHANGE_TOOL_NAME);
     expect(timeSyncStage).toContain(REQUEST_STAGE_CHANGE_TOOL_NAME);
+    // 拓扑写工具只在拓扑阶段开放——非拓扑阶段直写库的结果不会被对账，会让工程与 workflow 静默分叉。
+    expect(topologyStage).toContain("mcp__tsn_topology__topology_apply_operations");
+    expect(timeSyncStage).not.toContain("mcp__tsn_topology__topology_apply_operations");
   });
 
   it("U2: extracts a stage-change proposal in a non-topology stage (no stage gate)", () => {

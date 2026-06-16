@@ -138,6 +138,17 @@ export function recordStageResult(
   };
 }
 
+// 任一阶段转移都作废上一轮未确认的回退提议——pendingStageChange 不得跨转移残留，
+// 否则确认按钮会指向一个已经过期的回退目标（确定性状态归状态机骨架）。
+export function clearPendingStageChange(workflow: WorkflowState): WorkflowState {
+  if (!workflow.pendingStageChange) {
+    return workflow;
+  }
+
+  const { pendingStageChange: _drop, ...rest } = workflow;
+  return rest;
+}
+
 export function confirmCurrentStage(workflow: WorkflowState, createdAt = new Date().toISOString()): WorkflowState {
   const currentStep = workflow.currentStep;
   const stage = workflow.stages[currentStep];
@@ -158,14 +169,14 @@ export function confirmCurrentStage(workflow: WorkflowState, createdAt = new Dat
   };
 
   if (!nextStep) {
-    return {
+    return clearPendingStageChange({
       ...workflow,
       stages: confirmedStages,
       availableActions: [],
-    };
+    });
   }
 
-  return {
+  return clearPendingStageChange({
     ...workflow,
     currentStep: nextStep,
     stages: {
@@ -179,7 +190,7 @@ export function confirmCurrentStage(workflow: WorkflowState, createdAt = new Dat
       },
     },
     availableActions: actionsForStage({ step: nextStep, status: "current" }),
-  };
+  });
 }
 
 export function requestStageChanges(
@@ -220,12 +231,12 @@ export function requestStageChanges(
     }),
   ) as Record<WorkflowStep, WorkflowStageState>;
 
-  return {
+  return clearPendingStageChange({
     ...workflow,
     currentStep: step,
     stages,
     availableActions: actionsForStage(stages[step]),
-  };
+  });
 }
 
 export function getNextWorkflowStep(step: WorkflowStep): WorkflowStep | undefined {

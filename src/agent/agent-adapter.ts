@@ -12,6 +12,7 @@ import {
 import { getScenarioConfig, WORKFLOW_STEPS, type WorkflowStep } from "../domain/scenario-config";
 import { redactProviderNamesForDisplay } from "../ui/display-redaction";
 import {
+  clearPendingStageChange,
   confirmCurrentStage,
   normalizeWorkflowState,
   recordStageResult,
@@ -234,7 +235,14 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
 function runConfirmAction(workflow: WorkflowState): TsnAgentResult {
   if (workflow.pendingStageChange) {
     const target = workflow.pendingStageChange;
-    const switched: WorkflowState = { ...requestStageChanges(workflow, target), pendingStageChange: undefined };
+    // requestStageChanges 会清空 pendingStageChange 并把后续阶段重置为 locked。
+    const switched = requestStageChanges(workflow, target);
+
+    // 回退到 time-sync 需重新自动生成摘要并进入待确认——否则会停在 current 且无确认按钮（死胡同）。
+    if (target === "time-sync" && switched.stages["time-sync"].status === "current") {
+      return runTimeSyncStage(switched);
+    }
+
     const scenarioConfig = getScenarioConfig(workflow.scenarioConfigId);
     const events = [
       createEvent({
@@ -401,15 +409,6 @@ function asStageChangeRequest(value: unknown): StageChangeRequest | undefined {
 
 function isLegalStageSwitchTarget(target: string): target is WorkflowStep {
   return (STAGE_SWITCH_TARGETS as readonly string[]).includes(target);
-}
-
-function clearPendingStageChange(workflow: WorkflowState): WorkflowState {
-  if (!workflow.pendingStageChange) {
-    return workflow;
-  }
-
-  const { pendingStageChange: _drop, ...rest } = workflow;
-  return rest;
 }
 
 function applyStageResults(input: {
@@ -603,25 +602,14 @@ function applyStageChangeRequest(
     };
   }
 
-  // 往后回退（破坏性）：记 pending + 当前阶段进入 waiting_confirmation（复用确认按钮），不立即执行。
+  // 往后回退（破坏性）：只记 pendingStageChange，不改任何阶段状态——确认按钮的显隐由
+  // pendingStageChange 决定（见 chat-pane）。若放弃提议（下一轮自由文本），clearPendingStageChange
+  // 直接抹掉它、按钮随之消失，不会留下指向过期目标的「幽灵」待确认状态。
   const reasonSuffix = request.reason ? `（${request.reason}）` : "";
   const summary = `切回${scenarioConfig.stageLabels[target]}会让其后已完成的阶段重新来过${reasonSuffix}。确认要切回吗？确认后点「确认并继续」。`;
-  const pendingWorkflow: WorkflowState = {
-    ...workflow,
-    pendingStageChange: target,
-    stages: {
-      ...workflow.stages,
-      [workflow.currentStep]: {
-        ...workflow.stages[workflow.currentStep],
-        status: "waiting_confirmation",
-        summary,
-      },
-    },
-    availableActions: ["confirm-stage", "request-changes"],
-  };
 
   return {
-    workflow: pendingWorkflow,
+    workflow: { ...workflow, pendingStageChange: target },
     events: [
       createEvent({
         id: "event-stage-change-pending",
@@ -713,6 +701,9 @@ function buildConversationContext(
     "重要：固定阶段顺序是拓扑 -> 时间同步 -> 流量规划 -> 模拟仿真。拓扑确认后必须进入时间同步，不要说进入配置控制流或流量规划。",
     "重要：流量规划与规划导出在当前版本暂时下线，不要声称可以生成流量规划或导出文件。",
     "重要：当前应用还没有接入 OMNeT++/远程仿真 runner。不能声称已经启动仿真、正在 SSH 执行，或稍后通知仿真结果。",
+    workflow.pendingStageChange
+      ? `重要：已有一个待用户确认的回退提议（目标阶段：${scenarioConfig.stageLabels[workflow.pendingStageChange]}）。不要重复调用 request_stage_change；等待用户点确认按钮。`
+      : "",
     "",
     "最近对话：",
     recentMessages || "暂无历史对话。",

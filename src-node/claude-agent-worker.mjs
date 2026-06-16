@@ -28,7 +28,9 @@ export const REQUEST_STAGE_CHANGE_TOOL_NAME = `mcp__${WORKFLOW_MCP_SERVER_NAME}_
 export const requestStageChangeTool = tool(
   "request_stage_change",
   "当用户想回到之前已完成的阶段（拓扑 topology 或时间同步 time-sync）做修改时调用本工具。targetStage 为目标阶段，reason 为一句话理由。前进到下一阶段由用户点「确认并继续」按钮完成，不要用本工具前进。",
-  { targetStage: z.string(), reason: z.string().optional() },
+  // targetStage 在 schema 层即限定为合法回退目标——非法值由 SDK 拒绝、模型可自纠；
+  // 应用层（agent-adapter）仍独立校验合法性/方向，作纵深防御。
+  { targetStage: z.enum(["topology", "time-sync"]), reason: z.string().optional() },
   async (args) => ({
     content: [
       {
@@ -426,13 +428,18 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
 
 // Phase B-β2：adapter 端非拓扑阶段全部本地拦截，worker 只会收到 topology 阶段；
 // stage runner / flow-template retry 路径已删除。
-export function buildAllowedToolsForStage(_stageRunnerInput, hasTopologyMcpConfig) {
+export function buildAllowedToolsForStage(stageRunnerInput, hasTopologyMcpConfig) {
+  const stage = isRecord(stageRunnerInput) && typeof stageRunnerInput.stage === "string"
+    ? stageRunnerInput.stage
+    : undefined;
   return [
     "Skill",
     "Read",
     // 切阶段工具在所有阶段可用——非拓扑阶段也要能让大模型表达回退意图。
     REQUEST_STAGE_CHANGE_TOOL_NAME,
-    ...(hasTopologyMcpConfig ? TOPOLOGY_MCP_ALLOWED_TOOLS : []),
+    // 拓扑写工具只在拓扑阶段开放：非拓扑阶段直接写库的结果不会被对账（提取按 stage 门槛），
+    // 会让右侧工程与 workflow 状态静默分叉。改拓扑须先经切阶段工具回到拓扑阶段。
+    ...(hasTopologyMcpConfig && stage === "topology" ? TOPOLOGY_MCP_ALLOWED_TOOLS : []),
   ];
 }
 
