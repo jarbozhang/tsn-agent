@@ -20,8 +20,9 @@ const CUSTOMER_VISIBLE_CATEGORY_TITLES = new Set([
   "其他",
 ]);
 
-export const appVersion = packageJson.version;
 export const releaseNotes = parseChangelog(changelogMarkdown);
+// banner 版本号取 CHANGELOG 最新条目，与更新日志保持一致；CHANGELOG 缺失时回退 package.json。
+export const appVersion = releaseNotes[0]?.version ?? packageJson.version;
 
 export function parseChangelog(markdown: string): ReleaseNote[] {
   const lines = markdown.split(/\r?\n/);
