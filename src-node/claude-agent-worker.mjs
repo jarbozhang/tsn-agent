@@ -1,4 +1,5 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { query, createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import { mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -17,6 +18,38 @@ export const TOPOLOGY_MCP_ALLOWED_TOOLS = [
   "mcp__tsn_topology__topology_validate_artifacts",
   "mcp__tsn_topology__topology_apply_operations",
 ];
+
+// U1（独立编排能力）：切阶段工具独立于四个阶段，用 SDK in-process 自定义工具承载，
+// 不连 sidecar、不写状态、不做合法性判断（合法性在应用层 agent-adapter）。它只把
+// 大模型的「想回到哪个阶段」结构化返回；返回值经 stageResults 同款通道回传给应用层。
+const WORKFLOW_MCP_SERVER_NAME = "tsn_workflow";
+export const REQUEST_STAGE_CHANGE_TOOL_NAME = `mcp__${WORKFLOW_MCP_SERVER_NAME}__request_stage_change`;
+
+export const requestStageChangeTool = tool(
+  "request_stage_change",
+  "当用户想回到之前已完成的阶段（拓扑 topology 或时间同步 time-sync）做修改时调用本工具。targetStage 为目标阶段，reason 为一句话理由。前进到下一阶段由用户点「确认并继续」按钮完成，不要用本工具前进。",
+  { targetStage: z.string(), reason: z.string().optional() },
+  async (args) => ({
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          ok: true,
+          stageChangeRequest: {
+            targetStage: args.targetStage,
+            ...(typeof args.reason === "string" && args.reason.length > 0 ? { reason: args.reason } : {}),
+          },
+        }),
+      },
+    ],
+  }),
+);
+
+const workflowMcpServer = createSdkMcpServer({
+  name: WORKFLOW_MCP_SERVER_NAME,
+  version: "1.0.0",
+  tools: [requestStageChangeTool],
+});
 
 export const responseSchema = {
   type: "object",
@@ -124,7 +157,8 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     // 尝试浪费的 turn；prompt 交互规则 1 告知替代路径（中文数字编号选项）。
     disallowedTools: ["AskUserQuestion"],
     skills: ["tsn-topology", "tsn-flow-planning"],
-    ...(topologyMcpConfig ? { mcpServers: topologyMcpConfig } : {}),
+    // tsn_workflow（切阶段工具，in-process）始终注册；tsn_topology 仅在 server 路径存在时注册。
+    mcpServers: { ...(topologyMcpConfig ?? {}), [WORKFLOW_MCP_SERVER_NAME]: workflowMcpServer },
     env: {
       ...process.env,
       TSN_AGENT_STAGE_RESULT_PATH: stageResultPath,
@@ -179,6 +213,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
       }
       collectToolCalls(message);
       captureTopologyStageResults(message);
+      captureStageChangeRequests(message);
 
       if (emittedText.length === 0) {
         for (const text of extractAssistantTextBlocks(message)) {
@@ -195,6 +230,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
       }
       collectToolCalls(message);
       captureTopologyStageResults(message);
+      captureStageChangeRequests(message);
 
       for (const text of extractStreamEventText(message)) {
         emitAssistantChunk(text);
@@ -207,6 +243,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
       }
       collectToolCalls(message);
       captureTopologyStageResults(message);
+      captureStageChangeRequests(message);
     }
 
     if (message.type === "result") {
@@ -238,6 +275,23 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
       emitOperationTrace({
         key: `workflow-stage-result:${extracted.key}`,
         text: `[阶段结果] 拓扑工具结果已生成：${summarizeStageResultForTrace(extracted.result)}`,
+      });
+    }
+  };
+  // U2：切阶段提议与拓扑结果走同一回传通道，但不受拓扑提取的 stage 门槛限制——
+  // 任何阶段调 request_stage_change 都要能被捕获。提议只是「大模型可控的意图」，
+  // 合法性/方向/破坏性确认全在应用层校验（见 agent-adapter applyStageResults）。
+  const captureStageChangeRequests = (message) => {
+    for (const extracted of extractStageChangeRequests(message, toolUseNamesById)) {
+      if (capturedStageResultKeys.has(extracted.key)) {
+        continue;
+      }
+
+      capturedStageResultKeys.add(extracted.key);
+      capturedStageResults.push(extracted.result);
+      emitOperationTrace({
+        key: `stage-change-request:${extracted.key}`,
+        text: `[切阶段] 大模型请求切到阶段：${extracted.result.targetStage}`,
       });
     }
   };
@@ -372,10 +426,12 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
 
 // Phase B-β2：adapter 端非拓扑阶段全部本地拦截，worker 只会收到 topology 阶段；
 // stage runner / flow-template retry 路径已删除。
-function buildAllowedToolsForStage(_stageRunnerInput, hasTopologyMcpConfig) {
+export function buildAllowedToolsForStage(_stageRunnerInput, hasTopologyMcpConfig) {
   return [
     "Skill",
     "Read",
+    // 切阶段工具在所有阶段可用——非拓扑阶段也要能让大模型表达回退意图。
+    REQUEST_STAGE_CHANGE_TOOL_NAME,
     ...(hasTopologyMcpConfig ? TOPOLOGY_MCP_ALLOWED_TOOLS : []),
   ];
 }
@@ -1197,6 +1253,59 @@ export function extractTopologyWorkflowStageResults(message, toolUseNamesById = 
   }
 
   return results;
+}
+
+// U2：从 request_stage_change 工具的 tool_result 提取切阶段提议。与拓扑提取的
+// 边界一致（只认来自该工具调用的结果——大模型在自然语言里写「切到拓扑」但没调
+// 工具则不产生提议），但不接 stageRunnerInput.stage 门槛：任何阶段都要能切。
+// 注意：targetStage 是大模型填的参数，这里不校验合法性（合法性在应用层）。
+export function extractStageChangeRequests(message, toolUseNamesById = new Map()) {
+  const results = [];
+  const contentBlocks = collectContentBlocks(message);
+
+  for (const block of contentBlocks) {
+    if (block?.type !== "tool_result") {
+      continue;
+    }
+
+    const toolUseId = typeof block.tool_use_id === "string" ? block.tool_use_id : undefined;
+    const toolName = toolUseId ? toolUseNamesById.get(toolUseId) : undefined;
+    if (toolName !== REQUEST_STAGE_CHANGE_TOOL_NAME) {
+      continue;
+    }
+
+    const request = extractStageChangeRequest(extractJsonFromToolResultBlock(block));
+    if (!request) {
+      continue;
+    }
+
+    results.push({
+      key: `${toolUseId ?? toolName}:${REQUEST_STAGE_CHANGE_TOOL_NAME}:${request.targetStage}`,
+      result: {
+        kind: "stage-change-request",
+        targetStage: request.targetStage,
+        ...(request.reason ? { reason: request.reason } : {}),
+      },
+    });
+  }
+
+  return results;
+}
+
+function extractStageChangeRequest(value) {
+  if (!isRecord(value) || value.ok !== true || !isRecord(value.stageChangeRequest)) {
+    return undefined;
+  }
+
+  const { targetStage, reason } = value.stageChangeRequest;
+  if (typeof targetStage !== "string" || targetStage.length === 0) {
+    return undefined;
+  }
+
+  return {
+    targetStage,
+    reason: typeof reason === "string" && reason.length > 0 ? reason : undefined,
+  };
 }
 
 function collectContentBlocks(message) {
