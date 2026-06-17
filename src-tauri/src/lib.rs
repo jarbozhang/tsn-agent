@@ -18,6 +18,7 @@ mod topology_position_command;
 mod topology_query_command;
 mod topology_sidecar;
 mod topology_sidecar_routes;
+mod topology_verify;
 
 #[tauri::command]
 fn app_health() -> &'static str {
