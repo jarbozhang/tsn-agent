@@ -234,4 +234,29 @@ mod tests {
         assert!(r.errors.iter().any(|e| e.code == "inet_unreachable"));
         assert!(!r.errors.iter().any(|e| e.code == "inet_load_failed"));
     }
+
+    /// 真机验收（默认 #[ignore]：需本机到远端 INET 免密 + 网络）。用我们代码生成的 bundle
+    /// 真连远端 INET（RemoteConfig::dev_default）跑加载冒烟，断言合法拓扑 EXIT=0 → ok=true。
+    /// 跑：`cargo test --manifest-path src-tauri/Cargo.toml real_inet -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn real_inet_legal_topology_loads() {
+        let nodes = vec![
+            node("0", "switch"),
+            node("1", "switch"),
+            node("2", "endSystem"),
+            node("3", "endSystem"),
+            node("4", "endSystem"),
+        ];
+        let links = vec![
+            link(0, "0", "1"),
+            link(1, "0", "2"),
+            link(2, "0", "3"),
+            link(3, "1", "4"),
+        ];
+        let cfg = RemoteConfig::dev_default();
+        let r = run_inet_verification(&nodes, &links, "real-acceptance", 0, &SshRunner, &cfg);
+        assert!(r.ok, "expected INET load OK, got: {:?}", r.errors);
+        assert_eq!(r.caliber, "loadability_only");
+    }
 }
