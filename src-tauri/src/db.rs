@@ -355,6 +355,14 @@ pub const SESSION_BACKFILL_STATE_SQL: &str = r#"
         ON session_backfill_state(state);
 "#;
 
+/// 端系统持久层标签统一（2026-06-17）：旧版给端系统节点的 `node_type` 存
+/// `networkcard`（借"网卡"一词当节点类型），与应用其余各层统一使用的
+/// `endSystem` 不一致。把存量行刷成 `endSystem`，使库内只有一套叫法。
+/// 纯数据 UPDATE，无匹配行时空跑，幂等。
+pub const RENAME_NETWORKCARD_NODE_TYPE_SQL: &str = r#"
+    UPDATE topology_nodes SET node_type = 'endSystem' WHERE node_type = 'networkcard';
+"#;
+
 pub fn migrations() -> Vec<tauri_plugin_sql::Migration> {
     vec![
         tauri_plugin_sql::Migration {
@@ -379,6 +387,12 @@ pub fn migrations() -> Vec<tauri_plugin_sql::Migration> {
             version: 4,
             description: "create_session_backfill_state",
             sql: SESSION_BACKFILL_STATE_SQL,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
+        tauri_plugin_sql::Migration {
+            version: 5,
+            description: "rename_networkcard_node_type_to_end_system",
+            sql: RENAME_NETWORKCARD_NODE_TYPE_SQL,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
     ]

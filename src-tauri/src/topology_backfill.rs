@@ -182,9 +182,9 @@ pub async fn walker_run_session(pool: &SqlitePool, session_id: &str) -> Result<(
 pub(crate) fn legacy_node_type(canonical: &str) -> &'static str {
     match canonical {
         "switch" => "switch",
-        "endSystem" => "networkcard",
+        "endSystem" => "endSystem",
         "server" => "server",
-        _ => "networkcard",
+        _ => "endSystem",
     }
 }
 
@@ -289,6 +289,15 @@ mod tests {
         sqlx::query(&crate::db::safety_net_schema_sql())
             .execute(&pool).await.unwrap();
         pool
+    }
+
+    #[test]
+    fn legacy_node_type_maps_end_system_without_networkcard() {
+        // 端系统持久层标签已统一为 endSystem，不再产生旧的 networkcard。
+        assert_eq!(legacy_node_type("switch"), "switch");
+        assert_eq!(legacy_node_type("endSystem"), "endSystem");
+        assert_eq!(legacy_node_type("server"), "server");
+        assert_eq!(legacy_node_type("anything-else"), "endSystem");
     }
 
     #[test]
