@@ -8,6 +8,9 @@ mod session_import;
 mod session_store;
 mod skill_factory_hashes;
 mod skill_files;
+mod inet_bundle;
+mod inet_remote;
+mod inet_verify_command;
 mod topology_backfill;
 mod topology_compute;
 mod topology_intermediate;
@@ -93,6 +96,7 @@ pub fn run() {
             topology_position_command::update_node_position,
             topology_query_command::query_topology,
             topology_query_command::verify_topology,
+            inet_verify_command::verify_inet,
             session_store::get_current_session,
             session_store::list_sessions,
             session_store::remove_session,
