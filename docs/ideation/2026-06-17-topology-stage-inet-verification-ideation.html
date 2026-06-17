@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>点子梳理：拓扑阶段的 INET 验证</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#161c24; --panel2:#1d242e; --tx:#e6edf3; --muted:#9aa7b4;
+    --line:#2a333f; --accent:#6cb6ff; --accent-soft:#13243a; --accent-tx:#9ecbff;
+    --good:#7ee2a8; --good-soft:#13291d; --warn:#ffce8a; --warn-soft:#2e2415;
+    --bad:#ff9a9a; --bad-soft:#2e1818;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+    font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:900px;margin-inline:auto;padding:48px 24px 80px}
+  h1{font-size:30px;line-height:1.25;margin:0 0 6px}
+  h2{font-size:21px;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:17px;margin:0 0 4px}
+  p{margin:10px 0}
+  .eyebrow{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-tx);font-weight:600}
+  .meta{color:var(--muted);font-size:13px;margin:10px 0 0}
+  .meta code{background:var(--panel2);padding:1px 6px;border-radius:5px;color:var(--tx)}
+  code{background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:.88em;
+    font-family:"SF Mono",ui-monospace,Menlo,monospace}
+  section{margin-top:8px}
+  .lead{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:18px 0}
+  .axes{display:grid;gap:10px;margin:14px 0}
+  .axis{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .axis b{color:var(--accent-tx)}
+  .jump{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:14px 0}
+  .jump ol{margin:6px 0 0;padding-left:22px}
+  .jump a{color:var(--accent-tx);text-decoration:none}
+  .jump a:hover{text-decoration:underline}
+  article.idea{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin:16px 0}
+  .idea-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .rank{font-size:13px;font-weight:700;color:var(--bg);background:var(--accent);
+    border-radius:999px;min-width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;padding:0 8px}
+  .chips{margin:12px 0 4px;display:flex;gap:8px;flex-wrap:wrap}
+  .chip{font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--muted)}
+  .chip.axis{background:var(--accent-soft);color:var(--accent-tx);border-color:#244)}
+  .chip.axis{border-color:#27425f}
+  .chip.conf{background:var(--good-soft);color:var(--good);border-color:#234d33}
+  .chip.cx{background:var(--warn-soft);color:var(--warn);border-color:#4d3f1f}
+  .field{margin:12px 0}
+  .field .lbl{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;display:block;margin-bottom:2px}
+  .basis{border-left:3px solid var(--accent);background:var(--accent-soft);padding:8px 12px;border-radius:0 8px 8px 0}
+  .plain{border-left:3px solid var(--good);background:var(--good-soft);padding:8px 12px;border-radius:0 8px 8px 0}
+  .plain .lbl{color:var(--good)}
+  .down{color:var(--muted)}
+  figure{margin:16px 0;text-align:center}
+  figure svg{max-width:100%;height:auto;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px}
+  figcaption{font-size:12.5px;color:var(--muted);margin-top:6px}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--accent-tx);font-weight:600}
+  td.n{white-space:nowrap;color:var(--muted)}
+  a{color:var(--accent-tx)}
+  footer.composition-signal{margin-top:48px;padding-top:16px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:12.5px}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:5px;background:var(--panel2);color:var(--muted);border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">Ideation · 点子梳理</div>
+  <h1>拓扑阶段的 INET 验证：把库里的拓扑发出去验对不对</h1>
+  <p class="meta">
+    日期 <time datetime="2026-06-17">2026-06-17</time> ·
+    主题 <code>topology-stage-inet-verification</code> ·
+    模式 repo-grounded
+  </p>
+  <p class="meta">聚焦：把已生成在 SQLite 里的拓扑记录，以什么格式、走什么渠道发给 INET（OMNeT++ TSN 仿真）做验证——同时验<b>拓扑图本身</b>和 <b>MAC 转发表</b>；且 MAC 转发表目前还没存进数据库。</p>
+
+  <div class="lead">
+    <p style="margin-top:0"><b>一句话背景</b>：现在拓扑画完之后，软件几乎不知道它"对不对"——唯一的检查只看了"节点数 &gt; 0"和"有没有连到空气的线"。要真正验证，得把拓扑送进 INET 看它能不能跑、转发路径对不对。本次梳理给出 7 个可深入的方向。</p>
+    <p style="margin-bottom:0"><b>两个被核实的关键事实</b>：①「MAC 转发表没存库」属实——但其实代码里早就能用 BFS <b>现算</b>出一张转发表（<code>build_artifacts</code> 里的 <code>build_legacy_mac_forwarding_table</code>），只是算完没保存。② 拓扑节点存的类型是旧的 Qunee 画图类名，不是 INET 认识的模块名——任何"发给 INET"都得先补一张类型对照表。</p>
+  </div>
+
+  <h2>Grounding Context · 代码现状</h2>
+  <section>
+    <p><b>库里的拓扑长什么样</b>：只有两张表真正被写——<code>topology_nodes</code>（节点：编号 imac、名字、类型 switch/endSystem/server、坐标）和 <code>topology_links</code>（链路：两端节点、端口号塞在 styles_json 字符串里、速率）。端口没有结构化成列，速率/队列等更深的字段没落库。</p>
+    <p><b>MAC 转发表 / 各类节点配置表</b>（<code>nodes_array_cfg(fwd_cfg)</code>、<code>nodes_object_cfg(static_mac_cfg)</code> 等）在表结构里定义了，但<b>没有任何生产代码往里写</b>——只有测试和导入回环碰过。所以 boss 说的"MAC 转发表没生成"成立。但 <code>topology_compute.rs:2438</code> 的 BFS 已经能现算出一张转发表（每个交换机 × 每个目的节点 → 出端口），随 <code>build_artifacts</code> 工具吐成 <code>mac-forwarding-table.json</code>，<b>用完即弃、不落库</b>。</p>
+    <p><b>现有"验证"</b>：MCP 的 <code>validate</code> 工具只查"节点数 &gt; 0"和"悬空链路"。<b>没有任何 INET / 语义级验证</b>。</p>
+    <p><b>历史</b>：曾经有一套 INET 导出 + smoke 仿真的计划（05-21-001），整套导出器已被删除；但 <code>docs/ned-contract.md</code> 还留着完整的 NED 导出契约（TsnSwitch / TsnDevice / EthernetLink、INET 4.6、命令 <code>inet -u Cmdenv -f omnetpp.ini -n .</code>）——文档与代码已漂移。</p>
+    <p><b>通道与信任模型</b>：拓扑 sidecar 是进程内的 127.0.0.1 HTTP + 令牌；MCP 工具只是转发给它。<b>今天没有任何进程拉起 INET</b>，远程 API 客户端已删。信任上：worker 只认 MCP 返回里的 <code>mutationId</code>，agent 没有写权限——新验证闸应该是"<b>一条 sidecar 路由 + 一个工具</b>"的同款形状，不要重建那个被删掉的"让大模型回传结果"的协议（多一个事实源正是当年被删的原因）。</p>
+  </section>
+
+  <h2>Topic Axes · 五个验证面</h2>
+  <div class="axes">
+    <div class="axis"><b>A 验什么</b>：拓扑图有效性（连通/端口配对/链路对称/角色约束/编号重复）vs MAC 转发表有效性（可达/无环/路径全覆盖/与拓扑一致）。两个不同目标。</div>
+    <div class="axis"><b>B MAC 表从哪来</b>：现在没存——现算现用（已有 BFS）/ 存库再验 / 让 INET 自己生成再对账。先有数据才能验它。</div>
+    <div class="axis"><b>C 发出去长什么样</b>：INET 原生的 NED+INI+XML / TSNsched 式 JSON / 旧的 build_artifacts JSON / 专门的转发表 XML。</div>
+    <div class="axis"><b>D 怎么发、在哪跑</b>：进程内 sidecar 拉本地 INET / 远程仿真主机（HTTP 或 SSH+SCP）/ MCP 工具 / worker 拉起。</div>
+    <div class="axis"><b>E 绿勾代表什么、结论怎么回传</b>：纯结构检查（不跑仿真）/ INET "能加载运行" smoke / 真正的可调度性（NC/SMT）；口径标注；结论经可信 sidecar 路由回传。</div>
+  </div>
+
+  <h2>Ranked Ideas · 排序后的点子</h2>
+  <div class="jump">
+    <b>跳转</b>
+    <ol>
+      <li><a href="#i1">零仿真结构校验器（先落地、不依赖 INET）</a></li>
+      <li><a href="#i2">一句人话结论 + 口径标签</a></li>
+      <li><a href="#i3">MAC 转发表现算现验、不落库</a></li>
+      <li><a href="#i4">让 INET 自己生成转发表，再跟我们的对账（INET 当裁判）</a></li>
+      <li><a href="#i5">节点类型→INET 模块 的对照表：先建这块砖</a></li>
+      <li><a href="#i6">序列化即交付物：一个 inet-bundle 验证与导出共用</a></li>
+      <li><a href="#i7">远程仿真主机 + 阶段无关的验证通道</a></li>
+    </ol>
+  </div>
+
+  <!-- IDEA 1 -->
+  <article class="idea" id="i1">
+    <div class="idea-head"><span class="rank">1</span><h3>零仿真结构校验器（先落地、不依赖 INET）</h3></div>
+    <div class="chips">
+      <span class="chip axis">面 A · 验什么</span>
+      <span class="chip conf">把握 90%</span>
+      <span class="chip cx">复杂度 低</span>
+    </div>
+    <div class="field"><span class="lbl">说明</span>
+      <p>大部分"拓扑对不对"根本不用跑仿真，是纯图论：连通性、端口两两配对、链路对称、有没有孤立节点、交换机/端系统角色是否合法、编号是否重复。加一条 sidecar 路由 <code>/db/topology/verify</code>，直接读库里的 <code>topology_nodes</code>+<code>topology_links</code>，把这些检查做完，返回 <code>{ok, errors[], signalId}</code>。检查规则做成一张"声明式规则清单"（数据，不是写死的 if），以后加规则就是加一行。这一半立刻能上、随时能跑、断网也能跑，是把"拓扑验证"拆成"先结构、后仿真"里能马上交付的那一半。</p>
+    </div>
+    <figure>
+      <svg viewBox="0 0 560 150" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,PingFang SC,sans-serif" font-size="12">
+        <rect x="14" y="55" width="120" height="40" rx="8" fill="#1d242e" stroke="#2a333f"/>
+        <text x="74" y="80" fill="#e6edf3" text-anchor="middle">库里的拓扑</text>
+        <text x="74" y="118" fill="#9aa7b4" text-anchor="middle">nodes + links</text>
+        <line x1="134" y1="75" x2="200" y2="75" stroke="#6cb6ff" stroke-width="2" marker-end="url(#a1)"/>
+        <rect x="200" y="40" width="170" height="70" rx="8" fill="#13243a" stroke="#27425f"/>
+        <text x="285" y="66" fill="#9ecbff" text-anchor="middle" font-weight="600">规则清单逐条核</text>
+        <text x="285" y="86" fill="#9aa7b4" text-anchor="middle" font-size="11">连通·端口·对称·角色·重复</text>
+        <line x1="370" y1="75" x2="436" y2="75" stroke="#6cb6ff" stroke-width="2" marker-end="url(#a1)"/>
+        <rect x="436" y="55" width="112" height="40" rx="8" fill="#13291d" stroke="#234d33"/>
+        <text x="492" y="73" fill="#7ee2a8" text-anchor="middle">一句话结论</text>
+        <text x="492" y="89" fill="#9aa7b4" text-anchor="middle" font-size="11">+ 错误清单</text>
+        <defs><marker id="a1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#6cb6ff"/></marker></defs>
+      </svg>
+      <figcaption>结构校验全程不碰仿真器：读库 → 规则清单 → 结论。这是能最先上线的一块。</figcaption>
+    </figure>
+    <div class="field basis"><span class="lbl">依据 direct</span>
+      <p>现有 <code>validate</code> 只查节点数+悬空链路（<code>topology-tools.ts</code>）；图数据已完整落库；前序梳理已定调验证闸形状为 <code>/db/&lt;stage&gt;/verify → {ok,errors[],signalId}</code>。规则清单形状来自跨域类比（芯片设计的 DRC 规则库与检查引擎分离）。</p>
+    </div>
+    <div class="field"><span class="lbl">为何重要</span><p>它把"拓扑验证"里最便宜、最确定的一半立刻变现，且不被 INET 环境拖住；INET 只留给图论答不了的问题。</p></div>
+    <div class="field"><span class="lbl">代价</span><p class="down">结构对 ≠ 时延/调度对——必须靠口径标签（点子 2）说清"这只是结构级"，否则会被误读成"已验证通过"。</p></div>
+  </article>
+
+  <!-- IDEA 2 -->
+  <article class="idea" id="i2">
+    <div class="idea-head"><span class="rank">2</span><h3>一句人话结论 + 口径标签</h3></div>
+    <div class="chips">
+      <span class="chip axis">面 E · 绿勾代表什么</span>
+      <span class="chip conf">把握 85%</span>
+      <span class="chip cx">复杂度 低</span>
+    </div>
+    <div class="field"><span class="lbl">说明</span>
+      <p>不管后台做的是结构检查、INET 加载 smoke 还是更深的验证，回给用户的永远是<b>一句中文结论</b>（如"拓扑连通、端口配对正确，可用"或"交换机 SW3 有一条线没接对端，拓扑不完整"），仿真器的原始输出收进可展开的细节里。同时每个结论强制带一个<b>口径标签</b>（仅结构 / 仅能加载运行 / 已验可调度性），并把工具命名为 <code>simulation_loadability_check</code> 而不是含糊的 <code>tsn_verify</code>——让"绿勾"在界面上永远不可能脱离它的适用范围单独出现。</p>
+    </div>
+    <figure>
+      <svg viewBox="0 0 540 168" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,PingFang SC,sans-serif" font-size="12">
+        <text x="20" y="22" fill="#9aa7b4" font-size="11">验证强度阶梯（绿勾必须说清自己在第几级）</text>
+        <rect x="20" y="34" width="500" height="30" rx="6" fill="#13291d" stroke="#234d33"/>
+        <text x="32" y="53" fill="#7ee2a8">① 结构正确</text>
+        <text x="200" y="53" fill="#9aa7b4" font-size="11">连通/端口/角色 — 不跑仿真，随时可得</text>
+        <rect x="20" y="70" width="500" height="30" rx="6" fill="#2e2415" stroke="#4d3f1f"/>
+        <text x="32" y="89" fill="#ffce8a">② 能加载运行</text>
+        <text x="200" y="89" fill="#9aa7b4" font-size="11">INET 能跑起来 — 不等于时延有保证</text>
+        <rect x="20" y="106" width="500" height="30" rx="6" fill="#1d242e" stroke="#2a333f"/>
+        <text x="32" y="125" fill="#9aa7b4">③ 可调度性</text>
+        <text x="200" y="125" fill="#9aa7b4" font-size="11">最坏时延 NC/SMT — 暂不做，但占好位</text>
+        <text x="20" y="158" fill="#ff9a9a" font-size="11">危险：把 ① 或 ② 的绿勾读成"③ 已保证"——口径标签就是为了堵死这个</text>
+      </svg>
+      <figcaption>同一个"绿"在不同级别含义完全不同；标签把级别钉死在数据里，界面无法丢。</figcaption>
+    </figure>
+    <div class="field plain"><span class="lbl">为何对 boss 关键</span>
+      <p>boss 看不懂工程术语——一份看不懂结论的验证功能等于没用。"一句人话"是真正的交付物，仿真只是它的来源。</p>
+    </div>
+    <div class="field basis"><span class="lbl">依据 direct + external</span>
+      <p>前序梳理点子 #5 已要求口径隔离（强制 <code>coverage</code> 字段、命名 <code>simulation_loadability_check</code>）；外部 DO-178C 分级保证、"仿真是统计下界不是可调度性证明"。现在（planning-export 还没建）是钉死这套命名最便宜的时机。</p>
+    </div>
+    <div class="field"><span class="lbl">代价</span><p class="down">需要约定一套结论文案模板；多个级别的口径词要提前统一，否则后面四个阶段各说各话。</p></div>
+  </article>
+
+  <!-- IDEA 3 -->
+  <article class="idea" id="i3">
+    <div class="idea-head"><span class="rank">3</span><h3>MAC 转发表现算现验、不落库</h3></div>
+    <div class="chips">
+      <span class="chip axis">面 B · MAC 表从哪来</span>
+      <span class="chip conf">把握 80%</span>
+      <span class="chip cx">复杂度 低-中</span>
+    </div>
+    <div class="field"><span class="lbl">说明</span>
+      <p>MAC 转发表是拓扑的纯函数——已有的 BFS（<code>build_legacy_mac_forwarding_table</code>）就能从节点+链路算出来。所以不必先存库再验：验证路由在同一次调用里现算这张表，并直接校验算出来的结果（每个目的地恰好一个出端口、不指回源头形成环、所有可达端系统都覆盖、出端口确实在该交换机上），算完即弃。等于把"该不该给数据库加 MAC 列/写入器"这个争论整个绕过去——数据已存在，验它的计算结果就好，数据库保持单一事实源。</p>
+    </div>
+    <div class="field basis"><span class="lbl">依据 direct</span>
+      <p><code>topology_compute.rs:2438-2475</code> 的 BFS 已现算每交换机×每目的的出端口、随响应吐出、从不落库；那些 MAC 配置表零生产写入者。换句话说：表能算，只是没存。</p>
+    </div>
+    <div class="field"><span class="lbl">为何重要</span><p>直面"MAC 表没生成"的真相，并选了改动最小的解法（现算现验），契合"不留冗余、单路径"的信任纪律。这是"验 MAC 表有效性"这半最便宜的入口。</p></div>
+    <div class="field"><span class="lbl">代价</span><p class="down">如果未来有真实消费者（真机/规划引擎）确实需要持久化的 MAC 表，那是另一个由消费者驱动的决定，不在本验证范围里。</p></div>
+  </article>
+
+  <!-- IDEA 4 -->
+  <article class="idea" id="i4">
+    <div class="idea-head"><span class="rank">4</span><h3>让 INET 自己生成转发表，再跟我们的对账（INET 当裁判）</h3></div>
+    <div class="chips">
+      <span class="chip axis">面 A/B · 验什么 + 表从哪来</span>
+      <span class="chip conf">把握 75%</span>
+      <span class="chip cx">复杂度 中-高</span>
+    </div>
+    <div class="field"><span class="lbl">说明</span>
+      <p>与其由我们断言"这张转发表对不对"（需要先定义什么叫对），不如让 INET 用它自带的转发表配置器从拓扑自动生成一张 FDB，再把它和我们 BFS 算出来的那张<b>逐条对账</b>：一致 = 我们的算法和一个成熟参考实现吻合；不一致 = 精确定位到哪个"交换机×目的"的出端口对不上（像 <code>terraform plan</code> 那样给出逐项差异，而不是一个 pass/fail）。这同时化解了"MAC 表对谁有效"的悬而未决——把 INET 自己当作那个权威消费者。</p>
+    </div>
+    <figure>
+      <svg viewBox="0 0 560 176" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,PingFang SC,sans-serif" font-size="12">
+        <rect x="20" y="30" width="150" height="42" rx="8" fill="#13243a" stroke="#27425f"/>
+        <text x="95" y="51" fill="#9ecbff" text-anchor="middle">我们 BFS 算的表</text>
+        <text x="95" y="66" fill="#9aa7b4" text-anchor="middle" font-size="11">build_artifacts</text>
+        <rect x="20" y="104" width="150" height="42" rx="8" fill="#1d242e" stroke="#2a333f"/>
+        <text x="95" y="125" fill="#e6edf3" text-anchor="middle">INET 自动生成的表</text>
+        <text x="95" y="140" fill="#9aa7b4" text-anchor="middle" font-size="11">configurator 自学</text>
+        <line x1="170" y1="51" x2="250" y2="80" stroke="#6cb6ff" stroke-width="2" marker-end="url(#a4)"/>
+        <line x1="170" y1="125" x2="250" y2="96" stroke="#6cb6ff" stroke-width="2" marker-end="url(#a4)"/>
+        <rect x="250" y="62" width="110" height="52" rx="8" fill="#2e2415" stroke="#4d3f1f"/>
+        <text x="305" y="84" fill="#ffce8a" text-anchor="middle" font-weight="600">逐条对账</text>
+        <text x="305" y="102" fill="#9aa7b4" text-anchor="middle" font-size="11">diff</text>
+        <line x1="360" y1="88" x2="430" y2="88" stroke="#6cb6ff" stroke-width="2" marker-end="url(#a4)"/>
+        <rect x="430" y="62" width="110" height="52" rx="8" fill="#13291d" stroke="#234d33"/>
+        <text x="485" y="84" fill="#7ee2a8" text-anchor="middle">一致 / 哪条不一致</text>
+        <text x="485" y="102" fill="#9aa7b4" text-anchor="middle" font-size="11">可定位到端口</text>
+        <defs><marker id="a4" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#6cb6ff"/></marker></defs>
+      </svg>
+      <figcaption>不去定义"绝对正确"，而是检验"两个独立计算是否一致"——差异本身就是可执行的证据。</figcaption>
+    </figure>
+    <div class="field basis"><span class="lbl">依据 external + direct</span>
+      <p>INET 可用 <code>*.macForwardingTableConfigurator.typename=""</code> 切换自动/静态 FDB；"期望 vs 实际"对账模式来自 Cumulus NetQ / 西门子 PRONETA；我们的 BFS 表已存在可供对账。6 个生成视角中有 6 个独立收敛到这个方向，是最被反复指向的点子。</p>
+    </div>
+    <div class="field"><span class="lbl">为何重要</span><p>它才是 boss 真正问的"发给 INET 验 MAC 转发表"，且把"对谁有效"这个隐藏假设变成了屏幕上可见的差异表。</p></div>
+    <div class="field"><span class="lbl">代价</span><p class="down">依赖能跑起来的 INET（见点子 5、7 的前置）；对账口径要明确（INET 走最短路，我们的 BFS 也走最短路，规则要对齐）。</p></div>
+  </article>
+
+  <!-- IDEA 5 -->
+  <article class="idea" id="i5">
+    <div class="idea-head"><span class="rank">5</span><h3>节点类型→INET 模块 的对照表：先建这块砖</h3></div>
+    <div class="chips">
+      <span class="chip axis">面 C · 发出去长什么样</span>
+      <span class="chip conf">把握 80%</span>
+      <span class="chip cx">复杂度 中</span>
+    </div>
+    <div class="field"><span class="lbl">说明</span>
+      <p>库里节点存的类型是旧的 Qunee 画图类名（<code>Q.Graphs.exchanger2 / node / server</code>），不是 INET 认识的模块（<code>TsnSwitch / TsnDevice</code>）。任何"发给 INET"都必须先过这道翻译。把它做成一张<b>带版本号的对照表（数据资产）</b>，并升格为一项验证检查：任何节点的类型在表里找不到对应，就是一个 <code>unmappable_node_type</code> 错误，在 INET 还没启动前就明确报出来（而不是生成一个坏掉的 NED 文件、让 INET 抛一句看不懂的崩溃）。还可加一道"导出→重新解析→比对"的往返检查，确保翻译无损。</p>
+    </div>
+    <div class="field basis"><span class="lbl">依据 direct</span>
+      <p>调研确认存的 <code>sync_type._classPath</code> 是 Qunee 类、非 INET NED 模块，"任何 INET 导出都需要一张新的类型映射"。这是所有 INET 路径共同的前置长杆。</p>
+    </div>
+    <div class="field"><span class="lbl">为何重要</span><p>把一类"INET 莫名加载失败"的隐性故障，前移成一句精确、可行动的应用内报错；同时这张翻译表是后面每个碰 INET 的阶段都要跨的边界，做成单一资产可复用。</p></div>
+    <div class="field"><span class="lbl">代价</span><p class="down">需要有人确定并维护这张对照表；server 类型映射到哪个 INET 模块需要确认。</p></div>
+  </article>
+
+  <!-- IDEA 6 -->
+  <article class="idea" id="i6">
+    <div class="idea-head"><span class="rank">6</span><h3>序列化即交付物：一个 inet-bundle 验证与导出共用</h3></div>
+    <div class="chips">
+      <span class="chip axis">面 C · 发出去长什么样（杠杆）</span>
+      <span class="chip conf">把握 65%</span>
+      <span class="chip cx">复杂度 中-高</span>
+    </div>
+    <div class="field"><span class="lbl">说明</span>
+      <p>定义<b>一套</b>序列化产物——<code>{network.ned, omnetpp.ini, fdb.xml, manifest.json}</code>——验证时用的就是这个包，不另造一份临时格式；将来 planning-export 真要导出时，沿用同一套布局（只在 ini 里加 GCL/流），而不是再发明一个并行格式。manifest 里钉上 <code>{格式版本, 来源 mutationId, 口径}</code> 作为统一的来源头。配套：检查器与生成器解耦（CI 里用一个已知好/已知坏的样例分别断言"必过/必拒"），并把还留在磁盘上的 <code>docs/ned-contract.md</code> 从"漂移的死文档"升级为生成器输出要满足的可执行契约。</p>
+    </div>
+    <div class="field basis"><span class="lbl">依据 direct + reasoned</span>
+      <p>旧的导出器（ned/ini/gcl 等多文件）已删除、<code>docs/ned-contract.md</code> 仍在磁盘描述着不存在的目录（漂移）；这是四个阶段验证里的第一个，现在选定的格式会被后三个阶段继承——此刻钉死格式是最便宜的时机。</p>
+    </div>
+    <div class="field"><span class="lbl">为何重要</span><p>最贵、最难改的就是被多个下游依赖的序列化格式。趁只有拓扑用它时定下来，避免"验证用一份、真导出又一份"的重复，也把唯一幸存的契约文档变成资产而非负债。</p></div>
+    <div class="field"><span class="lbl">代价</span><p class="down">需要先想清楚 export 阶段的需求，否则"通用格式"可能猜错；属于偏前期投资，单独看本期收益不如点子 1-3 直接。</p></div>
+  </article>
+
+  <!-- IDEA 7 -->
+  <article class="idea" id="i7">
+    <div class="idea-head"><span class="rank">7</span><h3>远程仿真主机 + 阶段无关的验证通道</h3></div>
+    <div class="chips">
+      <span class="chip axis">面 D · 怎么发、在哪跑</span>
+      <span class="chip conf">把握 70%</span>
+      <span class="chip cx">复杂度 高</span>
+    </div>
+    <div class="field"><span class="lbl">说明</span>
+      <p>INET/OMNeT++ 是个重型本地依赖，不太可能塞进桌面应用。让它跑在<b>远程仿真主机</b>上：sidecar 把序列化好的包通过 SSH/SCP 送到一个按次隔离的远程目录，用结构化参数（不是拼 shell 字符串）跑 <code>inet -u Cmdenv -f omnetpp.ini -n .</code> 的加载 smoke，带超时、进程组杀、密钥脱敏，结果经可信 sidecar 路由回来。关键设计：这条路由从第一天就做成<b>阶段无关</b> <code>/verify/inet</code>（带 <code>stage</code> 参数），让后面 time-sync/flow/export 复用同一套"导出+跑+回收"管线，而不是各建一条。</p>
+    </div>
+    <figure>
+      <svg viewBox="0 0 560 138" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,PingFang SC,sans-serif" font-size="12">
+        <rect x="18" y="48" width="150" height="46" rx="8" fill="#161c24" stroke="#2a333f"/>
+        <text x="93" y="68" fill="#e6edf3" text-anchor="middle">桌面应用（瘦）</text>
+        <text x="93" y="85" fill="#9aa7b4" text-anchor="middle" font-size="11">sidecar /verify/inet</text>
+        <line x1="168" y1="71" x2="240" y2="71" stroke="#6cb6ff" stroke-width="2" marker-end="url(#a7)"/>
+        <text x="204" y="62" fill="#9aa7b4" text-anchor="middle" font-size="10">SSH/SCP 包</text>
+        <rect x="240" y="40" width="170" height="62" rx="8" fill="#13243a" stroke="#27425f"/>
+        <text x="325" y="64" fill="#9ecbff" text-anchor="middle" font-weight="600">远程仿真主机</text>
+        <text x="325" y="82" fill="#9aa7b4" text-anchor="middle" font-size="11">装好 INET，跑 smoke</text>
+        <line x1="410" y1="71" x2="482" y2="71" stroke="#6cb6ff" stroke-width="2" marker-end="url(#a7)"/>
+        <text x="446" y="62" fill="#9aa7b4" text-anchor="middle" font-size="10">回收结果</text>
+        <rect x="482" y="48" width="62" height="46" rx="8" fill="#13291d" stroke="#234d33"/>
+        <text x="513" y="75" fill="#7ee2a8" text-anchor="middle">结论</text>
+        <text x="93" y="120" fill="#9aa7b4" font-size="10">阶段无关：time-sync/flow/export 后续复用同一条通道</text>
+        <defs><marker id="a7" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#6cb6ff"/></marker></defs>
+      </svg>
+      <figcaption>重依赖留在远端，应用保持可安装；通道做成阶段无关，是后三个阶段的复用底座。</figcaption>
+    </figure>
+    <div class="field basis"><span class="lbl">依据 direct</span>
+      <p>前序梳理已提"阶段无关 <code>/verify/inet</code>"；被删的 05-21-001 留下了可复用的跨机纪律（SSH/SCP 按次目录、结构化参数、超时、进程组杀、脱敏）；今天 worker 是唯一的外部进程拉起点。</p>
+    </div>
+    <div class="field"><span class="lbl">为何重要</span><p>决定了 INET 物理上在哪跑——本地-only 会把大多数没装 OMNeT++ 的用户挡在门外、让功能形同虚设。通道做成阶段无关，则后三个阶段只需加一套模板而非重建管线。</p></div>
+    <div class="field"><span class="lbl">代价</span><p class="down">本期最复杂的一条，涉及外部主机/认证/网络——属于改变数据流的架构决定，需要 boss 拍板（要不要远程、主机谁提供）。</p></div>
+  </article>
+
+  <h2>Rejection Summary · 落选与原因</h2>
+  <table>
+    <thead><tr><th class="n">#</th><th>点子</th><th>落选原因</th></tr></thead>
+    <tbody>
+      <tr><td class="n">1</td><td>把现算的 MAC 表持久化进库再验</td><td>是"MAC 表从哪来"这道分叉的另一边；现算现验（点子 3）改动更小、不引入会失同步的派生数据。作为备选记录。</td></tr>
+      <tr><td class="n">2</td><td>按每个消费者建 Pact 式契约验 MAC 表</td><td>规划引擎已不消费 MAC 表、真机待定，多消费者验证器属过度设计；并入点子 4（INET 当裁判）+ 点子 2（口径）。</td></tr>
+      <tr><td class="n">3</td><td>每次拓扑改动就增量跑、带缓存（verify-on-write）</td><td>过早优化；结构检查本就便宜，仿真缓存等真接了 INET、有性能问题时再说。</td></tr>
+      <tr><td class="n">4</td><td>完整 DO-178C 分级阶梯（含 not_evaluated 顶层）</td><td>方向对，但本期只实现底部两级；并入点子 2 的口径标签即可表达"未做的更高级别"。</td></tr>
+      <tr><td class="n">5</td><td>opp_test 指纹/golden-file 回归</td><td>是序列化器的回归手段，并入点子 6 的检查器/生成器解耦。</td></tr>
+      <tr><td class="n">6</td><td>对转发表做属性测试（无环/全可达）</td><td>是验证手段而非独立方向；其断言已并入点子 3 的校验项。</td></tr>
+      <tr><td class="n">7</td><td>"导出→重解析→比对"的往返不变量单列</td><td>是点子 5（类型映射）的配套检查，已并入，不单列。</td></tr>
+      <tr><td class="n">8</td><td>把验证结果做成大模型回传的结构化协议</td><td>正是当年 05-21-001 被删的"多事实源"反模式；所有点子都改走 sidecar 单路由+可信信号，故不保留。</td></tr>
+    </tbody>
+  </table>
+
+  <footer class="composition-signal">
+    Composed 2026-06-17 by ce-ideate · 来源：boss 关于"拓扑阶段验证（发库内拓扑给 INET 验拓扑图+MAC 转发表）"的提问 + 代码库调研 + 外部 INET/TSN 实践 + 前序梳理 <code>docs/ideation/2026-06-16-skill-stage-verification-ideation.html</code>
+  </footer>
+
+</div>
+</body>
+</html>
