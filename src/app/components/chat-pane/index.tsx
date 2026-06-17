@@ -114,7 +114,12 @@ export function ChatPane({
               {workflow.pendingStageChange ? (
                 <>
                   <strong>确认切回{scenarioConfig.stageLabels[workflow.pendingStageChange]}</strong>
-                  <p>切回会让其后已完成的阶段重新来过。确认后点下方按钮。</p>
+                  <p>
+                    {workflow.pendingStageChange === "topology"
+                      ? "切回会按你的新要求覆盖重建当前拓扑，其后已完成的阶段也会重新来过。"
+                      : "切回会让其后已完成的阶段重新来过。"}
+                    确认请点右侧按钮。
+                  </p>
                 </>
               ) : (
                 <>
