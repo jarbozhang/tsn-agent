@@ -381,6 +381,9 @@ describe("runTsnAgent", () => {
     expect(result.verification?.ok).toBe(false);
     expect(result.assistantText).toContain("孤立节点");
     expect(result.assistantText).toContain("确认并继续");
+    // 结构失败 → 短路、不进 INET 闸。
+    const inetCalls = invokeMock.mock.calls.filter(([command]) => command === "verify_inet");
+    expect(inetCalls).toHaveLength(0);
   });
 
   it("advances topology confirm through both gates (structural + INET) and merges loadability verdict", async () => {
@@ -465,6 +468,7 @@ describe("runTsnAgent", () => {
     expect(result.verification?.ok).toBe(false);
     expect(result.verification?.caliber).toBe("loadability_only");
     expect(result.assistantText).toContain("INET");
+    expect(result.assistantText).toContain("先修好再继续"); // 可修复语气（区别于 unreachable 中性文案）
   });
 
   it("blocks advance with neutral copy when remote is unreachable (inet_unreachable)", async () => {

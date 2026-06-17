@@ -41,21 +41,25 @@ pub fn run_inet_verification(
         },
         Ok(outcome) => match outcome.exit_code {
             Some(0) => VerifyResult { ok: true, caliber: CALIBER_LOADABILITY_ONLY, errors: vec![] },
-            other => {
-                let code_str = other.map(|c| c.to_string()).unwrap_or_else(|| "未知".to_string());
-                VerifyResult {
-                    ok: false,
-                    caliber: CALIBER_LOADABILITY_ONLY,
-                    errors: vec![VerifyError {
-                        code: "inet_load_failed".to_string(),
-                        message_zh: format!(
-                            "拓扑在 INET 上跑不起来（退出码 {code_str}）。{}",
-                            outcome.output_tail
-                        ),
-                        node_ref: None,
-                    }],
-                }
-            }
+            // 拿不到退出码（进程被杀等）→ 当环境问题，不诬陷拓扑（SshRunner 通常已把 255/None 归不可达）。
+            None => VerifyResult {
+                ok: false,
+                caliber: CALIBER_LOADABILITY_ONLY,
+                errors: vec![VerifyError {
+                    code: "inet_unreachable".to_string(),
+                    message_zh: "校验暂时无法运行：远端 INET 未返回退出码，右侧工程保持原状态，未推进。".to_string(),
+                    node_ref: None,
+                }],
+            },
+            Some(code) => VerifyResult {
+                ok: false,
+                caliber: CALIBER_LOADABILITY_ONLY,
+                errors: vec![VerifyError {
+                    code: "inet_load_failed".to_string(),
+                    message_zh: format!("拓扑在 INET 上跑不起来（退出码 {code}）。{}", outcome.output_tail),
+                    node_ref: None,
+                }],
+            },
         },
     }
 }
@@ -159,6 +163,9 @@ mod tests {
         fn unreachable() -> Self {
             Self { calls: Cell::new(0), outcome: Err(RemoteError::Unreachable("connect timeout".into())) }
         }
+        fn no_exit_code() -> Self {
+            Self { calls: Cell::new(0), outcome: Ok(RemoteRunOutcome { exit_code: None, output_tail: "".into() }) }
+        }
     }
     impl RemoteRunner for StubRunner {
         fn run_bundle(&self, _b: &InetBundle, _c: &RemoteConfig) -> Result<RemoteRunOutcome, RemoteError> {
@@ -214,5 +221,17 @@ mod tests {
         assert!(r.errors.iter().any(|e| e.code == "inet_unreachable"));
         // 不可达文案不说拓扑错。
         assert!(r.errors[0].message_zh.contains("校验暂时无法运行"));
+    }
+
+    #[test]
+    fn missing_exit_code_is_unreachable_not_load_failed() {
+        let nodes = vec![node("0", "switch"), node("1", "endSystem")];
+        let links = vec![link(0, "0", "1")];
+        let runner = StubRunner::no_exit_code();
+        let r = run_inet_verification(&nodes, &links, "s", 0, &runner, &cfg());
+        assert!(!r.ok);
+        // 拿不到退出码当环境问题，不诬陷拓扑。
+        assert!(r.errors.iter().any(|e| e.code == "inet_unreachable"));
+        assert!(!r.errors.iter().any(|e| e.code == "inet_load_failed"));
     }
 }
