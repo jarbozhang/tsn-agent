@@ -59,7 +59,7 @@ const edgeTypes = {
 
 export interface CommitNodePositionArgs {
   sessionId: string;
-  imac: number;
+  syncName: string;
   x: number;
   y: number;
   expectedMutationId: number;
@@ -110,10 +110,10 @@ function topologyViewportResetKey(snapshot: TopologyRowSnapshot | undefined, las
     return undefined;
   }
   const nodeKey = snapshot.nodes
-    .map((node) => `${node.imac}:${node.x}:${node.y}:${node.nodeType ?? ""}:${node.insertOrder}`)
+    .map((node) => `${node.syncName}:${node.x}:${node.y}:${node.nodeType ?? ""}:${node.insertOrder}`)
     .join(",");
   const linkKey = snapshot.links
-    .map((link) => `${link.linkSeq}:${link.srcImac}:${link.dstImac}`)
+    .map((link) => `${link.linkSeq}:${link.srcSyncName}:${link.dstSyncName}`)
     .join(",");
   return `${snapshot.sessionId}:${lastMutationId}:${nodeKey}:${linkKey}`;
 }
@@ -194,8 +194,8 @@ export function WorkspacePane({
     setPendingPositions(next);
   }, []);
 
-  // session 切换：overlay/拖动/缓存/基准全部重置——overlay 按 imac 键控，
-  // 不重置会污染另一 session 同 imac 节点；拖动中切换时 dragStop 不再触发，
+  // session 切换：overlay/拖动/缓存/基准全部重置——overlay 按 syncName 键控，
+  // 不重置会污染另一 session 同 syncName 节点；拖动中切换时 dragStop 不再触发，
   // draggingRef 也在此回正，防快照永久滞留缓存。
   useEffect(() => {
     const sessionId = topologySnapshot?.sessionId;
@@ -354,7 +354,7 @@ export function WorkspacePane({
 
       void commitNodePosition({
         sessionId,
-        imac: Number(node.id),
+        syncName: node.id,
         x,
         y,
         expectedMutationId: dragStartMutationIdRef.current,
@@ -388,12 +388,12 @@ export function WorkspacePane({
   const endSystemCount = topologySnapshot ? countEndSystems(topologySnapshot) : 0;
   const linkCount = topologySnapshot?.links.length ?? 0;
   const selectedNodeRow = selectedTopologyItem?.kind === "node"
-    ? topologySnapshot?.nodes.find((node) => String(node.imac) === selectedTopologyItem.id)
+    ? topologySnapshot?.nodes.find((node) => node.syncName === selectedTopologyItem.id)
     : undefined;
   // 详情面板坐标优先读 overlay（R9：拖毕即显示新坐标，无确认窗口跳变）。
   const selectedNode = selectedNodeRow
     ? (() => {
-        const pending = pendingPositions.get(String(selectedNodeRow.imac));
+        const pending = pendingPositions.get(selectedNodeRow.syncName);
         return pending ? { ...selectedNodeRow, x: pending.x, y: pending.y } : selectedNodeRow;
       })()
     : undefined;
@@ -401,10 +401,10 @@ export function WorkspacePane({
     ? topologySnapshot?.links.find((link) => linkRowId(link) === selectedTopologyItem.id)
     : undefined;
   const selectedLinkSourceNode = selectedLink
-    ? topologySnapshot?.nodes.find((node) => node.imac === selectedLink.srcImac)
+    ? topologySnapshot?.nodes.find((node) => node.syncName === selectedLink.srcSyncName)
     : undefined;
   const selectedLinkTargetNode = selectedLink
-    ? topologySnapshot?.nodes.find((node) => node.imac === selectedLink.dstImac)
+    ? topologySnapshot?.nodes.find((node) => node.syncName === selectedLink.dstSyncName)
     : undefined;
 
   return (
@@ -509,8 +509,7 @@ export function WorkspacePane({
             {selectedNode ? (
               <div className="detail-grid">
                 <DetailRow label="名称" value={selectedNode.name ?? "无"} />
-                <DetailRow label="IMAC" value={selectedNode.imac} />
-                <DetailRow label="同步名称" value={selectedNode.syncName} />
+                <DetailRow label="节点号" value={selectedNode.syncName} />
                 <DetailRow label="类型" value={NODE_KIND_NAME[nodeTypeToken(selectedNode.nodeType)]} />
                 <DetailRow label="坐标" value={`${selectedNode.x}, ${selectedNode.y}`} />
                 <DetailRow label="插入顺序" value={selectedNode.insertOrder} />
@@ -540,11 +539,11 @@ export function WorkspacePane({
                 <DetailRow label="名称" value={selectedLink.name ?? "无"} />
                 <DetailRow
                   label="源端点"
-                  value={selectedLinkSourceNode ? nodeRowLabel(selectedLinkSourceNode) : `imac ${selectedLink.srcImac}`}
+                  value={selectedLinkSourceNode ? nodeRowLabel(selectedLinkSourceNode) : `节点 ${selectedLink.srcSyncName}`}
                 />
                 <DetailRow
                   label="目标端点"
-                  value={selectedLinkTargetNode ? nodeRowLabel(selectedLinkTargetNode) : `imac ${selectedLink.dstImac}`}
+                  value={selectedLinkTargetNode ? nodeRowLabel(selectedLinkTargetNode) : `节点 ${selectedLink.dstSyncName}`}
                 />
               </div>
             ) : (
@@ -575,7 +574,7 @@ function TsnTopologyNode({ data }: NodeProps) {
   const nodeData = data as {
     label?: string;
     nodeType?: TsnNodeKind;
-    imac?: number;
+    syncName?: string;
   };
   const nodeType = nodeData.nodeType ?? "endSystem";
 
@@ -586,7 +585,7 @@ function TsnTopologyNode({ data }: NodeProps) {
       <Handle id="t" type="target" position={Position.Top} />
       <span className="tsn-node-type mono">{NODE_KIND_BADGE[nodeType]}</span>
       <strong>{nodeData.label}</strong>
-      <small className="mono">imac {nodeData.imac}</small>
+      <small className="mono">节点 {nodeData.syncName}</small>
     </div>
   );
 }

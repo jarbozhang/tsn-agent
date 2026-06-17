@@ -89,16 +89,16 @@ export function nodeTypeToken(nodeType: string | null): TsnNodeKind {
 export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): { nodes: Node[]; edges: Edge[] } {
   // 标签防撞序数：按 DB 初始坐标统计每个节点每个方位的边数（linkSeq 序确定性）。
   const centers = new Map(
-    snapshot.nodes.map((node) => [node.imac, { x: node.x + NODE_W / 2, y: node.y + NODE_H / 2 }]),
+    snapshot.nodes.map((node) => [node.syncName, { x: node.x + NODE_W / 2, y: node.y + NODE_H / 2 }]),
   );
   const sideCounter = new Map<string, number>();
-  const takeOrd = (imac: number, otherImac: number): number => {
-    const from = centers.get(imac);
-    const to = centers.get(otherImac);
+  const takeOrd = (syncName: string, otherSyncName: string): number => {
+    const from = centers.get(syncName);
+    const to = centers.get(otherSyncName);
     if (!from || !to) {
       return 0;
     }
-    const key = `${imac}:${roughSide(from, to)}`;
+    const key = `${syncName}:${roughSide(from, to)}`;
     const ord = sideCounter.get(key) ?? 0;
     sideCounter.set(key, ord + 1);
     return ord;
@@ -106,13 +106,13 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): { no
 
   return {
     nodes: snapshot.nodes.map((node) => ({
-      id: String(node.imac),
+      id: node.syncName,
       type: "tsnNode",
       position: { x: node.x, y: node.y },
       data: {
         label: nodeRowLabel(node),
         nodeType: nodeTypeToken(node.nodeType),
-        imac: node.imac,
+        syncName: node.syncName,
       },
     })),
     edges: snapshot.links.map((link) => {
@@ -121,13 +121,13 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): { no
         leftLabel: meta.leftLabel,
         rightLabel: meta.rightLabel,
         // 仅有标签的端点占用层级槽位，无标签端不推远后续标签。
-        leftOrd: meta.leftLabel ? takeOrd(link.srcImac, link.dstImac) : 0,
-        rightOrd: meta.rightLabel ? takeOrd(link.dstImac, link.srcImac) : 0,
+        leftOrd: meta.leftLabel ? takeOrd(link.srcSyncName, link.dstSyncName) : 0,
+        rightOrd: meta.rightLabel ? takeOrd(link.dstSyncName, link.srcSyncName) : 0,
       };
       return {
         id: linkRowId(link),
-        source: String(link.srcImac),
-        target: String(link.dstImac),
+        source: link.srcSyncName,
+        target: link.dstSyncName,
         type: "tsnFloating",
         className: planeClassName(meta.plane),
         data,

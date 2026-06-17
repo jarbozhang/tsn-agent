@@ -17,12 +17,10 @@ function snapshotFor(sessionId: string, nodeCount: number): TopologyRowSnapshot 
   return {
     sessionId,
     nodes: Array.from({ length: nodeCount }, (_, index) => ({
-      imac: index + 1,
       syncName: String(index),
       name: null,
       x: 0,
       y: 0,
-      syncType: "{}",
       nodeType: index === 0 ? "switch" : null,
       insertOrder: index,
     })),
