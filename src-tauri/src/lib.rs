@@ -92,6 +92,7 @@ pub fn run() {
             topology_mutations_command::get_topology_mutations_since,
             topology_position_command::update_node_position,
             topology_query_command::query_topology,
+            topology_query_command::verify_topology,
             session_store::get_current_session,
             session_store::list_sessions,
             session_store::remove_session,
