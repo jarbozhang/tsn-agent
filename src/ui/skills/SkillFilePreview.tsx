@@ -242,10 +242,11 @@ export function SkillFilePreview({
   return (
     <section className="skill-files-panel" aria-label="Skill 文件">
       <div className="skill-files-header">
-        <small>编辑会保存到当前选中的 skill 文件，下次 agent 运行生效。</small>
+        <p className="skill-section-kicker">Skill 文件</p>
         <div className="skill-files-header-actions">
+          {fileList?.status && <span className={`skill-file-status ${fileList.status}`}>{rootStatusLabel(fileList.status)}</span>}
           <button
-            className="btn"
+            className="skill-restore-btn"
             type="button"
             onClick={previewRestore}
             disabled={
@@ -255,12 +256,12 @@ export function SkillFilePreview({
               || restoreState.kind === "confirming"
             }
           >
-            <RotateCcw size={14} aria-hidden="true" />
+            <RotateCcw size={13} aria-hidden="true" />
             {restoreState.kind === "previewing" ? "正在比对..." : "恢复内置版本"}
           </button>
-          {fileList?.status && <span className={`skill-file-status ${fileList.status}`}>{rootStatusLabel(fileList.status)}</span>}
         </div>
       </div>
+      <small className="skill-files-note">编辑会保存到当前选中的 skill 文件，下次 agent 运行生效。</small>
 
       {error && <div className="skill-file-error">{error}</div>}
 
