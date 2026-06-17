@@ -415,11 +415,15 @@ export function SkillFilePreview({
 /** .md 预览：frontmatter 折成顶部 meta 块，正文走 react-markdown（GFM）。 */
 function MarkdownFileView({ text }: { text: string }) {
   const { frontmatter, body } = splitFrontmatter(text);
+  // 剥掉 HTML/markdown 注释（<!-- ... -->）再渲染：它们是给维护者看的元注释，
+  // react-markdown 不识别注释、会把 <!-- --> 当普通文字露出来。编辑模式仍显示原文，
+  // 注释也仍保留在文件里、照常注入给 agent——这里只是预览视图的清理。
+  const renderedBody = body.replace(/<!--[\s\S]*?-->/g, "");
 
   return (
     <div className="skill-file-markdown">
       {frontmatter && <pre className="skill-file-frontmatter mono">{frontmatter}</pre>}
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderedBody}</ReactMarkdown>
     </div>
   );
 }
