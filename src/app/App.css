@@ -1284,6 +1284,17 @@ textarea:focus-visible {
   border: 1px solid var(--error);
 }
 
+/* 远端连不上等环境问题：中性「暂时无法验证」外观，区别于红色「验证未通过」（不误导去改拓扑）。 */
+.msg-agent.msg-verify-pending {
+  border-left: 3px solid var(--border, #555);
+}
+
+.caliber-chip.caliber-pending {
+  color: var(--text-secondary, #9aa0a6);
+  background: rgba(127, 127, 127, 0.14);
+  border: 1px solid var(--border, #666);
+}
+
 .msg-user p,
 .msg-agent p {
   margin: 0;

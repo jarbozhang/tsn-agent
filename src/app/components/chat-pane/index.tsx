@@ -92,11 +92,16 @@ export function ChatPane({
             message.role === "assistant" && message.verification && !message.verification.ok
               ? message.verification
               : undefined;
+          // 远端连不上（inet_unreachable）是环境问题：走中性「暂时无法验证」外观，不套红「验证未通过」
+          // （否则误导用户去改一个其实没问题的拓扑）。结构错 / 跑不起来才走红 block。
+          const isEnvIssue = verifyBlock?.errors.some((error) => error.code === "inet_unreachable") ?? false;
+          const showRedBlock = Boolean(verifyBlock) && !isEnvIssue;
           return (
           <article
             className={[
               message.role === "user" ? "msg-user" : "msg-agent",
-              verifyBlock ? "msg-verify-block" : "",
+              showRedBlock ? "msg-verify-block" : "",
+              verifyBlock && isEnvIssue ? "msg-verify-pending" : "",
               message.id === pendingAssistantMessageId ? "pending" : "",
             ].filter(Boolean).join(" ")}
             key={message.id}
@@ -104,7 +109,9 @@ export function ChatPane({
             <span className="message-role">{message.role === "user" ? "USER" : "AGENT"}</span>
             {verifyBlock && (
               <div className="verify-header">
-                <span className="caliber-chip caliber-block">验证未通过 · {caliberLabel(verifyBlock.caliber)}</span>
+                <span className={isEnvIssue ? "caliber-chip caliber-pending" : "caliber-chip caliber-block"}>
+                  {isEnvIssue ? "暂时无法验证" : "验证未通过"} · {caliberLabel(verifyBlock.caliber)}
+                </span>
               </div>
             )}
             {/* Plan 2026-06-10-001 U5：工具事件常先于首个文本 chunk（此时仍是 pending
@@ -209,8 +216,16 @@ export function ChatPane({
   );
 }
 
-export function AgentRunStatusBar({ elapsedSeconds, phase }: { elapsedSeconds: number; phase: AgentRunPhase }) {
-  const message = getAgentRunStatusMessage(phase);
+export function AgentRunStatusBar({
+  elapsedSeconds,
+  phase,
+  inetVerifying,
+}: {
+  elapsedSeconds: number;
+  phase: AgentRunPhase;
+  inetVerifying?: boolean;
+}) {
+  const message = inetVerifying ? "正在 INET 上验证…（最长约 120 秒）" : getAgentRunStatusMessage(phase);
 
   return (
     <div className={`agent-run-status ${phase}`} role="status" aria-live="polite" data-testid="agent-run-status">

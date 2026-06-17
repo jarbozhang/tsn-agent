@@ -41,6 +41,8 @@ function mockTauriCommands(options: {
   topology?: Record<string, unknown>;
   verify?: Record<string, unknown>;
   verifyError?: unknown;
+  inetVerify?: Record<string, unknown>;
+  inetVerifyError?: unknown;
 } = {}) {
   invokeMock.mockImplementation(async (command: string) => {
     if (command === "query_topology") {
@@ -53,6 +55,14 @@ function mockTauriCommands(options: {
       }
       // 默认通过：确认过关闸放行，既有 confirm 测试不被新闸拦。
       return options.verify ?? { ok: true, caliber: "structural_only", errors: [] };
+    }
+
+    if (command === "verify_inet") {
+      if (options.inetVerifyError !== undefined) {
+        throw options.inetVerifyError;
+      }
+      // 默认通过：结构闸放行后串到 INET 闸也放行，既有 confirm 测试不被第二道闸拦。
+      return options.inetVerify ?? { ok: true, caliber: "loadability_only", errors: [] };
     }
 
     if (command === "run_claude_agent") {
@@ -373,9 +383,9 @@ describe("runTsnAgent", () => {
     expect(result.assistantText).toContain("确认并继续");
   });
 
-  it("advances topology confirm and merges the pass verdict when verification passes", async () => {
+  it("advances topology confirm through both gates (structural + INET) and merges loadability verdict", async () => {
     enableTauriRuntime();
-    mockTauriCommands({ verify: { ok: true, caliber: "structural_only", errors: [] } });
+    mockTauriCommands(); // 默认结构 + INET 两闸都过
     const { runTsnAgent } = await import("./agent-adapter");
 
     const result = await runTsnAgent({
@@ -386,7 +396,8 @@ describe("runTsnAgent", () => {
 
     expect(result.workflow.currentStep).toBe("time-sync"); // 已推进
     expect(result.verification?.ok).toBe(true);
-    expect(result.assistantText).toContain("结构没问题（仅结构级）");
+    expect(result.verification?.caliber).toBe("loadability_only"); // 最终结论是 INET 口径
+    expect(result.assistantText).toContain("已在 INET 验证通过（仅能加载运行）");
     // 通过结论并进推进摘要、不另发消息——只有一段 assistantText。
   });
 
@@ -409,8 +420,10 @@ describe("runTsnAgent", () => {
       session: sessionWithWorkflow(rollbackWorkflow),
     });
 
-    // 回退确认不调 verify_topology。
-    const verifyCalls = invokeMock.mock.calls.filter(([command]) => command === "verify_topology");
+    // 回退确认不调任何过关闸（结构 + INET 都不触发）。
+    const verifyCalls = invokeMock.mock.calls.filter(
+      ([command]) => command === "verify_topology" || command === "verify_inet",
+    );
     expect(verifyCalls).toHaveLength(0);
   });
 
@@ -428,6 +441,68 @@ describe("runTsnAgent", () => {
     expect(result.workflow.currentStep).toBe("topology"); // 不放行
     expect(result.mode).toBe("local");
     expect(result.assistantText).toContain("结构校验暂时无法运行");
+    expect(result.verification).toBeUndefined();
+  });
+
+  it("blocks advance when INET load fails (inet_load_failed)", async () => {
+    enableTauriRuntime();
+    mockTauriCommands({
+      inetVerify: {
+        ok: false,
+        caliber: "loadability_only",
+        errors: [{ code: "inet_load_failed", messageZh: "拓扑在 INET 上跑不起来（退出码 1）。" }],
+      },
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "继续",
+      action: "confirm-stage",
+      session: sessionWithWorkflow(topologyWaitingWorkflow()),
+    });
+
+    expect(result.workflow.currentStep).toBe("topology"); // 不放行
+    expect(result.verification?.ok).toBe(false);
+    expect(result.verification?.caliber).toBe("loadability_only");
+    expect(result.assistantText).toContain("INET");
+  });
+
+  it("blocks advance with neutral copy when remote is unreachable (inet_unreachable)", async () => {
+    enableTauriRuntime();
+    mockTauriCommands({
+      inetVerify: {
+        ok: false,
+        caliber: "loadability_only",
+        errors: [{ code: "inet_unreachable", messageZh: "连不上远端 INET。" }],
+      },
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "继续",
+      action: "confirm-stage",
+      session: sessionWithWorkflow(topologyWaitingWorkflow()),
+    });
+
+    expect(result.workflow.currentStep).toBe("topology");
+    expect(result.assistantText).toContain("校验暂时无法运行");
+    // 环境问题：不说拓扑错、不用"先修好"语气。
+    expect(result.assistantText).not.toContain("先修好");
+  });
+
+  it("fail-closed: verify_inet rejection does not advance and shows a dedicated message", async () => {
+    enableTauriRuntime();
+    mockTauriCommands({ inetVerifyError: new Error("ssh unreachable") });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "继续",
+      action: "confirm-stage",
+      session: sessionWithWorkflow(topologyWaitingWorkflow()),
+    });
+
+    expect(result.workflow.currentStep).toBe("topology"); // 不放行
+    expect(result.assistantText).toContain("校验暂时无法运行");
     expect(result.verification).toBeUndefined();
   });
 

@@ -135,6 +135,42 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
         };
       }
       passVerification = verdict;
+
+      // 结构通过 → 串第二道 INET 验证（远端、耗时；fail-closed，不冒泡到 App 通用 catch）。
+      let inetVerdict: TopologyVerifyResult;
+      try {
+        inetVerdict = await invoke<TopologyVerifyResult>("verify_inet", { request: { sessionId } });
+      } catch (error) {
+        logAgent(request.diagnostics, {
+          sessionId,
+          runId,
+          message: "INET 校验调用失败，未推进",
+          details: { error: error instanceof Error ? error.message : String(error) },
+        });
+        return {
+          events: [],
+          workflow,
+          assistantText: "校验暂时无法运行，右侧工程保持原状态，未推进。请稍后再点「确认并继续」。",
+          mode: "local",
+        };
+      }
+      if (!inetVerdict.ok) {
+        logAgent(request.diagnostics, {
+          sessionId,
+          runId,
+          message: "INET 校验未通过，拦截推进",
+          details: { errorCount: inetVerdict.errors.length },
+        });
+        return {
+          events: [],
+          workflow,
+          assistantText: composeVerificationBlockText(inetVerdict),
+          mode: "local",
+          verification: inetVerdict,
+        };
+      }
+      // 用 INET verdict（loadability_only）作为最终通过结论。
+      passVerification = inetVerdict;
     }
 
     const confirmResult = runConfirmAction(workflow);
@@ -153,7 +189,10 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
     if (!confirmResult.carryIntent) {
       // 通过过关闸的前进确认：把"结构没问题（仅结构级）"并进推进摘要、带结构化 verdict（不另发消息）。
       if (passVerification) {
-        const passLine = "结构没问题（仅结构级）。";
+        const passLine =
+          passVerification.caliber === "loadability_only"
+            ? "已在 INET 验证通过（仅能加载运行）。"
+            : "结构没问题（仅结构级）。";
         return {
           ...confirmResult,
           assistantText: confirmResult.assistantText ? `${passLine}\n${confirmResult.assistantText}` : passLine,
@@ -295,12 +334,19 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
 // 结构校验未通过时的对话文案：可修复语气（非"出错了"）+ 问题清单 + 可操作引导 + 口径。
 // 结构化 verdict 另随 result.verification 回传，由 chat-pane 区分渲染（U4）。
 function composeVerificationBlockText(verdict: TopologyVerifyResult): string {
+  // 远端连不上（环境问题）：不说拓扑错、不列问题清单当拓扑错（U5 据 code 走中性外观）。
+  if (verdict.errors.some((error) => error.code === "inet_unreachable")) {
+    return [
+      "校验暂时无法运行：连不上远端 INET，右侧工程保持原状态，未推进。",
+      "请检查网络 / 远端后再点「确认并继续」。",
+    ].join("\n");
+  }
   const problems = verdict.errors.map((error) => `· ${error.messageZh}`);
-  return [
-    "拓扑还差一点，先修好再继续（仅结构级）：",
-    ...problems,
-    "改好后再点「确认并继续」。",
-  ].join("\n");
+  const head =
+    verdict.caliber === "loadability_only"
+      ? "拓扑在 INET 上还跑不起来，先修好再继续（仅能加载运行）："
+      : "拓扑还差一点，先修好再继续（仅结构级）：";
+  return [head, ...problems, "改好后再点「确认并继续」。"].join("\n");
 }
 
 // 确认按钮的确定性入口：先处理待确认的破坏性回退，否则普通推进。切阶段本身不走大模型；

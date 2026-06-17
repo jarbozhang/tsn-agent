@@ -31,6 +31,11 @@ describe("AgentRunStatusBar", () => {
     expect(screen.getByText(/正在持续推理/)).toBeInTheDocument();
     expect(screen.getByText(/已运行 5 秒/)).toBeInTheDocument();
   });
+
+  it("shows the INET verifying message when inetVerifying is set (U5)", () => {
+    render(<AgentRunStatusBar elapsedSeconds={3} phase="waiting" inetVerifying />);
+    expect(screen.getByText(/正在 INET 上验证/)).toBeInTheDocument();
+  });
 });
 
 describe("ChatPane", () => {
@@ -81,6 +86,49 @@ describe("ChatPane", () => {
     expect(container.querySelector(".msg-verify-block")).toBeNull();
     expect(screen.queryByText(/验证未通过/)).toBeNull();
     expect(screen.getByText(/结构没问题（仅结构级）/)).toBeInTheDocument();
+  });
+
+  it("renders an INET load failure as a red verify-block with loadability caliber chip (U5)", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "m1",
+        role: "assistant",
+        content:
+          "拓扑在 INET 上还跑不起来，先修好再继续（仅能加载运行）：\n· 拓扑在 INET 上跑不起来（退出码 1）。\n改好后再点「确认并继续」。",
+        createdAt: "2026-06-17T00:00:00Z",
+        verification: {
+          ok: false,
+          caliber: "loadability_only",
+          errors: [{ code: "inet_load_failed", messageZh: "拓扑在 INET 上跑不起来（退出码 1）。" }],
+        },
+      },
+    ];
+    const { container } = render(<ChatPane {...baseProps({ messages })} />);
+    expect(container.querySelector(".msg-verify-block")).not.toBeNull();
+    expect(screen.getByText(/验证未通过 · 仅能加载运行/)).toBeInTheDocument();
+  });
+
+  it("renders an INET unreachable result with neutral copy, not the red verify-block (U5)", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "m1",
+        role: "assistant",
+        content:
+          "校验暂时无法运行：连不上远端 INET，右侧工程保持原状态，未推进。\n请检查网络 / 远端后再点「确认并继续」。",
+        createdAt: "2026-06-17T00:00:00Z",
+        verification: {
+          ok: false,
+          caliber: "loadability_only",
+          errors: [{ code: "inet_unreachable", messageZh: "连不上远端 INET。" }],
+        },
+      },
+    ];
+    const { container } = render(<ChatPane {...baseProps({ messages })} />);
+    // 环境问题：中性外观，不套红「验证未通过」。
+    expect(container.querySelector(".msg-verify-block")).toBeNull();
+    expect(container.querySelector(".msg-verify-pending")).not.toBeNull();
+    expect(screen.getByText(/暂时无法验证 · 仅能加载运行/)).toBeInTheDocument();
+    expect(screen.queryByText(/验证未通过/)).toBeNull();
   });
 
   it("renders streaming tool cards above the waiting indicator on the pending message (U5)", () => {
