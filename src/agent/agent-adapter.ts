@@ -20,7 +20,7 @@ import {
   type WorkflowState,
 } from "../project/project-state";
 import { getTopologyRuntimeSummary } from "../topology/topology-service";
-import type { AgentEvent, TsnAgentRequest, TsnAgentResult } from "./agent-types";
+import type { AgentEvent, TopologyVerifyResult, TsnAgentRequest, TsnAgentResult } from "./agent-types";
 import { redactSecretsInValue } from "../sessions/session-repository";
 import { enrichToolCall, type RawToolCall, type ToolCallRecord } from "./tool-call-record";
 import {
@@ -98,6 +98,45 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
 
   // 显式确认动作（确认按钮）：切阶段本身确定性、不走大模型。
   if (action === "confirm-stage") {
+    // 拓扑阶段「前进确认」过关闸（只拦前进、不验回退；回退确认带 pendingStageChange）。
+    let passVerification: TopologyVerifyResult | undefined;
+    if (sessionId && workflow.currentStep === "topology" && !workflow.pendingStageChange) {
+      let verdict: TopologyVerifyResult;
+      try {
+        verdict = await invoke<TopologyVerifyResult>("verify_topology", { request: { sessionId } });
+      } catch (error) {
+        // fail-closed：不推进、不冒泡到 App 通用 catch（否则把"继续"卡回输入框）。
+        logAgent(request.diagnostics, {
+          sessionId,
+          runId,
+          message: "结构校验调用失败，未推进",
+          details: { error: error instanceof Error ? error.message : String(error) },
+        });
+        return {
+          events: [],
+          workflow,
+          assistantText: "结构校验暂时无法运行，右侧工程保持原状态，未推进。请稍后再点「确认并继续」。",
+          mode: "local",
+        };
+      }
+      if (!verdict.ok) {
+        logAgent(request.diagnostics, {
+          sessionId,
+          runId,
+          message: "结构校验未通过，拦截推进",
+          details: { errorCount: verdict.errors.length },
+        });
+        return {
+          events: [],
+          workflow,
+          assistantText: composeVerificationBlockText(verdict),
+          mode: "local",
+          verification: verdict,
+        };
+      }
+      passVerification = verdict;
+    }
+
     const confirmResult = runConfirmAction(workflow);
     logAgent(request.diagnostics, {
       sessionId,
@@ -112,6 +151,15 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
 
     // 无「带原话」标记 → 纯确定性确认（推进 / time-sync 自动生成 / 无操作），直接返回。
     if (!confirmResult.carryIntent) {
+      // 通过过关闸的前进确认：把"结构没问题（仅结构级）"并进推进摘要、带结构化 verdict（不另发消息）。
+      if (passVerification) {
+        const passLine = "结构没问题（仅结构级）。";
+        return {
+          ...confirmResult,
+          assistantText: confirmResult.assistantText ? `${passLine}\n${confirmResult.assistantText}` : passLine,
+          verification: passVerification,
+        };
+      }
       return confirmResult;
     }
 
@@ -243,6 +291,17 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
 }
 
 // ---------- 阶段推进（确定性） ----------
+
+// 结构校验未通过时的对话文案：可修复语气（非"出错了"）+ 问题清单 + 可操作引导 + 口径。
+// 结构化 verdict 另随 result.verification 回传，由 chat-pane 区分渲染（U4）。
+function composeVerificationBlockText(verdict: TopologyVerifyResult): string {
+  const problems = verdict.errors.map((error) => `· ${error.messageZh}`);
+  return [
+    "拓扑还差一点，先修好再继续（仅结构级）：",
+    ...problems,
+    "改好后再点「确认并继续」。",
+  ].join("\n");
+}
 
 // 确认按钮的确定性入口：先处理待确认的破坏性回退，否则普通推进。切阶段本身不走大模型；
 // 但回退「带原话」时返回 carryIntent，由 runTsnAgent 在切换后的阶段用原话自动跑一轮大模型。
