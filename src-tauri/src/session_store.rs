@@ -239,6 +239,12 @@ pub async fn connect_app_database(app: &tauri::AppHandle) -> Result<Pool<Sqlite>
         .await
         .map_err(db_error)?;
 
+    // 去 Qunee 化 re-key：老库节点键 imac→sync_name、删 sync_type、连线端点改名（幂等，见 db.rs）。
+    // 须在补 name 列之后，重建会 SELECT name 列。
+    crate::db::ensure_topology_rekey_to_sync_name(&pool)
+        .await
+        .map_err(db_error)?;
+
     Ok(pool)
 }
 
@@ -436,6 +442,88 @@ mod tests {
         assert_eq!(migs[4].description, "rename_networkcard_node_type_to_end_system");
     }
 
+    /// 在内存库里手工建出旧（imac/sync_type）结构 + sessions，灌入样例数据，
+    /// 供 re-key 守卫测试。返回的 pool 是「老库」形态。
+    async fn legacy_imac_pool() -> Pool<Sqlite> {
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .in_memory(true)
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("memory sqlite");
+        sqlx::query(
+            r#"
+            CREATE TABLE sessions (id TEXT PRIMARY KEY NOT NULL);
+            CREATE TABLE topology_nodes (
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                imac INTEGER NOT NULL, sync_name TEXT NOT NULL, name TEXT,
+                x REAL NOT NULL, y REAL NOT NULL, sync_type TEXT NOT NULL,
+                node_type TEXT, insert_order INTEGER NOT NULL,
+                PRIMARY KEY (session_id, imac)
+            );
+            CREATE TABLE topology_links (
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                link_seq INTEGER NOT NULL, name TEXT,
+                src_imac INTEGER NOT NULL, dst_imac INTEGER NOT NULL,
+                styles_json TEXT NOT NULL,
+                PRIMARY KEY (session_id, link_seq)
+            );
+            INSERT INTO sessions (id) VALUES ('s1');
+            INSERT INTO topology_nodes (session_id, imac, sync_name, name, x, y, sync_type, node_type, insert_order)
+                VALUES ('s1', 100, '0', 'SW-0', 0, 0, '{"_classPath":"Q.Graphs.exchanger2"}', 'switch', 0),
+                       ('s1', 101, '1', 'ES-1', 10, 10, '{"_classPath":"Q.Graphs.node"}', 'endSystem', 1);
+            INSERT INTO topology_links (session_id, link_seq, name, src_imac, dst_imac, styles_json)
+                VALUES ('s1', 0, '0:0-1:0', 100, 101, '{}');
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy schema + data");
+        pool
+    }
+
+    #[tokio::test]
+    async fn rekey_promotes_sync_name_drops_imac_and_remaps_links() {
+        let pool = legacy_imac_pool().await;
+        crate::db::ensure_topology_rekey_to_sync_name(&pool)
+            .await
+            .expect("rekey");
+
+        // imac / sync_type 列消失
+        let imac_cols: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM pragma_table_info('topology_nodes') WHERE name IN ('imac','sync_type')")
+                .fetch_one(&pool).await.unwrap();
+        assert_eq!(imac_cols, 0, "imac/sync_type 应已删除");
+
+        // 节点按 sync_name 可查、名字/坐标保留
+        let (name, x): (Option<String>, f64) =
+            sqlx::query_as("SELECT name, x FROM topology_nodes WHERE session_id='s1' AND sync_name='1'")
+                .fetch_one(&pool).await.unwrap();
+        assert_eq!(name.as_deref(), Some("ES-1"));
+        assert_eq!(x, 10.0);
+
+        // 连线端点由 imac 重映射为 sync_name
+        let (src, dst): (String, String) =
+            sqlx::query_as("SELECT src_sync_name, dst_sync_name FROM topology_links WHERE session_id='s1' AND link_seq=0")
+                .fetch_one(&pool).await.unwrap();
+        assert_eq!((src.as_str(), dst.as_str()), ("0", "1"));
+    }
+
+    #[tokio::test]
+    async fn rekey_is_noop_on_already_migrated_db() {
+        // 新结构库（safety_net 直接建出新 schema）再跑 re-key 应 no-op、不报错。
+        let pool = fresh_memory_pool().await;
+        crate::db::ensure_topology_rekey_to_sync_name(&pool)
+            .await
+            .expect("rekey noop");
+        let imac_cols: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM pragma_table_info('topology_nodes') WHERE name='imac'")
+                .fetch_one(&pool).await.unwrap();
+        assert_eq!(imac_cols, 0);
+    }
+
     async fn fresh_memory_pool() -> Pool<Sqlite> {
         // 与 `connect_app_database` 生产路径一致：通过 SqliteConnectOptions
         // builder 启用 foreign_keys=true，而不是事后手动 PRAGMA，
@@ -480,15 +568,15 @@ mod tests {
                 .await
                 .expect("initial insert");
             sqlx::query(
-                "INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, insert_order) \
-                 VALUES ('s1', 1, '0', 0.0, 0.0, '{}', 0)",
+                "INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) \
+                 VALUES ('s1', '0', 0.0, 0.0, 0)",
             )
             .execute(&pool)
             .await
             .expect("seed topology node");
             sqlx::query(
-                "INSERT INTO topology_links (session_id, link_seq, src_imac, dst_imac, styles_json) \
-                 VALUES ('s1', 0, 1, 1, '{}')",
+                "INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) \
+                 VALUES ('s1', 0, '0', '0', '{}')",
             )
             .execute(&pool)
             .await

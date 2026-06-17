@@ -326,7 +326,7 @@ mod tests {
             let pool = fresh_pool().await;
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('with_p0', 't', 'now', 'now', '{\"title\":\"x\"}'), ('no_p0', 't', 'now', 'now', '{\"title\":\"x\"}')")
                 .execute(&pool).await.unwrap();
-            sqlx::query("INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, node_type, insert_order) VALUES ('with_p0', 100, '1', 0, 0, '{}', 'switch', 0)")
+            sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, x, y, node_type, insert_order) VALUES ('with_p0', '1', 0, 0, 'switch', 0)")
                 .execute(&pool).await.unwrap();
 
             let marked = mark_pending_for_all_sessions(&pool).await.unwrap();

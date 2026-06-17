@@ -296,9 +296,9 @@ mod tests {
                 .expect("seed session");
         }
         // s1：2 节点 1 链路 + 1 个 nodes 行；s2：1 节点（断言不被带出）。
-        sqlx::query("INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, insert_order) VALUES ('s1', 1, '0', 0.0, 0.0, '{}', 0), ('s1', 2, '1', 1.0, 1.0, '{}', 1), ('s2', 9, '9', 9.0, 9.0, '{}', 0)")
+        sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) VALUES ('s1', '0', 0.0, 0.0, 0), ('s1', '1', 1.0, 1.0, 1), ('s2', '9', 9.0, 9.0, 0)")
             .execute(pool).await.expect("seed nodes");
-        sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_imac, dst_imac, styles_json) VALUES ('s1', 0, 1, 2, '{}')")
+        sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) VALUES ('s1', 0, '0', '1', '{}')")
             .execute(pool).await.expect("seed links");
         sqlx::query("INSERT INTO nodes (session_id, node_id) VALUES ('s1', 'n0')")
             .execute(pool).await.expect("seed legacy node");

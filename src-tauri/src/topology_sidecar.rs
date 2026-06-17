@@ -442,8 +442,8 @@ mod tests {
 
             let operations: Vec<serde_json::Value> = (0..33)
                 .map(|i| serde_json::json!({
-                    "op": "node_add", "imac": i, "syncName": i.to_string(),
-                    "x": 0.0, "y": 0.0, "syncType": "{}", "insertOrder": i
+                    "op": "node_add", "syncName": i.to_string(),
+                    "x": 0.0, "y": 0.0, "insertOrder": i
                 }))
                 .collect();
             let body = serde_json::json!({ "sessionId": "s1", "operations": operations }).to_string();
@@ -545,7 +545,7 @@ mod tests {
             let body = serde_json::json!({
                 "sessionId": "s1",
                 "operations": [
-                    { "op": "node_add", "imac": 1, "syncName": "0", "x": 0.0, "y": 0.0, "syncType": "{}", "insertOrder": 0 }
+                    { "op": "node_add", "syncName": "0", "x": 0.0, "y": 0.0, "insertOrder": 0 }
                 ],
                 "dryRun": false
             }).to_string();
@@ -584,7 +584,7 @@ mod tests {
             let body = serde_json::json!({
                 "sessionId": "s1",
                 "operations": [
-                    { "op": "node_add", "imac": 2, "syncName": "0", "x": 0.0, "y": 0.0, "syncType": "{}", "insertOrder": 0 }
+                    { "op": "node_add", "syncName": "0", "x": 0.0, "y": 0.0, "insertOrder": 0 }
                 ],
                 "dryRun": true
             }).to_string();
@@ -653,14 +653,14 @@ mod tests {
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
                 .execute(&pool).await.unwrap();
             // 故意乱序插入，断言响应按 insert_order / link_seq 排序。
-            sqlx::query(r#"INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, node_type, insert_order) VALUES
-                ('s1', 102, '2', 200.0, 80.0, '{"_classPath":"Q.Graphs.pc"}', 'endSystem', 2),
-                ('s1', 100, '0', 0.0, 0.0, '{"_classPath":"Q.Graphs.exchanger2"}', 'switch', 0),
-                ('s1', 101, '1', 100.0, 0.0, '{"_classPath":"Q.Graphs.exchanger2"}', 'switch', 1)"#)
+            sqlx::query(r#"INSERT INTO topology_nodes (session_id, sync_name, x, y, node_type, insert_order) VALUES
+                ('s1', '2', 200.0, 80.0, 'endSystem', 2),
+                ('s1', '0', 0.0, 0.0, 'switch', 0),
+                ('s1', '1', 100.0, 0.0, 'switch', 1)"#)
                 .execute(&pool).await.unwrap();
-            sqlx::query(r#"INSERT INTO topology_links (session_id, link_seq, name, src_imac, dst_imac, styles_json) VALUES
-                ('s1', 1, 'l-acc', 101, 102, '{"leftLabel":"P2","rightLabel":"P1","speed":100}'),
-                ('s1', 0, 'l-bb', 100, 101, '{"leftLabel":"P1","rightLabel":"P1","speed":1000}')"#)
+            sqlx::query(r#"INSERT INTO topology_links (session_id, link_seq, name, src_sync_name, dst_sync_name, styles_json) VALUES
+                ('s1', 1, 'l-acc', '1', '2', '{"leftLabel":"P2","rightLabel":"P1","speed":100}'),
+                ('s1', 0, 'l-bb', '0', '1', '{"leftLabel":"P1","rightLabel":"P1","speed":1000}')"#)
                 .execute(&pool).await.unwrap();
             let (router, token) = build_test_router_with_pool(pool, buf).await;
 
@@ -672,16 +672,14 @@ mod tests {
             assert_eq!(summary["nodeCount"], 3);
             assert_eq!(summary["linkCount"], 2);
 
-            // nodes 按 insert_order 排序，字段 camelCase、syncType 原文。
+            // nodes 按 insert_order 排序，字段 camelCase。
             let nodes = summary["nodes"].as_array().unwrap();
             assert_eq!(nodes.len(), 3);
-            assert_eq!(nodes[0]["imac"], 100);
             assert_eq!(nodes[0]["syncName"], "0");
             assert_eq!(nodes[0]["nodeType"], "switch");
-            assert_eq!(nodes[0]["syncType"], r#"{"_classPath":"Q.Graphs.exchanger2"}"#);
             assert_eq!(nodes[0]["x"], 0.0);
             assert_eq!(nodes[0]["insertOrder"], 0);
-            assert_eq!(nodes[2]["imac"], 102);
+            assert_eq!(nodes[2]["syncName"], "2");
             assert_eq!(nodes[2]["nodeType"], "endSystem");
 
             // links 按 link_seq 排序，stylesJson 原文。
@@ -689,8 +687,8 @@ mod tests {
             assert_eq!(links.len(), 2);
             assert_eq!(links[0]["linkSeq"], 0);
             assert_eq!(links[0]["name"], "l-bb");
-            assert_eq!(links[0]["srcImac"], 100);
-            assert_eq!(links[0]["dstImac"], 101);
+            assert_eq!(links[0]["srcSyncName"], "0");
+            assert_eq!(links[0]["dstSyncName"], "1");
             assert_eq!(links[0]["stylesJson"], r#"{"leftLabel":"P1","rightLabel":"P1","speed":1000}"#);
             assert_eq!(links[1]["linkSeq"], 1);
         });
@@ -768,31 +766,28 @@ mod tests {
     }
 
     /// 模拟模型读 inspect rows：定位第一条骨干链路（两端皆 switch）与建新行参照。
-    /// 返回 (backbone_seq, sw1_imac, sw2_imac, styles_json, switch_sync_type,
-    ///        next_imac, next_link_seq, next_insert_order)。
-    fn locate_insert_site(summary: &serde_json::Value) -> (i64, i64, i64, String, String, i64, i64, i64) {
+    /// 返回 (backbone_seq, sw1_sync_name, sw2_sync_name, styles_json,
+    ///        next_sync_name, next_link_seq, next_insert_order)。
+    fn locate_insert_site(summary: &serde_json::Value) -> (i64, String, String, String, String, i64, i64) {
         let nodes = summary["nodes"].as_array().unwrap();
         let links = summary["links"].as_array().unwrap();
-        let switch_imacs: std::collections::HashSet<i64> = nodes.iter()
+        let switch_syncs: std::collections::HashSet<String> = nodes.iter()
             .filter(|n| n["nodeType"] == "switch")
-            .map(|n| n["imac"].as_i64().unwrap())
+            .map(|n| n["syncName"].as_str().unwrap().to_string())
             .collect();
         let backbone = links.iter()
-            .find(|l| switch_imacs.contains(&l["srcImac"].as_i64().unwrap())
-                && switch_imacs.contains(&l["dstImac"].as_i64().unwrap()))
+            .find(|l| switch_syncs.contains(l["srcSyncName"].as_str().unwrap())
+                && switch_syncs.contains(l["dstSyncName"].as_str().unwrap()))
             .expect("generic-line must have a switch-switch backbone link");
-        let switch_sync_type = nodes.iter()
-            .find(|n| n["nodeType"] == "switch")
-            .and_then(|n| n["syncType"].as_str())
-            .unwrap()
-            .to_string();
+        let next_sync = nodes.iter()
+            .map(|n| n["syncName"].as_str().unwrap().parse::<i64>().unwrap())
+            .max().unwrap() + 1;
         (
             backbone["linkSeq"].as_i64().unwrap(),
-            backbone["srcImac"].as_i64().unwrap(),
-            backbone["dstImac"].as_i64().unwrap(),
+            backbone["srcSyncName"].as_str().unwrap().to_string(),
+            backbone["dstSyncName"].as_str().unwrap().to_string(),
             backbone["stylesJson"].as_str().unwrap().to_string(),
-            switch_sync_type,
-            nodes.iter().map(|n| n["imac"].as_i64().unwrap()).max().unwrap() + 1,
+            next_sync.to_string(),
             links.iter().map(|l| l["linkSeq"].as_i64().unwrap()).max().unwrap() + 1,
             nodes.iter().map(|n| n["insertOrder"].as_i64().unwrap()).max().unwrap() + 1,
         )
@@ -820,22 +815,22 @@ mod tests {
             let before = parsed["summary"].clone();
             assert_eq!(before["nodeCount"], 24);
             assert_eq!(before["linkCount"], 23);
-            let original_identity: Vec<(i64, String)> = before["nodes"].as_array().unwrap().iter()
-                .map(|n| (n["imac"].as_i64().unwrap(), n["syncName"].as_str().unwrap().to_string()))
+            let original_identity: Vec<String> = before["nodes"].as_array().unwrap().iter()
+                .map(|n| n["syncName"].as_str().unwrap().to_string())
                 .collect();
 
-            let (backbone_seq, sw1, sw2, styles, sync_type, new_imac, new_seq, new_order) =
+            let (backbone_seq, sw1, sw2, styles, new_sync, new_seq, new_order) =
                 locate_insert_site(&before);
 
-            // 构造 [link_delete, node_add, link_add×2]（syncType/stylesJson 复制原文）。
+            // 构造 [link_delete, node_add, link_add×2]（stylesJson 复制原文）。
             let batch = serde_json::json!([
                 { "op": "link_delete", "linkSeq": backbone_seq },
-                { "op": "node_add", "imac": new_imac, "syncName": new_imac.to_string(),
-                  "x": 150.0, "y": 40.0, "syncType": sync_type, "nodeType": "switch",
+                { "op": "node_add", "syncName": new_sync,
+                  "x": 150.0, "y": 40.0, "nodeType": "switch",
                   "insertOrder": new_order },
-                { "op": "link_add", "linkSeq": new_seq, "srcImac": sw1, "dstImac": new_imac,
+                { "op": "link_add", "linkSeq": new_seq, "srcSyncName": sw1, "dstSyncName": new_sync,
                   "stylesJson": styles },
-                { "op": "link_add", "linkSeq": new_seq + 1, "srcImac": new_imac, "dstImac": sw2,
+                { "op": "link_add", "linkSeq": new_seq + 1, "srcSyncName": new_sync, "dstSyncName": sw2,
                   "stylesJson": styles },
             ]);
             let (status, parsed) = apply_ops(router.clone(), &token, "s1", batch).await;
@@ -850,34 +845,32 @@ mod tests {
             assert_eq!(after["nodeCount"], 25);
             assert_eq!(after["linkCount"], 24);
             let after_nodes = after["nodes"].as_array().unwrap();
-            assert!(after_nodes.iter().any(|n| n["imac"].as_i64() == Some(new_imac)));
+            assert!(after_nodes.iter().any(|n| n["syncName"].as_str() == Some(new_sync.as_str())));
             let after_links = after["links"].as_array().unwrap();
             assert!(after_links.iter().any(|l| l["linkSeq"].as_i64() == Some(new_seq)));
             assert!(after_links.iter().any(|l| l["linkSeq"].as_i64() == Some(new_seq + 1)));
             assert!(!after_links.iter().any(|l| l["linkSeq"].as_i64() == Some(backbone_seq)));
 
-            // 原有 24 节点的 imac/syncName 逐一保持不变（轮 5 整表重建破坏的性质）。
-            for (imac, sync_name) in &original_identity {
-                let preserved = after_nodes.iter().any(|n| {
-                    n["imac"].as_i64() == Some(*imac) && n["syncName"].as_str() == Some(sync_name)
-                });
-                assert!(preserved, "node imac={imac} syncName={sync_name} lost identity");
+            // 原有 24 节点的 syncName 逐一保持不变（轮 5 整表重建破坏的性质）。
+            for sync_name in &original_identity {
+                let preserved = after_nodes.iter().any(|n| n["syncName"].as_str() == Some(sync_name));
+                assert!(preserved, "node syncName={sync_name} lost identity");
             }
 
-            // Error path：已占用 imac + 异值 → IMAC_TAKEN，message 含 node_update
-            // 指引，原节点不变（U7 三态防护在路由层可见）。
+            // Error path：已占用 syncName + 异值 → SYNC_NAME_TAKEN，message 含 node_update
+            // 指引，原节点不变（三态防护在路由层可见）。
             let collision = serde_json::json!([
-                { "op": "node_add", "imac": sw1, "syncName": "hijack", "x": 9.0, "y": 9.0,
-                  "syncType": "{}", "nodeType": "switch", "insertOrder": 99 },
+                { "op": "node_add", "syncName": sw1, "x": 9.0, "y": 9.0,
+                  "nodeType": "switch", "insertOrder": 99 },
             ]);
             let (status, parsed) = apply_ops(router.clone(), &token, "s1", collision).await;
             assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-            assert_eq!(parsed["code"], "IMAC_TAKEN");
+            assert_eq!(parsed["code"], "SYNC_NAME_TAKEN");
             assert!(parsed["message"].as_str().unwrap().contains("node_update"));
             let (_, parsed) = inspect_session(router, &token, "s1").await;
             let sw1_row = parsed["summary"]["nodes"].as_array().unwrap().iter()
-                .find(|n| n["imac"].as_i64() == Some(sw1)).unwrap().clone();
-            assert_ne!(sw1_row["syncName"], "hijack");
+                .find(|n| n["syncName"].as_str() == Some(sw1.as_str())).unwrap().clone();
+            assert_ne!(sw1_row["x"], 9.0, "碰撞不得覆盖原节点坐标");
         });
     }
 
@@ -896,17 +889,17 @@ mod tests {
 
             initialize_generic_line(router.clone(), &token, "s1", 2, 2).await;
             let (_, parsed) = inspect_session(router.clone(), &token, "s1").await;
-            let (backbone_seq, sw1, sw2, styles, sync_type, new_imac, new_seq, new_order) =
+            let (backbone_seq, sw1, sw2, styles, new_sync, new_seq, new_order) =
                 locate_insert_site(&parsed["summary"]);
 
             let batch_with_seqs = |seq_a: i64, seq_b: i64| serde_json::json!([
                 { "op": "link_delete", "linkSeq": backbone_seq },
-                { "op": "node_add", "imac": new_imac, "syncName": new_imac.to_string(),
-                  "x": 150.0, "y": 40.0, "syncType": sync_type, "nodeType": "switch",
+                { "op": "node_add", "syncName": new_sync,
+                  "x": 150.0, "y": 40.0, "nodeType": "switch",
                   "insertOrder": new_order },
-                { "op": "link_add", "linkSeq": seq_a, "srcImac": sw1, "dstImac": new_imac,
+                { "op": "link_add", "linkSeq": seq_a, "srcSyncName": sw1, "dstSyncName": new_sync,
                   "stylesJson": styles },
-                { "op": "link_add", "linkSeq": seq_b, "srcImac": new_imac, "dstImac": sw2,
+                { "op": "link_add", "linkSeq": seq_b, "srcSyncName": new_sync, "dstSyncName": sw2,
                   "stylesJson": styles },
             ]);
 
@@ -935,7 +928,7 @@ mod tests {
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
                 .execute(&pool).await.unwrap();
             // Insert link pointing at non-existent nodes
-            sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_imac, dst_imac, styles_json) VALUES ('s1', 0, 99, 100, '{}')")
+            sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) VALUES ('s1', 0, '99', '100', '{}')")
                 .execute(&pool).await.unwrap();
             let (router, token) = build_test_router_with_pool(pool, buf).await;
             let body = serde_json::json!({ "sessionId": "s1" }).to_string();
