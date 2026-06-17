@@ -2,6 +2,34 @@
 
 本文件用于在应用内展示客户可见的更新内容。技术名词、文件名和产品名保留原文。
 
+## v0.6.0 - 2026-06-17
+
+### 新功能
+
+- 更新 improve topology layout and canvas interaction
+- 新增 stage-switch tool usage rules to system prompt (U5)
+- 更新 consume stage-change proposals with legality + destructive-confirm (U3)
+- 新增 request_stage_change tool and all-stage extraction (U1+U2)
+- 更新 make in-app version follow real releases
+
+### 修复
+
+- 更新 correct stale tauri-bundle assertion for topology MCP server
+- 更新 carry the original intent through a confirmed stage rollback
+- 更新 hide HTML comments in SKILL.md markdown preview
+- 更新 respect user scroll-up during streaming (stick-to-bottom)
+- 更新 resolve stale-pending phantom confirm, pending leak, time-sync rollback dead-end, and cross-stage topology write gap
+- 更新 skill drawer tabs visible + stable on switch (system WebKit)
+
+### 其他
+
+- 更新 Merge pull request #27 from jarbozhang/fix/stale-tauri-bundle-test
+- 更新 Merge pull request #25 from thanktiger/topology-layout-pr
+- 更新 Merge pull request #26 from jarbozhang/feat/llm-stage-switch-intent
+- 更新 refine the Skill drawer layout and visual hierarchy
+
+本文件用于在应用内展示客户可见的更新内容。技术名词、文件名和产品名保留原文。
+
 ## v0.4.1 - 2026-06-08
 
 ### 修复
