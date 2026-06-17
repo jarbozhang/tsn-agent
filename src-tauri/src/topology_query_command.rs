@@ -30,13 +30,12 @@ pub struct QueryTopologyResponse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TopologyNodeRow {
-    pub imac: i64,
+    /// 节点逻辑序号（主键 / 身份；前端画布 id 与选中键）。
     pub sync_name: String,
     /// 逻辑节点名（如 ES-1），initialize 写入；缺失时前端回退派生名。
     pub name: Option<String>,
     pub x: f64,
     pub y: f64,
-    pub sync_type: String,
     pub node_type: Option<String>,
     pub insert_order: i64,
 }
@@ -46,8 +45,8 @@ pub struct TopologyNodeRow {
 pub struct TopologyLinkRow {
     pub link_seq: i64,
     pub name: Option<String>,
-    pub src_imac: i64,
-    pub dst_imac: i64,
+    pub src_sync_name: String,
+    pub dst_sync_name: String,
     pub styles_json: String,
 }
 
@@ -59,17 +58,17 @@ pub async fn query_topology(
 ) -> Result<QueryTopologyResponse, String> {
     let pool = store.pool(&app).await?;
     let nodes = sqlx::query(
-        r#"SELECT imac, sync_name, name, x, y, sync_type, node_type, insert_order
+        r#"SELECT sync_name, name, x, y, node_type, insert_order
            FROM topology_nodes
            WHERE session_id = ?
-           ORDER BY insert_order, imac"#,
+           ORDER BY insert_order, sync_name"#,
     )
     .bind(&request.session_id)
     .fetch_all(pool)
     .await
     .map_err(|e| format!("查询节点失败：{e}"))?;
     let links = sqlx::query(
-        r#"SELECT link_seq, name, src_imac, dst_imac, styles_json
+        r#"SELECT link_seq, name, src_sync_name, dst_sync_name, styles_json
            FROM topology_links
            WHERE session_id = ?
            ORDER BY link_seq"#,
@@ -84,12 +83,10 @@ pub async fn query_topology(
         nodes: nodes
             .into_iter()
             .map(|r| TopologyNodeRow {
-                imac: r.get("imac"),
                 sync_name: r.get("sync_name"),
                 name: r.get("name"),
                 x: r.get("x"),
                 y: r.get("y"),
-                sync_type: r.get("sync_type"),
                 node_type: r.get("node_type"),
                 insert_order: r.get("insert_order"),
             })
@@ -99,8 +96,8 @@ pub async fn query_topology(
             .map(|r| TopologyLinkRow {
                 link_seq: r.get("link_seq"),
                 name: r.get("name"),
-                src_imac: r.get("src_imac"),
-                dst_imac: r.get("dst_imac"),
+                src_sync_name: r.get("src_sync_name"),
+                dst_sync_name: r.get("dst_sync_name"),
                 styles_json: r.get("styles_json"),
             })
             .collect(),
@@ -130,17 +127,17 @@ mod tests {
     fn query_topology_returns_ordered_nodes_and_links() {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
-            sqlx::query("INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, insert_order) VALUES ('s1', 2, '1', 1.0, 1.0, '{}', 1), ('s1', 1, '0', 0.0, 0.0, '{}', 0)")
+            sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) VALUES ('s1', '1', 1.0, 1.0, 1), ('s1', '0', 0.0, 0.0, 0)")
                 .execute(&pool).await.unwrap();
-            sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_imac, dst_imac, styles_json) VALUES ('s1', 0, 1, 2, '{}')")
+            sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) VALUES ('s1', 0, '0', '1', '{}')")
                 .execute(&pool).await.unwrap();
 
             // 直接调用底层 query 路径（bypass Tauri State 包装）
-            let nodes = sqlx::query("SELECT imac, sync_name, x, y, sync_type, node_type, insert_order FROM topology_nodes WHERE session_id = 's1' ORDER BY insert_order, imac")
+            let nodes = sqlx::query("SELECT sync_name, x, y, node_type, insert_order FROM topology_nodes WHERE session_id = 's1' ORDER BY insert_order, sync_name")
                 .fetch_all(&pool).await.unwrap();
             assert_eq!(nodes.len(), 2);
-            assert_eq!(nodes[0].get::<i64, _>("imac"), 1); // insert_order=0 排前
-            assert_eq!(nodes[1].get::<i64, _>("imac"), 2);
+            assert_eq!(nodes[0].get::<String, _>("sync_name"), "0"); // insert_order=0 排前
+            assert_eq!(nodes[1].get::<String, _>("sync_name"), "1");
         });
     }
 }

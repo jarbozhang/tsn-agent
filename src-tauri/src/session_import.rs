@@ -367,7 +367,7 @@ async fn perform_import_inner(
 /// UI label 与 agent inspect）统一吃 4KB 兜底上限 —— 不再有无限大的口子。
 fn validate_text_field(table: &str, col: &str, row: &sqlx::sqlite::SqliteRow) -> Result<(), String> {
     let limit = match col {
-        "styles_json" | "sync_type" => MAX_SMALL_TEXT_BYTES,
+        "styles_json" => MAX_SMALL_TEXT_BYTES,
         "ref_json" | "cfg_json" | "spec_json" | "entry_json" => MAX_JSON_TEXT_BYTES,
         "mac_address" | "ip" => MAX_IDENT_TEXT_BYTES,
         _ => MAX_SMALL_TEXT_BYTES,
@@ -454,9 +454,9 @@ mod tests {
         let src_pool = source_pool(target_dir).await;
         sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', 't', 'now', 'now', ?)")
             .bind(payload).execute(&src_pool).await.unwrap();
-        sqlx::query("INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, insert_order) VALUES ('orig', 1, '0', 0.0, 0.0, '{}', 0), ('orig', 2, '1', 1.0, 1.0, '{}', 1)")
+        sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) VALUES ('orig', '0', 0.0, 0.0, 0), ('orig', '1', 1.0, 1.0, 1)")
             .execute(&src_pool).await.unwrap();
-        sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_imac, dst_imac, styles_json) VALUES ('orig', 0, 1, 2, '{}')")
+        sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) VALUES ('orig', 0, '0', '1', '{}')")
             .execute(&src_pool).await.unwrap();
         let export_path = target_dir.join("export.db");
         crate::session_export::perform_single_session_export(
@@ -541,7 +541,7 @@ mod tests {
             let src_pool = source_pool(dir.path()).await;
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', 't', 'now', 'now', '{}')")
                 .execute(&src_pool).await.unwrap();
-            sqlx::query("INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, insert_order) VALUES ('orig', 1, '0', 1.7, 2.3, '{}', 0)")
+            sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) VALUES ('orig', '0', 1.7, 2.3, 0)")
                 .execute(&src_pool).await.unwrap();
             let export_path = dir.path().join("export.db");
             crate::session_export::perform_single_session_export(&src_pool, "orig", export_path.to_str().unwrap())
@@ -550,7 +550,7 @@ mod tests {
             perform_import(&main_pool, &export_path, Some("rt")).await.unwrap();
 
             let (x, y): (f64, f64) = sqlx::query_as(
-                "SELECT x, y FROM topology_nodes WHERE session_id='rt' AND imac=1",
+                "SELECT x, y FROM topology_nodes WHERE session_id='rt' AND sync_name='0'",
             )
             .fetch_one(&main_pool).await.unwrap();
             assert_eq!(x, 1.7, "x 坐标 round-trip 必须无损");
@@ -637,10 +637,10 @@ mod tests {
             // MAX_NODES + 1 行（批量 INSERT 提速）。
             let mut values = Vec::new();
             for i in 0..=(MAX_NODES as i64) {
-                values.push(format!("('orig', {i}, '{i}', 0.0, 0.0, '{{}}', {i})"));
+                values.push(format!("('orig', '{i}', 0.0, 0.0, {i})"));
             }
             let sql = format!(
-                "INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, insert_order) VALUES {}",
+                "INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) VALUES {}",
                 values.join(", ")
             );
             sqlx::query(&sql).execute(&src_pool).await.unwrap();
@@ -665,10 +665,10 @@ mod tests {
             let src_pool = source_pool(dir.path()).await;
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', 't', 'now', 'now', '{}')")
                 .execute(&src_pool).await.unwrap();
-            sqlx::query("INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, insert_order) VALUES ('orig', 1, '0', 0.0, 0.0, '{}', 0), ('orig', 2, '1', 1.0, 1.0, '{}', 1)")
+            sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) VALUES ('orig', '0', 0.0, 0.0, 0), ('orig', '1', 1.0, 1.0, 1)")
                 .execute(&src_pool).await.unwrap();
             let bomb = format!("{{\"pad\":\"{}\"}}", "x".repeat(5000));
-            sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_imac, dst_imac, styles_json) VALUES ('orig', 0, 1, 2, ?)")
+            sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) VALUES ('orig', 0, '0', '1', ?)")
                 .bind(&bomb).execute(&src_pool).await.unwrap();
             let bomb_path = dir.path().join("bomb.db");
             crate::session_export::perform_single_session_export(&src_pool, "orig", bomb_path.to_str().unwrap())
@@ -757,14 +757,14 @@ mod tests {
             let src_pool = source_pool(dir.path()).await;
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', 't', 'now', 'now', '{}')")
                 .execute(&src_pool).await.unwrap();
-            sqlx::query("INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, insert_order) VALUES ('orig', 1, '0', 0.0, 0.0, '{}', 0), ('orig', 2, '1', 1.0, 1.0, '{}', 1)")
+            sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) VALUES ('orig', '0', 0.0, 0.0, 0), ('orig', '1', 1.0, 1.0, 1)")
                 .execute(&src_pool).await.unwrap();
             let mut values = Vec::new();
             for i in 0..=(MAX_LINKS as i64) {
-                values.push(format!("('orig', {i}, 1, 2, '{{}}')"));
+                values.push(format!("('orig', {i}, '0', '1', '{{}}')"));
             }
             let sql = format!(
-                "INSERT INTO topology_links (session_id, link_seq, src_imac, dst_imac, styles_json) VALUES {}",
+                "INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) VALUES {}",
                 values.join(", ")
             );
             sqlx::query(&sql).execute(&src_pool).await.unwrap();
@@ -825,10 +825,10 @@ mod tests {
                 .execute(&src_pool).await.unwrap();
             let mut values = Vec::new();
             for i in 0..(MAX_NODES as i64) {
-                values.push(format!("('orig', {i}, '{i}', 0.0, 0.0, '{{}}', {i})"));
+                values.push(format!("('orig', '{i}', 0.0, 0.0, {i})"));
             }
             let sql = format!(
-                "INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, insert_order) VALUES {}",
+                "INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) VALUES {}",
                 values.join(", ")
             );
             sqlx::query(&sql).execute(&src_pool).await.unwrap();

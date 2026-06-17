@@ -419,8 +419,8 @@ describe("claude-agent-worker", () => {
     // 机制层 AE3：agent 在 assistantText 里输出整份拓扑 JSON、不调任何 MCP 工具，
     // trusted-signal 提取器只认 MCP tool_result 的 mutationId → 返回空。
     const topologyJson = JSON.stringify({
-      nodes: [{ imac: 1, syncName: "1", nodeType: "switch" }],
-      links: [{ linkSeq: 1, srcImac: 1, dstImac: 2 }],
+      nodes: [{ syncName: "1", nodeType: "switch" }],
+      links: [{ linkSeq: 1, srcSyncName: "0", dstSyncName: "1" }],
     });
     const extracted = extractTopologyWorkflowStageResults(
       {

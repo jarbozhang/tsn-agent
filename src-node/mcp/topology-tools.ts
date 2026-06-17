@@ -64,7 +64,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.inspect",
       allowedToolName: "mcp__tsn_topology__topology_inspect",
       title: "Inspect topology",
-      description: "Return the session's full persisted topology rows: nodes (imac/syncName/name/nodeType/syncType/x/y/insertOrder) and links (linkSeq/name/srcImac/dstImac/stylesJson). No parameters. Call this first to locate existing imac/linkSeq values before building apply_operations batches. UI 显示名优先节点 name 列（与对话命名一致），name 缺失才回退「类型前缀-syncName」派生；用户引用 SW-N/ES-N 时优先按 name 匹配。links 的 stylesJson 是 JSON 串：plane（A/B）控制画布链路配色（A=蓝、B=红，错值会误导用户）、role（access/backbone）为链路角色、leftLabel/rightLabel 作为端口号渲染在连线两端。",
+      description: "Return the session's full persisted topology rows: nodes (syncName/name/nodeType/x/y/insertOrder) and links (linkSeq/name/srcSyncName/dstSyncName/stylesJson). No parameters. Call this first to locate existing syncName/linkSeq values before building apply_operations batches. 节点身份是 syncName（逻辑序号），连线两端 srcSyncName/dstSyncName 引用节点 syncName。UI 显示名优先节点 name 列（与对话命名一致），name 缺失才回退「类型前缀-syncName」派生；用户引用 SW-N/ES-N 时优先按 name 匹配。links 的 stylesJson 是 JSON 串：plane（A/B）控制画布链路配色（A=蓝、B=红，错值会误导用户）、role（access/backbone）为链路角色、leftLabel/rightLabel 作为端口号渲染在连线两端。",
       inputSchema: {},
       handler: async (args) => callSidecarTool("/db/topology/inspect", args, {}),
     },
@@ -131,7 +131,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.apply_operations",
       allowedToolName: "mcp__tsn_topology__topology_apply_operations",
       title: "Apply topology operations",
-      description: "Apply atomic topology operations (node_add / node_update / node_delete / link_add / link_delete) to the session's persisted topology. Returns summary.mutationId on commit. Call topology.inspect first to locate existing imac/linkSeq values; retries must resend the exact same batch (same imac/linkSeq), never re-allocate keys.",
+      description: "Apply atomic topology operations (node_add / node_update / node_delete / link_add / link_delete) to the session's persisted topology. Returns summary.mutationId on commit. Call topology.inspect first to locate existing syncName/linkSeq values; retries must resend the exact same batch (same syncName/linkSeq), never re-allocate keys.",
       inputSchema: applyOperationsInputSchema(),
       handler: async (args) => callSidecarTool(
         "/db/topology/apply_operations",
@@ -290,33 +290,29 @@ function toCallToolResult(payload: unknown): CallToolResult {
 export function applyOperationsInputSchema(): z.ZodRawShape {
   const nodeAddSchema = z.object({
     op: z.literal("node_add"),
-    imac: z.number().int().describe("新节点 key；必须避开已占用 imac（先 inspect）。修改已有节点属性用 node_update，node_add 仅用于新增 imac"),
-    syncName: z.string(),
+    syncName: z.string().describe("新节点 key（逻辑序号，如 \"5\"）；必须避开已占用 syncName（先 inspect）。修改已有节点属性用 node_update，node_add 仅用于新增节点"),
     x: z.number(),
     y: z.number(),
-    syncType: z.string().describe("legacy JSON 串；复制 inspect 返回的同类节点 syncType 原文"),
     nodeType: z.string().describe("复制 inspect 返回的同类节点 nodeType（如 switch / endSystem）"),
     insertOrder: z.number().int(),
   }).strict();
   const nodeUpdateSchema = z.object({
     op: z.literal("node_update"),
-    imac: z.number().int().describe("目标节点的既有 imac（先 inspect）；只更新提供的字段"),
-    syncName: z.string().optional(),
+    syncName: z.string().describe("目标节点的既有 syncName（先 inspect）；只更新提供的字段，syncName 本身不可改"),
     x: z.number().optional(),
     y: z.number().optional(),
-    syncType: z.string().optional(),
     nodeType: z.string().optional(),
   }).strict();
   const nodeDeleteSchema = z.object({
     op: z.literal("node_delete"),
-    imac: z.number().int().describe("目标节点的既有 imac；仍被链路引用时会被拒绝（先 link_delete）"),
+    syncName: z.string().describe("目标节点的既有 syncName；仍被链路引用时会被拒绝（先 link_delete）"),
   }).strict();
   const linkAddSchema = z.object({
     op: z.literal("link_add"),
     linkSeq: z.number().int().describe("新链路 key；必须避开已占用 linkSeq（先 inspect）"),
     name: z.string().optional(),
-    srcImac: z.number().int(),
-    dstImac: z.number().int(),
+    srcSyncName: z.string(),
+    dstSyncName: z.string(),
     stylesJson: z.string().describe("复制 inspect 返回的既有链路 stylesJson 作为格式参照（leftLabel/rightLabel/speed；模板链路可能另含 plane/role）。plane 表示平面归属（A/B），新链路须按两端节点实际平面填写或直接省略该键——抄错平面会让画布配色误导用户。leftLabel/rightLabel 会作为端口号渲染在连线两端（源端/目标端），新链路应填两端节点实际端口（新生成拓扑为 P0 起编）或省略，不要照抄参照链路的值"),
   }).strict();
   const linkDeleteSchema = z.object({
@@ -335,7 +331,7 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
       ]))
       .min(1)
       .max(32)
-      .describe("原子操作 batch（1-32）。增量修改先 inspect 再构造；重试必须复用同一 batch 的 imac/linkSeq"),
+      .describe("原子操作 batch（1-32）。增量修改先 inspect 再构造；重试必须复用同一 batch 的 syncName/linkSeq"),
     dryRun: z.boolean().optional(),
   };
 }

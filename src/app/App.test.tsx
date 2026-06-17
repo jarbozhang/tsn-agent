@@ -127,13 +127,13 @@ function sampleTopologyRows(sessionId: string) {
   return {
     sessionId,
     nodes: [
-      { imac: 1, syncName: "0", x: 0, y: 0, syncType: "{}", nodeType: "switch", insertOrder: 0 },
-      { imac: 2, syncName: "1", x: 160, y: 0, syncType: "{}", nodeType: "switch", insertOrder: 1 },
-      { imac: 3, syncName: "2", x: 0, y: 120, syncType: "{}", nodeType: null, insertOrder: 2 },
+      { syncName: "0", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
+      { syncName: "1", name: null, x: 160, y: 0, nodeType: "switch", insertOrder: 1 },
+      { syncName: "2", name: null, x: 0, y: 120, nodeType: null, insertOrder: 2 },
     ],
     links: [
-      { linkSeq: 0, name: null, srcImac: 1, dstImac: 2, stylesJson: "{}" },
-      { linkSeq: 1, name: "uplink", srcImac: 1, dstImac: 3, stylesJson: "{}" },
+      { linkSeq: 0, name: null, srcSyncName: "0", dstSyncName: "1", stylesJson: "{}" },
+      { linkSeq: 1, name: "uplink", srcSyncName: "0", dstSyncName: "2", stylesJson: "{}" },
     ],
   };
 }
@@ -470,7 +470,7 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "选择节点 1" }));
     const nodePanel = screen.getByRole("tabpanel", { name: "节点详情" });
-    expect(within(nodePanel).getByText("SW-0")).toBeInTheDocument();
+    expect(within(nodePanel).getByText("SW-1")).toBeInTheDocument();
     expect(within(nodePanel).getByText("交换机")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "选择链路 link-1" }));

@@ -68,32 +68,31 @@ pub const P0_DOMAIN_SCHEMA_SQL: &str = r#"
     -- topology.json (3 tables)
     CREATE TABLE IF NOT EXISTS topology_nodes (
         session_id    TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-        imac          INTEGER NOT NULL,
+        -- 节点逻辑序号（规划器/MAC 表的节点身份，如 "0"/"1"/"2"）：每会话唯一，作主键。
         sync_name     TEXT    NOT NULL,
         -- 逻辑节点名（如 ES-1）：initialize 落库写入，画布显示优先用它；
         -- NULLABLE——apply_operations 增量节点与历史数据回退派生名。
         name          TEXT,
         x             REAL    NOT NULL,
         y             REAL    NOT NULL,
-        sync_type     TEXT    NOT NULL,
         node_type     TEXT,
         insert_order  INTEGER NOT NULL,
-        PRIMARY KEY (session_id, imac)
+        PRIMARY KEY (session_id, sync_name)
     );
     CREATE INDEX IF NOT EXISTS idx_topology_nodes_session
         ON topology_nodes(session_id, insert_order);
 
     CREATE TABLE IF NOT EXISTS topology_links (
-        session_id   TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-        link_seq     INTEGER NOT NULL,
-        name         TEXT,
-        src_imac     INTEGER NOT NULL,
-        dst_imac     INTEGER NOT NULL,
-        styles_json  TEXT    NOT NULL,
+        session_id     TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        link_seq       INTEGER NOT NULL,
+        name           TEXT,
+        src_sync_name  TEXT    NOT NULL,
+        dst_sync_name  TEXT    NOT NULL,
+        styles_json    TEXT    NOT NULL,
         PRIMARY KEY (session_id, link_seq)
     );
     CREATE INDEX IF NOT EXISTS idx_topology_links_session
-        ON topology_links(session_id, src_imac, dst_imac);
+        ON topology_links(session_id, src_sync_name, dst_sync_name);
 
     CREATE TABLE IF NOT EXISTS topology_refs (
         session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -275,6 +274,87 @@ pub async fn ensure_topology_nodes_name_column(
     Ok(())
 }
 
+/// 拓扑去 Qunee 化 re-key（2026-06-17）：把节点身份从 Qunee 遗留的 `imac` 大数字
+/// 改为逻辑序号 `sync_name`（每会话唯一、即规划器/MAC 表认的节点号），并删除纯 Qunee
+/// 渲染用的 `sync_type` 列；连线两端从 `src_imac/dst_imac` 改为引用 `src_sync_name/dst_sync_name`。
+///
+/// 改主键属表重建，不走 migrations() 向量（否则全新库先按新 schema 建表、此迁移再找
+/// `imac` 列会报错）。沿用 `ensure_topology_nodes_name_column` 的命令式 pragma 守卫范式：
+/// 仅当老库仍有 `imac` 列时重建，新库/已迁移库 no-op。每行已存 `sync_name`，重建只是把它
+/// 扶正为键 + 用 imac→sync_name 映射改写连线端点；端点解析不到节点的悬空连线被丢弃。
+pub async fn ensure_topology_rekey_to_sync_name(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+) -> Result<(), sqlx::Error> {
+    let has_legacy_imac: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pragma_table_info('topology_nodes') WHERE name = 'imac'",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    if has_legacy_imac == 0 {
+        return Ok(());
+    }
+
+    let mut tx = pool.begin().await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE topology_nodes_rekey (
+            session_id    TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            sync_name     TEXT    NOT NULL,
+            name          TEXT,
+            x             REAL    NOT NULL,
+            y             REAL    NOT NULL,
+            node_type     TEXT,
+            insert_order  INTEGER NOT NULL,
+            PRIMARY KEY (session_id, sync_name)
+        );
+        INSERT OR IGNORE INTO topology_nodes_rekey
+            (session_id, sync_name, name, x, y, node_type, insert_order)
+            SELECT session_id, sync_name, name, x, y, node_type, insert_order
+            FROM topology_nodes;
+
+        CREATE TABLE topology_links_rekey (
+            session_id     TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            link_seq       INTEGER NOT NULL,
+            name           TEXT,
+            src_sync_name  TEXT    NOT NULL,
+            dst_sync_name  TEXT    NOT NULL,
+            styles_json    TEXT    NOT NULL,
+            PRIMARY KEY (session_id, link_seq)
+        );
+        INSERT INTO topology_links_rekey
+            (session_id, link_seq, name, src_sync_name, dst_sync_name, styles_json)
+            SELECT l.session_id, l.link_seq, l.name,
+                (SELECT n.sync_name FROM topology_nodes n
+                    WHERE n.session_id = l.session_id AND n.imac = l.src_imac),
+                (SELECT n.sync_name FROM topology_nodes n
+                    WHERE n.session_id = l.session_id AND n.imac = l.dst_imac),
+                l.styles_json
+            FROM topology_links l
+            WHERE EXISTS (SELECT 1 FROM topology_nodes n
+                    WHERE n.session_id = l.session_id AND n.imac = l.src_imac)
+              AND EXISTS (SELECT 1 FROM topology_nodes n
+                    WHERE n.session_id = l.session_id AND n.imac = l.dst_imac);
+
+        DROP TABLE topology_links;
+        DROP TABLE topology_nodes;
+        ALTER TABLE topology_nodes_rekey RENAME TO topology_nodes;
+        ALTER TABLE topology_links_rekey RENAME TO topology_links;
+
+        CREATE INDEX IF NOT EXISTS idx_topology_nodes_session
+            ON topology_nodes(session_id, insert_order);
+        CREATE INDEX IF NOT EXISTS idx_topology_links_session
+            ON topology_links(session_id, src_sync_name, dst_sync_name);
+        "#,
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
 /// Export/Import 共享的 session 域数据表清单（表名 + 列清单，首列恒为 session_id）。
 /// 单一事实源：导出切片（session_export）与导入复制（session_import）都遍历此清单，
 /// 防两端漂移 —— 导出写了 import 不收的表 = 静默丢数据。
@@ -283,11 +363,11 @@ pub const SESSION_SCOPED_TABLES: &[(&str, &[&str])] = &[
     ("topology_refs", &["session_id", "ref_json"]),
     (
         "topology_nodes",
-        &["session_id", "imac", "sync_name", "name", "x", "y", "sync_type", "node_type", "insert_order"],
+        &["session_id", "sync_name", "name", "x", "y", "node_type", "insert_order"],
     ),
     (
         "topology_links",
-        &["session_id", "link_seq", "name", "src_imac", "dst_imac", "styles_json"],
+        &["session_id", "link_seq", "name", "src_sync_name", "dst_sync_name", "styles_json"],
     ),
     (
         "topo_feature_links",

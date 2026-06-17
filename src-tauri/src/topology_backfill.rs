@@ -10,7 +10,7 @@
 //! 失败状态码：
 //!   - `PAYLOAD_NOT_JSON`：payload 不是合法 JSON
 //!
-//! `legacy_node_type` / `legacy_class_path`（type → legacy 字符串映射）由 sidecar
+//! `legacy_node_type`（type → 持久层 node_type 字符串映射）由 sidecar
 //! `persist_initialized_topology` 复用，保留在本模块作为单一定义点。
 //!
 //! 当前 unit 提供：
@@ -188,14 +188,6 @@ pub(crate) fn legacy_node_type(canonical: &str) -> &'static str {
     }
 }
 
-pub(crate) fn legacy_class_path(canonical: &str) -> &'static str {
-    match canonical {
-        "switch" => "Q.Graphs.exchanger2",
-        "server" => "Q.Graphs.server",
-        _ => "Q.Graphs.node",
-    }
-}
-
 async fn mark_completed(pool: &SqlitePool, session_id: &str) -> Result<(), String> {
     sqlx::query(
         r#"INSERT INTO session_backfill_state (session_id, state, attempted_at)
@@ -326,7 +318,7 @@ mod tests {
             let pool = fresh_pool().await;
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('with_p0', 't', 'now', 'now', '{\"title\":\"x\"}'), ('no_p0', 't', 'now', 'now', '{\"title\":\"x\"}')")
                 .execute(&pool).await.unwrap();
-            sqlx::query("INSERT INTO topology_nodes (session_id, imac, sync_name, x, y, sync_type, node_type, insert_order) VALUES ('with_p0', 100, '1', 0, 0, '{}', 'switch', 0)")
+            sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, x, y, node_type, insert_order) VALUES ('with_p0', '1', 0, 0, 'switch', 0)")
                 .execute(&pool).await.unwrap();
 
             let marked = mark_pending_for_all_sessions(&pool).await.unwrap();

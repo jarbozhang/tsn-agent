@@ -121,10 +121,10 @@ function sampleSnapshot(): TopologyRowSnapshot {
   return {
     sessionId: "s1",
     nodes: [
-      { imac: 1, syncName: "0", name: null, x: 0, y: 0, syncType: "{}", nodeType: "switch", insertOrder: 0 },
-      { imac: 2, syncName: "1", name: null, x: 160, y: 0, syncType: "{}", nodeType: null, insertOrder: 1 },
+      { syncName: "1", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
+      { syncName: "2", name: null, x: 160, y: 0, nodeType: null, insertOrder: 1 },
     ],
-    links: [{ linkSeq: 0, name: "uplink", srcImac: 1, dstImac: 2, stylesJson: "{}" }],
+    links: [{ linkSeq: 0, name: "uplink", srcSyncName: "1", dstSyncName: "2", stylesJson: "{}" }],
   };
 }
 
@@ -178,7 +178,7 @@ describe("WorkspacePane", () => {
       />,
     );
     const panel = screen.getByRole("tabpanel", { name: "节点详情" });
-    expect(within(panel).getByText("SW-0")).toBeInTheDocument();
+    expect(within(panel).getByText("SW-1")).toBeInTheDocument();
     expect(within(panel).getByText("交换机")).toBeInTheDocument();
   });
 
@@ -257,7 +257,7 @@ describe("WorkspacePane 拖动持久化（U4）", () => {
     await waitFor(() => expect(commitNodePosition).toHaveBeenCalledTimes(1));
     expect(commitNodePosition).toHaveBeenCalledWith({
       sessionId: "s1",
-      imac: 2,
+      syncName: "2",
       x: 480,
       y: 96,
       expectedMutationId: 7,
@@ -453,12 +453,10 @@ describe("WorkspacePane 画布配置与视口（R9/R12）", () => {
 describe("nodeRowLabel", () => {
   function nodeRow(overrides: Partial<TopologyNodeRow> = {}): TopologyNodeRow {
     return {
-      imac: 102,
       syncName: "2",
       name: null,
       x: 0,
       y: 0,
-      syncType: "{}",
       nodeType: "endSystem",
       insertOrder: 2,
       ...overrides,
@@ -526,8 +524,8 @@ describe("planeClassName（R3）", () => {
 });
 
 describe("topologySnapshotToReactFlow（U3 映射）", () => {
-  function node(imac: number, x: number, y: number): TopologyNodeRow {
-    return { imac, syncName: String(imac), name: null, x, y, syncType: "{}", nodeType: imac < 10 ? "switch" : "endSystem", insertOrder: imac };
+  function node(id: number, x: number, y: number): TopologyNodeRow {
+    return { syncName: String(id), name: null, x, y, nodeType: id < 10 ? "switch" : "endSystem", insertOrder: id };
   }
 
   it("Covers AE1/AE4：floating 边无 handle 绑定、className 三态、存量 p1 标签透传", () => {
@@ -535,9 +533,9 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
       sessionId: "s1",
       nodes: [node(1, 120, 300), node(10, 90, 60)],
       links: [
-        { linkSeq: 0, name: null, srcImac: 10, dstImac: 1, stylesJson: '{"plane":"A","leftLabel":"P0","rightLabel":"P0"}' },
-        { linkSeq: 1, name: null, srcImac: 10, dstImac: 1, stylesJson: '{"leftLabel":"p1","rightLabel":"p2"}' },
-        { linkSeq: 2, name: null, srcImac: 10, dstImac: 1, stylesJson: "broken" },
+        { linkSeq: 0, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: '{"plane":"A","leftLabel":"P0","rightLabel":"P0"}' },
+        { linkSeq: 1, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: '{"leftLabel":"p1","rightLabel":"p2"}' },
+        { linkSeq: 2, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: "broken" },
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
@@ -554,9 +552,9 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
       sessionId: "s1",
       nodes: [node(1, 120, 300), node(10, 90, 60)],
       links: [
-        { linkSeq: 0, name: null, srcImac: 10, dstImac: 1, stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}' },
-        { linkSeq: 1, name: null, srcImac: 10, dstImac: 1, stylesJson: '{"leftLabel":"P1","rightLabel":"P1"}' },
-        { linkSeq: 2, name: null, srcImac: 10, dstImac: 1, stylesJson: "broken" },
+        { linkSeq: 0, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}' },
+        { linkSeq: 1, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: '{"leftLabel":"P1","rightLabel":"P1"}' },
+        { linkSeq: 2, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: "broken" },
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);

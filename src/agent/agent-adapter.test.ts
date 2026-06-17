@@ -743,11 +743,11 @@ describe("runTsnAgent", () => {
       topology: {
         sessionId: "session-1",
         nodes: [
-          { imac: 1, syncName: "0", x: 0, y: 0, syncType: "{}", nodeType: "switch", insertOrder: 0 },
-          { imac: 2, syncName: "1", x: 1, y: 0, syncType: "{}", nodeType: null, insertOrder: 1 },
+          { syncName: "0", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
+          { syncName: "1", name: null, x: 1, y: 0, nodeType: null, insertOrder: 1 },
         ],
         links: [
-          { linkSeq: 0, name: null, srcImac: 1, dstImac: 2, stylesJson: "{}" },
+          { linkSeq: 0, name: null, srcSyncName: "0", dstSyncName: "1", stylesJson: "{}" },
         ],
       },
     });

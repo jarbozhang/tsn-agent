@@ -57,12 +57,12 @@ description: TSN Agent 拓扑阶段主索引。承载场景无关的领域语义
 
 当当前 project 已经有拓扑，且用户要插入交换机或调整连接时：
 
-1. 调用 `mcp__tsn_topology__topology_inspect`（无参数）获取该会话全部拓扑 rows：nodes（imac/syncName/name/nodeType/syncType/x/y/insertOrder）+ links（linkSeq/name/srcImac/dstImac/stylesJson）。
-2. 在 rows 中按 name/nodeType/连接关系定位目标节点与链路，得到精确的 imac / linkSeq；如用户引用不唯一，先用中文数字编号选项向用户澄清。定位时按上文「显示名映射」匹配。
-3. 构造原子 operations（如插入交换机 = `[link_delete, node_add, link_add, link_add]`）：新节点的 `syncType`/`nodeType` 复制 inspect 返回的同类节点原文，新链路的 `stylesJson` 参照既有链路；新 `imac`/`linkSeq` 必须避开 rows 中已占用的值。
+1. 调用 `mcp__tsn_topology__topology_inspect`（无参数）获取该会话全部拓扑 rows：nodes（syncName/name/nodeType/x/y/insertOrder）+ links（linkSeq/name/srcSyncName/dstSyncName/stylesJson）。节点身份是 `syncName`（逻辑序号），连线两端 `srcSyncName`/`dstSyncName` 引用节点 syncName。
+2. 在 rows 中按 name/nodeType/连接关系定位目标节点与链路，得到精确的 syncName / linkSeq；如用户引用不唯一，先用中文数字编号选项向用户澄清。定位时按上文「显示名映射」匹配。
+3. 构造原子 operations（如插入交换机 = `[link_delete, node_add, link_add, link_add]`）：新节点的 `nodeType` 复制 inspect 返回的同类节点原文，新链路的 `stylesJson` 参照既有链路、`srcSyncName`/`dstSyncName` 填两端节点的 syncName；新 `syncName`/`linkSeq` 必须避开 rows 中已占用的值。
 4. 调用 `mcp__tsn_topology__topology_apply_operations`；不把 rows 或 changeSet 写进对话。
 
-支持的 op：`node_add` / `node_update` / `node_delete` / `link_add` / `link_delete`（字段 camelCase，详见工具 schema）。「移动节点」「改属性」用 `node_update`；`node_add` 撞已占用 imac 会报 `IMAC_TAKEN`。
+支持的 op：`node_add` / `node_update` / `node_delete` / `link_add` / `link_delete`（字段 camelCase，详见工具 schema）。「移动节点」「改属性」用 `node_update`；`node_add` 撞已占用 syncName 会报 `SYNC_NAME_TAKEN`。
 
 ## 回复边界
 
