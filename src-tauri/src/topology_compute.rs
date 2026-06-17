@@ -2212,7 +2212,7 @@ fn imac_by_node_id_map(sorted_nodes: &[IntermediateNode]) -> HashMap<String, i64
 fn legacy_node_type(t: IntermediateNodeType) -> &'static str {
     match t {
         IntermediateNodeType::Switch => "switch",
-        IntermediateNodeType::EndSystem => "networkcard",
+        IntermediateNodeType::EndSystem => "endSystem",
         IntermediateNodeType::Server => "server",
     }
 }
