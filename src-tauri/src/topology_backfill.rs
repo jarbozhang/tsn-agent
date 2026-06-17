@@ -10,7 +10,7 @@
 //! 失败状态码：
 //!   - `PAYLOAD_NOT_JSON`：payload 不是合法 JSON
 //!
-//! `legacy_node_type` / `legacy_class_path`（type → legacy 字符串映射）由 sidecar
+//! `legacy_node_type`（type → 持久层 node_type 字符串映射）由 sidecar
 //! `persist_initialized_topology` 复用，保留在本模块作为单一定义点。
 //!
 //! 当前 unit 提供：
@@ -185,14 +185,6 @@ pub(crate) fn legacy_node_type(canonical: &str) -> &'static str {
         "endSystem" => "endSystem",
         "server" => "server",
         _ => "endSystem",
-    }
-}
-
-pub(crate) fn legacy_class_path(canonical: &str) -> &'static str {
-    match canonical {
-        "switch" => "Q.Graphs.exchanger2",
-        "server" => "Q.Graphs.server",
-        _ => "Q.Graphs.node",
     }
 }
 
