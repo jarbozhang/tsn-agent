@@ -32,6 +32,11 @@ export interface WorkflowState {
    * 用户点「确认并继续」时才真正执行 requestStageChanges(target)（破坏性回退）。
    */
   pendingStageChange?: WorkflowStep;
+  /**
+   * 触发本次回退提议的原始用户意图（如「减少一个交换机」）。用户确认回退后，
+   * 切阶段是确定性的，但随即用这句原话在新阶段自动跑一轮大模型——免去用户重输。
+   */
+  pendingStageChangeIntent?: string;
 }
 
 export type WorkflowAction =
@@ -96,7 +101,15 @@ export function normalizeWorkflowState(
     currentStep,
     stages,
     availableActions: state.availableActions?.length ? state.availableActions : actionsForStage(stages[currentStep]),
-    ...(isWorkflowStep(state.pendingStageChange) ? { pendingStageChange: state.pendingStageChange } : {}),
+    // 回退目标与触发原话绑定持久化：目标无效则原话也一并丢弃。
+    ...(isWorkflowStep(state.pendingStageChange)
+      ? {
+          pendingStageChange: state.pendingStageChange,
+          ...(typeof state.pendingStageChangeIntent === "string" && state.pendingStageChangeIntent.length > 0
+            ? { pendingStageChangeIntent: state.pendingStageChangeIntent }
+            : {}),
+        }
+      : {}),
   };
 }
 
@@ -141,11 +154,11 @@ export function recordStageResult(
 // 任一阶段转移都作废上一轮未确认的回退提议——pendingStageChange 不得跨转移残留，
 // 否则确认按钮会指向一个已经过期的回退目标（确定性状态归状态机骨架）。
 export function clearPendingStageChange(workflow: WorkflowState): WorkflowState {
-  if (!workflow.pendingStageChange) {
+  if (!workflow.pendingStageChange && !workflow.pendingStageChangeIntent) {
     return workflow;
   }
 
-  const { pendingStageChange: _drop, ...rest } = workflow;
+  const { pendingStageChange: _drop, pendingStageChangeIntent: _dropIntent, ...rest } = workflow;
   return rest;
 }
 

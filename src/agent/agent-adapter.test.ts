@@ -595,6 +595,73 @@ describe("runTsnAgent", () => {
     expect(result.workflow.stages["flow-template"].status).toBe("current");
   });
 
+  it("U3-fix(carry): stores the triggering intent with the pending rollback proposal", async () => {
+    enableTauriRuntime();
+    mockTauriCommands({
+      claude: {
+        assistantText: "要切回拓扑吗？",
+        sessionId: "s-carry-store",
+        stageResults: [{ kind: "stage-change-request", targetStage: "topology", reason: "减设备" }],
+      },
+    });
+    const workflow = createInitialWorkflowState();
+    workflow.currentStep = "flow-template";
+    workflow.stages.topology = { step: "topology", status: "confirmed" };
+    workflow.stages["time-sync"] = { step: "time-sync", status: "confirmed" };
+    workflow.stages["flow-template"] = { step: "flow-template", status: "current" };
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "减少一个交换机",
+      session: sessionWithWorkflow(workflow),
+    });
+
+    expect(result.workflow.pendingStageChange).toBe("topology");
+    expect(result.workflow.pendingStageChangeIntent).toBe("减少一个交换机");
+  });
+
+  it("U3-fix(carry): confirming the rollback re-runs the original intent in topology without retyping", async () => {
+    enableTauriRuntime();
+    mockTauriCommands({
+      claude: {
+        assistantText: "已减少一个交换机。",
+        sessionId: "s-carry-run",
+        stageResults: [validStageResult(12)],
+      },
+    });
+    const workflow = createInitialWorkflowState();
+    workflow.currentStep = "flow-template";
+    workflow.stages.topology = { step: "topology", status: "confirmed" };
+    workflow.stages["time-sync"] = { step: "time-sync", status: "confirmed" };
+    workflow.stages["flow-template"] = { step: "flow-template", status: "current" };
+    const pending: WorkflowState = {
+      ...workflow,
+      pendingStageChange: "topology",
+      pendingStageChangeIntent: "减少一个交换机",
+    };
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "继续",
+      action: "confirm-stage",
+      session: sessionWithWorkflow(pending),
+    });
+
+    // 切阶段后自动用原话跑了大模型（不是停在 local 让用户重输）。
+    expect(result.mode).toBe("claude");
+    expect(invokeMock).toHaveBeenCalledWith("run_claude_agent", {
+      request: expect.objectContaining({
+        prompt: "减少一个交换机",
+        stageRunnerInput: expect.objectContaining({ stage: "topology" }),
+      }),
+    });
+    expect(result.topologyMutationId).toBe(12);
+    expect(result.workflow.currentStep).toBe("topology");
+    expect(result.workflow.stages.topology.status).toBe("waiting_confirmation");
+    expect(result.workflow.pendingStageChange).toBeUndefined();
+    expect(result.workflow.pendingStageChangeIntent).toBeUndefined();
+  });
+
   it("U3-fix(A): abandoning a pending rollback via free text clears it and leaves no phantom confirm", async () => {
     enableTauriRuntime();
     const base = createInitialWorkflowState();

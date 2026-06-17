@@ -91,7 +91,12 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
     },
   });
 
-  // 显式确认动作（确认按钮）：确定性，不走大模型。有待确认回退则执行回退，否则推进当前阶段。
+  // 大模型路径实际使用的意图/工作流。正常等于用户输入；确认回退「带原话」时被替换为
+  // 切阶段后的工作流 + 触发回退的原话，从而切完自动执行原始编辑（不用用户重输）。
+  let effectiveIntent = userIntent;
+  let effectiveWorkflow = workflow;
+
+  // 显式确认动作（确认按钮）：切阶段本身确定性、不走大模型。
   if (action === "confirm-stage") {
     const confirmResult = runConfirmAction(workflow);
     logAgent(request.diagnostics, {
@@ -105,7 +110,14 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
       },
     });
 
-    return confirmResult;
+    // 无「带原话」标记 → 纯确定性确认（推进 / time-sync 自动生成 / 无操作），直接返回。
+    if (!confirmResult.carryIntent) {
+      return confirmResult;
+    }
+
+    // 回退带着原话：切阶段已完成（确定性），下面用原话在切换后的阶段继续走大模型。
+    effectiveIntent = confirmResult.carryIntent;
+    effectiveWorkflow = confirmResult.workflow;
   }
 
   // 自由文本一律走大模型判断意图（不再有正则快速路径）。跨阶段意图由大模型调
@@ -147,23 +159,24 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
   try {
     const claude = await invoke<ClaudeAgentResponse>("run_claude_agent", {
       request: {
-        prompt: userIntent,
+        prompt: effectiveIntent,
         runId,
         appSessionId: sessionId,
         resumeSessionId: request.session?.claudeSessionId,
-        conversationContext: buildConversationContext(request.session, workflow, snapshot, userIntent),
+        conversationContext: buildConversationContext(request.session, effectiveWorkflow, snapshot, effectiveIntent),
         stageRunnerInput: {
-          userIntent,
-          stage: workflow.currentStep,
-          scenarioConfigId: workflow.scenarioConfigId,
+          userIntent: effectiveIntent,
+          stage: effectiveWorkflow.currentStep,
+          scenarioConfigId: effectiveWorkflow.scenarioConfigId,
         },
       },
     });
     runFinished = true;
     const application = applyStageResults({
       stageResults: claude.stageResults ?? [],
-      workflow,
+      workflow: effectiveWorkflow,
       sessionId,
+      userIntent: effectiveIntent,
     });
     logAgent(request.diagnostics, {
       sessionId,
@@ -214,14 +227,14 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
         createEvent({
           id: "event-agent-failed",
           kind: "error",
-          stage: workflow.currentStep,
+          stage: effectiveWorkflow.currentStep,
           title: "智能助手执行失败",
           content: `本轮请求失败：${normalizeError(error)}。右侧工程保持原状态。`,
           status: "error",
         }),
       ],
-      workflow,
-      assistantText: buildAgentFailureText(error, userIntent),
+      workflow: effectiveWorkflow,
+      assistantText: buildAgentFailureText(error, effectiveIntent),
       mode: "claude",
     };
   } finally {
@@ -231,12 +244,20 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
 
 // ---------- 阶段推进（确定性） ----------
 
-// 确认按钮的确定性入口：先处理待确认的破坏性回退，否则普通推进。不调用大模型。
-function runConfirmAction(workflow: WorkflowState): TsnAgentResult {
+// 确认按钮的确定性入口：先处理待确认的破坏性回退，否则普通推进。切阶段本身不走大模型；
+// 但回退「带原话」时返回 carryIntent，由 runTsnAgent 在切换后的阶段用原话自动跑一轮大模型。
+function runConfirmAction(workflow: WorkflowState): TsnAgentResult & { carryIntent?: string } {
   if (workflow.pendingStageChange) {
     const target = workflow.pendingStageChange;
-    // requestStageChanges 会清空 pendingStageChange 并把后续阶段重置为 locked。
+    const carriedIntent = workflow.pendingStageChangeIntent;
+    // requestStageChanges 会清空 pendingStageChange/Intent 并把后续阶段重置为 locked。
     const switched = requestStageChanges(workflow, target);
+
+    // 回退到拓扑且带着触发它的原话：切阶段后让调用方用原话在拓扑阶段自动执行真正的编辑，
+    // 免去用户重输（time-sync 无可编辑工具，不走此路）。
+    if (target === "topology" && carriedIntent) {
+      return { events: [], workflow: switched, assistantText: "", mode: "local", carryIntent: carriedIntent };
+    }
 
     // 回退到 time-sync 需重新自动生成摘要并进入待确认——否则会停在 current 且无确认按钮（死胡同）。
     if (target === "time-sync" && switched.stages["time-sync"].status === "current") {
@@ -415,6 +436,7 @@ function applyStageResults(input: {
   stageResults: unknown[];
   workflow: WorkflowState;
   sessionId?: string;
+  userIntent: string;
 }): {
   events: AgentEvent[];
   workflow: WorkflowState;
@@ -449,7 +471,11 @@ function applyStageResults(input: {
   }
 
   // 再处理切阶段提议（多个时取最后一个）。
-  const switchOutcome = applyStageChangeRequest(stageChangeRequests[stageChangeRequests.length - 1], topology.workflow);
+  const switchOutcome = applyStageChangeRequest(
+    stageChangeRequests[stageChangeRequests.length - 1],
+    topology.workflow,
+    input.userIntent,
+  );
   return {
     events: [...topology.events, ...switchOutcome.events],
     workflow: switchOutcome.workflow,
@@ -558,6 +584,7 @@ function applyTopologyStageResults(input: {
 function applyStageChangeRequest(
   request: StageChangeRequest,
   workflow: WorkflowState,
+  userIntent: string,
 ): { events: AgentEvent[]; workflow: WorkflowState } {
   const target = request.targetStage;
   const scenarioConfig = getScenarioConfig(workflow.scenarioConfigId);
@@ -609,7 +636,8 @@ function applyStageChangeRequest(
   const summary = `切回${scenarioConfig.stageLabels[target]}会让其后已完成的阶段重新来过${reasonSuffix}。确认要切回吗？确认后点「确认并继续」。`;
 
   return {
-    workflow: { ...workflow, pendingStageChange: target },
+    // 同时记下触发回退的原话：确认后由 runConfirmAction/runTsnAgent 用它在新阶段自动执行编辑。
+    workflow: { ...workflow, pendingStageChange: target, pendingStageChangeIntent: userIntent },
     events: [
       createEvent({
         id: "event-stage-change-pending",
