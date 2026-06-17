@@ -411,8 +411,8 @@ mod tests {
         assert!(c.contains(&"DUPLICATE_LINK"));
     }
 
-    /// 连通性判定 = 转发表可派生性：连通拓扑的可达集应覆盖全部节点（转发表对每对都能取首跳）。
-    /// 锁定 KTD2：本模块的连通 BFS 与 topology_compute 的转发 BFS 跑同一无向边集、结论一致。
+    /// 锁定本模块不变式：连通 ⇔ 转发表可派生（连通拓扑的可达集覆盖全部节点，转发表对每对都能取首跳）。
+    /// 与 topology_compute 转发 BFS 的一致性由两侧同规则建边（每链路加双向边）的构造保证，本测试不断言跨模块对账。
     #[test]
     fn reachability_matches_connectivity() {
         let nodes = vec![

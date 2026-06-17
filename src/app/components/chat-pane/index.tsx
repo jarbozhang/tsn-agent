@@ -21,7 +21,7 @@ function caliberLabel(caliber: string): string {
     case "schedulability":
       return "已验可调度性";
     default:
-      return caliber;
+      return "未知口径";
   }
 }
 
