@@ -6,29 +6,61 @@
 
 ### 新功能
 
-- 更新 improve topology layout and canvas interaction
-- 新增 stage-switch tool usage rules to system prompt (U5)
-- 更新 consume stage-change proposals with legality + destructive-confirm (U3)
-- 新增 request_stage_change tool and all-stage extraction (U1+U2)
-- 更新 make in-app version follow real releases
+- 跨阶段修改更聪明：在靠后的阶段（如流量规划）直接用自然语言说「加两个交换机」「减少一个交换机」这类需求，助手现在能听懂你其实是想改拓扑，会先提示「切回拓扑会让后面已完成的阶段重做，确认吗」；你确认后自动切回拓扑阶段，并按你最初那句话直接执行修改，不用再输入一遍。
+
+### 优化
+
+- 拓扑画布更清晰：节点排布更宽松、不再相互重叠；连线改为更直观的直线，上下对齐的节点之间连成竖线；生成或刷新拓扑时画布自动以 100% 比例居中，且你手动拖动节点后视口不再被重置。
+- 「确认并继续」按钮更可靠：点了就确定推进到下一阶段，不会出现点了没反应、卡住的情况。
+- 聊天区滚动尊重你的操作：助手输出过程中你向上滚动查看历史时，新内容不再强行把页面拉回底部；滚回底部或发送新需求时恢复自动跟随。
+- Skill 能力面板重新设计：阶段、状态徽章、文件列表与文件预览的分组和层级更清晰，视觉更整洁。
 
 ### 修复
 
-- 更新 correct stale tauri-bundle assertion for topology MCP server
-- 更新 carry the original intent through a confirmed stage rollback
-- 更新 hide HTML comments in SKILL.md markdown preview
-- 更新 respect user scroll-up during streaming (stick-to-bottom)
-- 更新 resolve stale-pending phantom confirm, pending leak, time-sync rollback dead-end, and cross-stage topology write gap
-- 更新 skill drawer tabs visible + stable on switch (system WebKit)
+- Skill 文件预览不再显示内部注释标记。
 
-### 其他
+## v0.5.6 - 2026-06-16
 
-- 更新 Merge pull request #27 from jarbozhang/fix/stale-tauri-bundle-test
-- 更新 Merge pull request #25 from thanktiger/topology-layout-pr
-- 更新 Merge pull request #26 from jarbozhang/feat/llm-stage-switch-intent
-- 更新 refine the Skill drawer layout and visual hierarchy
+### 优化
 
-本文件用于在应用内展示客户可见的更新内容。技术名词、文件名和产品名保留原文。
+- 完善项目文档（README）。本版无用户可见的功能变化。
+
+## v0.5.5 - 2026-06-16
+
+### 修复
+
+- 修复 macOS 上应用安装在带空格的路径（如「TSN Agent.app」）时、智能助手运行后无任何返回的问题。应用同时更名为 TSN-Agent（去掉名称中的空格）从根源规避。
+- 修复 macOS 从图形界面启动时找不到 Node 运行时的问题；拓扑校验所需的本地服务随应用一起打包。
+
+## v0.5.3 - 2026-06-15
+
+### 优化
+
+- Linux 安装包调整为 deb / rpm 两种格式（移除 AppImage）。
+
+## v0.5.2 - 2026-06-15
+
+### 修复
+
+- 修复 Windows 版缺少随附运行时、导致智能助手无法运行的问题（运行所需组件现已打包进安装包）。
+
+## v0.5.1 - 2026-06-15
+
+### 修复
+
+- 修复 Windows 上部分路径无法被正确识别、影响应用启动的问题。
+
+## v0.5.0 - 2026-06-15
+
+### 新功能
+
+- 首次提供 Windows 与 Linux 安装包（此前仅 macOS）：Windows 提供 setup.exe 与 msi，Linux 提供 deb 与 rpm。
+- 多场景支持：内置「通用 TSN」与「箭载/舰载典型场景」，不同场景各有拓扑模板与推荐参数，拓扑模板会按当前场景过滤展示。
+- Skill 文件可在应用内查看与编辑，并能一键「恢复内置版本」还原为出厂内容，编辑后下次运行智能助手即生效。
+
+### 优化
+
+- 拓扑模板节点排布优化（如五跳线性：端系统仅挂链路两端、长链自动蛇形折叠）。
 
 ## v0.4.1 - 2026-06-08
 
@@ -57,8 +89,6 @@
 ### 修复
 
 - 修正节点指代理解：用户提到 SW-1、ES-4 这类画布上的节点名称时，智能助手现在按名称精确定位对应节点，不再按「第几台」折算导致改错位置（如要求在 SW-1 和 SW-2 之间插交换机却插到了 SW-0 和 SW-1 之间）。
-
-本文件用于在应用内展示客户可见的更新内容。技术名词、文件名和产品名保留原文。
 
 ## v0.3.3 - 2026-06-05
 
