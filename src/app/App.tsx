@@ -199,6 +199,7 @@ export function App() {
                 ...message,
                 content: redactProviderNamesForDisplay(result.assistantText),
                 toolCalls: result.toolCalls,
+                verification: result.verification,
               }
             : message,
         ),

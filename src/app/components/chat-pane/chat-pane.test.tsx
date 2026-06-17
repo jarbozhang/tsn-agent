@@ -47,6 +47,42 @@ describe("ChatPane", () => {
     expect(screen.getByText("我需要 4 个交换机")).toBeInTheDocument();
   });
 
+  it("renders a failed structural verification distinctly with a caliber chip (U4)", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "m1",
+        role: "assistant",
+        content: "拓扑还差一点，先修好再继续（仅结构级）：\n· ES-2 没连任何线，是个孤立节点。\n改好后再点「确认并继续」。",
+        createdAt: "2026-06-17T00:00:00Z",
+        verification: {
+          ok: false,
+          caliber: "structural_only",
+          errors: [{ code: "ISOLATED_NODE", messageZh: "ES-2 没连任何线，是个孤立节点。", nodeRef: "2" }],
+        },
+      },
+    ];
+    const { container } = render(<ChatPane {...baseProps({ messages })} />);
+    expect(screen.getByText(/验证未通过 · 仅结构级/)).toBeInTheDocument();
+    expect(container.querySelector(".msg-verify-block")).not.toBeNull();
+    expect(screen.getByText(/孤立节点/)).toBeInTheDocument();
+  });
+
+  it("does not render a verification block for a passing assistant message; caliber stays inline (U4/AE5)", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "m1",
+        role: "assistant",
+        content: "结构没问题（仅结构级）。已进入时间同步阶段。",
+        createdAt: "2026-06-17T00:00:01Z",
+        verification: { ok: true, caliber: "structural_only", errors: [] },
+      },
+    ];
+    const { container } = render(<ChatPane {...baseProps({ messages })} />);
+    expect(container.querySelector(".msg-verify-block")).toBeNull();
+    expect(screen.queryByText(/验证未通过/)).toBeNull();
+    expect(screen.getByText(/结构没问题（仅结构级）/)).toBeInTheDocument();
+  });
+
   it("renders streaming tool cards above the waiting indicator on the pending message (U5)", () => {
     const messages: ChatMessage[] = [
       { id: "m1", role: "user", content: "我需要双平面拓扑", createdAt: "2026-06-10T00:00:00Z" },
