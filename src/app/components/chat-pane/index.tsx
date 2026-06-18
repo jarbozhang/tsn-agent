@@ -219,13 +219,11 @@ export function ChatPane({
 export function AgentRunStatusBar({
   elapsedSeconds,
   phase,
-  inetVerifying,
 }: {
   elapsedSeconds: number;
   phase: AgentRunPhase;
-  inetVerifying?: boolean;
 }) {
-  const message = inetVerifying ? "正在 INET 上验证…（最长约 120 秒）" : getAgentRunStatusMessage(phase);
+  const message = getAgentRunStatusMessage(phase);
 
   return (
     <div className={`agent-run-status ${phase}`} role="status" aria-live="polite" data-testid="agent-run-status">

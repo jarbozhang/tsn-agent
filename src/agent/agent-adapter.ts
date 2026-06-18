@@ -99,7 +99,7 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
   // 显式确认动作（确认按钮）：切阶段本身确定性、不走大模型。
   if (action === "confirm-stage") {
     // 拓扑阶段「前进确认」过关闸（只拦前进、不验回退；回退确认带 pendingStageChange）。
-    let passVerification: TopologyVerifyResult | undefined;
+    // 代码兜底硬拦：结构不过则不推进；通过则静默推进——结构反馈已由 agent 操作拓扑时经 MCP validate 给出。
     if (sessionId && workflow.currentStep === "topology" && !workflow.pendingStageChange) {
       let verdict: TopologyVerifyResult;
       try {
@@ -134,43 +134,7 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
           verification: verdict,
         };
       }
-      passVerification = verdict;
-
-      // 结构通过 → 串第二道 INET 验证（远端、耗时；fail-closed，不冒泡到 App 通用 catch）。
-      let inetVerdict: TopologyVerifyResult;
-      try {
-        inetVerdict = await invoke<TopologyVerifyResult>("verify_inet", { request: { sessionId } });
-      } catch (error) {
-        logAgent(request.diagnostics, {
-          sessionId,
-          runId,
-          message: "INET 校验调用失败，未推进",
-          details: { error: error instanceof Error ? error.message : String(error) },
-        });
-        return {
-          events: [],
-          workflow,
-          assistantText: "校验暂时无法运行，右侧工程保持原状态，未推进。请稍后再点「确认并继续」。",
-          mode: "local",
-        };
-      }
-      if (!inetVerdict.ok) {
-        logAgent(request.diagnostics, {
-          sessionId,
-          runId,
-          message: "INET 校验未通过，拦截推进",
-          details: { errorCount: inetVerdict.errors.length },
-        });
-        return {
-          events: [],
-          workflow,
-          assistantText: composeVerificationBlockText(inetVerdict),
-          mode: "local",
-          verification: inetVerdict,
-        };
-      }
-      // 用 INET verdict（loadability_only）作为最终通过结论。
-      passVerification = inetVerdict;
+      // 结构通过：代码兜底放行，静默推进（不再单独弹「结构没问题」）。
     }
 
     const confirmResult = runConfirmAction(workflow);
@@ -185,20 +149,8 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
       },
     });
 
-    // 无「带原话」标记 → 纯确定性确认（推进 / time-sync 自动生成 / 无操作），直接返回。
+    // 无「带原话」标记 → 纯确定性确认（推进 / time-sync 自动生成 / 无操作），直接返回（静默推进）。
     if (!confirmResult.carryIntent) {
-      // 通过过关闸的前进确认：把"结构没问题（仅结构级）"并进推进摘要、带结构化 verdict（不另发消息）。
-      if (passVerification) {
-        const passLine =
-          passVerification.caliber === "loadability_only"
-            ? "已在 INET 验证通过（仅能加载运行）。"
-            : "结构没问题（仅结构级）。";
-        return {
-          ...confirmResult,
-          assistantText: confirmResult.assistantText ? `${passLine}\n${confirmResult.assistantText}` : passLine,
-          verification: passVerification,
-        };
-      }
       return confirmResult;
     }
 

@@ -104,8 +104,8 @@ pub async fn query_topology(
     })
 }
 
-/// 读库内拓扑行、调 topology_verify 核心。命令与测试共用，避免 Tauri 包装层挡测试。
-async fn load_and_verify_topology(
+/// 读库内拓扑行、调 topology_verify 核心。verify_topology 命令、sidecar validate（无参验库内）、测试共用。
+pub async fn load_and_verify_topology(
     pool: &sqlx::Pool<sqlx::Sqlite>,
     session_id: &str,
 ) -> Result<crate::topology_verify::VerifyResult, String> {

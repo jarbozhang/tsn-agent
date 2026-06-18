@@ -74,8 +74,6 @@ export function App() {
   const [retryTargetId, setRetryTargetId] = useState<string | undefined>();
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [payloadView, setPayloadView] = useState<{ sessionId: string; text: string } | undefined>();
-  // 确认拓扑阶段时第二道 INET 验证（远端、耗时）进行中——驱动状态栏「正在 INET 上验证…」。
-  const [inetVerifying, setInetVerifying] = useState(false);
   const { failures: backfillFailures, refresh: refreshBackfillFailures } = useBackfillFailures();
 
   useEffect(() => {
@@ -140,16 +138,8 @@ export function App() {
     // done 后由 result.toolCalls 整体覆盖对账（R12），崩溃路径随错误态丢弃（R14）。
     const streamedToolCalls = new Map<string, ToolCallRecord>();
 
-    // 拓扑阶段前进确认会触发第二道 INET 验证（结构校验瞬时、INET 远端是耗时大头）。
-    const willVerifyInet =
-      options.action === "confirm-stage" &&
-      contextSession.workflow.currentStep === "topology" &&
-      !contextSession.workflow.pendingStageChange;
     setInput((value) => (value.trim() === trimmedInput ? "" : value));
     agentRun.startRun();
-    if (willVerifyInet) {
-      setInetVerifying(true);
-    }
     agentRun.setPendingAssistantMessageId(assistantMessage.id);
     setCurrentSession(pendingSession);
     logDiagnostic(diagnosticsRepository, {
@@ -263,7 +253,6 @@ export function App() {
       });
     } finally {
       agentRun.finishRun();
-      setInetVerifying(false);
     }
   }
 
@@ -395,7 +384,7 @@ export function App() {
       </header>
 
       {isAgentRunning && (
-        <AgentRunStatusBar elapsedSeconds={agentRunElapsedSeconds} phase={agentRunPhase} inetVerifying={inetVerifying} />
+        <AgentRunStatusBar elapsedSeconds={agentRunElapsedSeconds} phase={agentRunPhase} />
       )}
 
       <main className="project-layout">

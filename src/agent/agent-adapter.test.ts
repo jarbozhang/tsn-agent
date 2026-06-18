@@ -386,9 +386,9 @@ describe("runTsnAgent", () => {
     expect(inetCalls).toHaveLength(0);
   });
 
-  it("advances topology confirm through both gates (structural + INET) and merges loadability verdict", async () => {
+  it("advances topology confirm silently when the structural gate passes (no extra prompt; INET moved to flow-planning)", async () => {
     enableTauriRuntime();
-    mockTauriCommands(); // 默认结构 + INET 两闸都过
+    mockTauriCommands(); // 结构闸默认通过
     const { runTsnAgent } = await import("./agent-adapter");
 
     const result = await runTsnAgent({
@@ -398,10 +398,14 @@ describe("runTsnAgent", () => {
     });
 
     expect(result.workflow.currentStep).toBe("time-sync"); // 已推进
-    expect(result.verification?.ok).toBe(true);
-    expect(result.verification?.caliber).toBe("loadability_only"); // 最终结论是 INET 口径
-    expect(result.assistantText).toContain("已在 INET 验证通过（仅能加载运行）");
-    // 通过结论并进推进摘要、不另发消息——只有一段 assistantText。
+    // 通过即静默推进：不再单独弹「结构没问题」（结构反馈由 agent 操作拓扑时经 MCP validate 给出）。
+    expect(result.assistantText).not.toContain("结构没问题");
+    expect(result.verification).toBeUndefined();
+    // 仍走结构校验兜底硬拦，但不再调 verify_inet（INET 已挪到流量规划阶段）。
+    const verifyCalls = invokeMock.mock.calls.filter(([command]) => command === "verify_topology");
+    expect(verifyCalls.length).toBeGreaterThanOrEqual(1);
+    const inetCalls = invokeMock.mock.calls.filter(([command]) => command === "verify_inet");
+    expect(inetCalls).toHaveLength(0);
   });
 
   it("does NOT verify a rollback-confirm (pendingStageChange present)", async () => {
@@ -444,69 +448,6 @@ describe("runTsnAgent", () => {
     expect(result.workflow.currentStep).toBe("topology"); // 不放行
     expect(result.mode).toBe("local");
     expect(result.assistantText).toContain("结构校验暂时无法运行");
-    expect(result.verification).toBeUndefined();
-  });
-
-  it("blocks advance when INET load fails (inet_load_failed)", async () => {
-    enableTauriRuntime();
-    mockTauriCommands({
-      inetVerify: {
-        ok: false,
-        caliber: "loadability_only",
-        errors: [{ code: "inet_load_failed", messageZh: "拓扑在 INET 上跑不起来（退出码 1）。" }],
-      },
-    });
-    const { runTsnAgent } = await import("./agent-adapter");
-
-    const result = await runTsnAgent({
-      userIntent: "继续",
-      action: "confirm-stage",
-      session: sessionWithWorkflow(topologyWaitingWorkflow()),
-    });
-
-    expect(result.workflow.currentStep).toBe("topology"); // 不放行
-    expect(result.verification?.ok).toBe(false);
-    expect(result.verification?.caliber).toBe("loadability_only");
-    expect(result.assistantText).toContain("INET");
-    expect(result.assistantText).toContain("先修好再继续"); // 可修复语气（区别于 unreachable 中性文案）
-  });
-
-  it("blocks advance with neutral copy when remote is unreachable (inet_unreachable)", async () => {
-    enableTauriRuntime();
-    mockTauriCommands({
-      inetVerify: {
-        ok: false,
-        caliber: "loadability_only",
-        errors: [{ code: "inet_unreachable", messageZh: "连不上远端 INET。" }],
-      },
-    });
-    const { runTsnAgent } = await import("./agent-adapter");
-
-    const result = await runTsnAgent({
-      userIntent: "继续",
-      action: "confirm-stage",
-      session: sessionWithWorkflow(topologyWaitingWorkflow()),
-    });
-
-    expect(result.workflow.currentStep).toBe("topology");
-    expect(result.assistantText).toContain("校验暂时无法运行");
-    // 环境问题：不说拓扑错、不用"先修好"语气。
-    expect(result.assistantText).not.toContain("先修好");
-  });
-
-  it("fail-closed: verify_inet rejection does not advance and shows a dedicated message", async () => {
-    enableTauriRuntime();
-    mockTauriCommands({ inetVerifyError: new Error("ssh unreachable") });
-    const { runTsnAgent } = await import("./agent-adapter");
-
-    const result = await runTsnAgent({
-      userIntent: "继续",
-      action: "confirm-stage",
-      session: sessionWithWorkflow(topologyWaitingWorkflow()),
-    });
-
-    expect(result.workflow.currentStep).toBe("topology"); // 不放行
-    expect(result.assistantText).toContain("校验暂时无法运行");
     expect(result.verification).toBeUndefined();
   });
 

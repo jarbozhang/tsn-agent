@@ -31,11 +31,6 @@ describe("AgentRunStatusBar", () => {
     expect(screen.getByText(/正在持续推理/)).toBeInTheDocument();
     expect(screen.getByText(/已运行 5 秒/)).toBeInTheDocument();
   });
-
-  it("shows the INET verifying message when inetVerifying is set (U5)", () => {
-    render(<AgentRunStatusBar elapsedSeconds={3} phase="waiting" inetVerifying />);
-    expect(screen.getByText(/正在 INET 上验证/)).toBeInTheDocument();
-  });
 });
 
 describe("ChatPane", () => {

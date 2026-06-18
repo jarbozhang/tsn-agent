@@ -13,6 +13,13 @@ origin: docs/brainstorms/2026-06-17-topology-stage-verification-requirements.md
 
 ---
 
+> **⚠️ 范围调整（2026-06-18，boss 决定）**：INET 验证在拓扑阶段只能做「加载冒烟」、增量小，还拖慢确认要联网；INET 的真价值是**有流量后的仿真**（时延/调度），属**流量规划阶段**。故 INET 验证从拓扑阶段过关闸**撤出**，挪到流量规划阶段（那个阶段重建时再接）。
+> - **拓扑阶段**：只保留第一批的**本地结构校验闸**（连通/端口/孤立/可达，瞬时、断网可用）；INET 那道闸的前端接入（U4 串接 + U5「验证中」状态 + chat-pane inetVerifying）**已撤回**，相关测试同步删/改。
+> - **INET 能力代码**（U1 `inet_bundle` 序列化 / U2 `inet_remote` 远端执行器 / U3 `verify_inet` 命令，及真机验过的链路、`MacForwardingTableConfigurator` 对账路径）**原样保留**，作为流量规划阶段的现成基础。
+> - 下文按"接拓扑阶段"写的部分（尤其 U4/U5 及 HTD 串行闸图）作为历史决策保留，**落地以本 note 为准**。
+
+---
+
 ## Summary
 
 第一批在离开拓扑阶段前插了一道**本地结构校验**过关闸（`verify_topology` 命令，瞬时、断网可用）。本批在它**之后串第二道闸**：结构校验通过后，应用本体（Rust 侧）把库内拓扑序列化成一个 INET 能读的 **inet-bundle**（`network.ned` + `omnetpp.ini` + `manifest.json`），通过系统 `ssh`/`scp` 发到远端 INET 主机、跑 `inet -u Cmdenv -f omnetpp.ini -n .`、按退出码判定「能否加载运行」，结论标 `loadability_only` 口径。两道闸都过才推进；远端验证有耗时，全程在对话框显示「验证中 / 已验证 / 未通过」状态。第二段再做转发表对账：让 INET 自己生成转发表，与我方从库行 BFS 算的逐条 diff，差异定位到「交换机 × 目的」的出端口。执行全部在 Rust 侧、shell 出系统 `ssh`/`scp`（复用既有 `commands.rs` 的结构化 argv / 超时 / 进程组杀 / 脱敏纪律），**不引入新依赖**；远端登录走**免密**，应用不存密码。
