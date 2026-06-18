@@ -96,7 +96,8 @@ pub fn run() {
             topology_position_command::update_node_position,
             topology_query_command::query_topology,
             topology_query_command::verify_topology,
-            inet_verify_command::verify_inet,
+            inet_verify_command::verify_inet, // 暂未接前端：INET 验证挪到后续流量规划阶段，保留作其基础，勿当死代码删
+
             session_store::get_current_session,
             session_store::list_sessions,
             session_store::remove_session,

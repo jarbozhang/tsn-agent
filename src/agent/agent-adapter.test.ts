@@ -41,8 +41,6 @@ function mockTauriCommands(options: {
   topology?: Record<string, unknown>;
   verify?: Record<string, unknown>;
   verifyError?: unknown;
-  inetVerify?: Record<string, unknown>;
-  inetVerifyError?: unknown;
 } = {}) {
   invokeMock.mockImplementation(async (command: string) => {
     if (command === "query_topology") {
@@ -58,11 +56,8 @@ function mockTauriCommands(options: {
     }
 
     if (command === "verify_inet") {
-      if (options.inetVerifyError !== undefined) {
-        throw options.inetVerifyError;
-      }
-      // 默认通过：结构闸放行后串到 INET 闸也放行，既有 confirm 测试不被第二道闸拦。
-      return options.inetVerify ?? { ok: true, caliber: "loadability_only", errors: [] };
+      // verify_inet 已不在拓扑确认链路触发（INET 挪到流量规划）；保留 mock 默认仅为「未被调用」断言兜底。
+      return { ok: true, caliber: "loadability_only", errors: [] };
     }
 
     if (command === "run_claude_agent") {
