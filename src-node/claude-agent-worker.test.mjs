@@ -1194,9 +1194,10 @@ describe("claude-agent-worker", () => {
     // 交互工学规则（plan 2026-06-05-001 U5）。
     expect(prompt).toContain("不要调用 AskUserQuestion");
     expect(prompt).toContain("选项编号用数字、跨轮保持指代稳定");
-    // 正确性不变式仍由 buildPrompt 骨架承载（initialize 仅用于从 0 生成/换模板）。
+    // buildPrompt 仍承载部分正确性提示（initialize 仅用于从 0 生成/换模板）。
     expect(prompt).toContain("不要用 initialize 重建");
-    expect(prompt).toContain("逐字节复用上一次的同一 batch");
+    // U3：重试「复用同一 batch」去重——只留 SYSTEM_PROMPT_SKELETON 一份权威，buildPrompt 不再重复。
+    expect(prompt).not.toContain("逐字节复用");
     expect(prompt).toContain("不要把 inspect 返回的 rows");
     // U1：与 SKILL.md 重复的领域指引已移出 buildPrompt（由注入的 SKILL.md 承载）。
     // 默认互联公式（N*M+(N-1)）。

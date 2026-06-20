@@ -594,8 +594,7 @@ export function buildPrompt(
 4. 一轮聚焦一个决策点；有合理默认值时给默认并允许用户一句话确认。
 5. 用户的简短确认（如"速率够用"）不需要调用工具，直接推进。
 6. 增量修改已确认的拓扑时，先 topology.inspect 查 rows 再用 topology.apply_operations 构造原子操作；不要用 initialize 重建（会重排节点命名）。
-7. 不要把 inspect 返回的 rows / stylesJson 原文复述进中文回复。
-8. apply_operations 超时重试时必须逐字节复用上一次的同一 batch（相同 syncName/linkSeq），不要重新分配 —— 重新分配 linkSeq 会产生重复的平行链路。`;
+7. 不要把 inspect 返回的 rows / stylesJson 原文复述进中文回复。`;
   const failureInstruction = "7. 如果当前阶段是拓扑，不能只返回文字说明；没有 trusted topology result 就不要声称阶段已生成。";
   const fileInstruction = "5. 不要修改仓库文件；不要写 TSN_AGENT_STAGE_RESULT_PATH；不要输出 Markdown 表格。";
 
