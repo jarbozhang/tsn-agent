@@ -134,16 +134,9 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.apply_operations",
       allowedToolName: "mcp__tsn_topology__topology_apply_operations",
       title: "Apply topology operations",
-      description: "Apply atomic topology operations (node_add / node_update / node_delete / link_add / link_delete) to the session's persisted topology. Returns summary.mutationId on commit. Call topology.inspect first to locate existing syncName/linkSeq values; retries must resend the exact same batch (same syncName/linkSeq), never re-allocate keys.",
+      description: "Apply atomic topology operations (node_add / node_update / node_delete / link_add / link_delete) to the session's persisted topology. Returns summary.mutationId on commit. Call topology.inspect first to locate existing syncName/linkSeq values; retries must resend the exact same batch (same syncName/linkSeq), never re-allocate keys. On a committed (non-dryRun) apply the response carries a `validation` field with the post-apply structural check (errors in Chinese) — relay any problems to the user.",
       inputSchema: applyOperationsInputSchema(),
-      handler: async (args) => callSidecarTool(
-        "/db/topology/apply_operations",
-        args,
-        {
-          operations: pickValue(args, "operations") ?? [],
-          dryRun: pickValue(args, "dryRun") ?? false,
-        },
-      ),
+      handler: async (args) => applyOperationsWithValidation(args),
     },
   ];
 }
@@ -180,37 +173,100 @@ interface IngressError {
   requiresUserClarification: boolean;
 }
 
+type SidecarRawResult =
+  | { ok: true; body: unknown }
+  | { ok: false; toolResult: CallToolResult };
+
+// 低层单次 sidecar 调用：成功返回原始 body（供 handler 串联 / 合并多次调用结果），
+// 失败返回已封装好的 CallToolResult（错误语义与 callSidecarTool 完全一致）。
+async function callSidecarRaw(
+  route: string,
+  args: unknown,
+  body: Record<string, unknown>,
+): Promise<SidecarRawResult> {
+  try {
+    const ingressError = validateIngress(args);
+    if (ingressError) {
+      return { ok: false, toolResult: toCallToolResult({ ok: false, errors: [ingressError] }) };
+    }
+    const sanitized = pruneUndefined(body);
+    const result: SidecarResult = await fetchSidecar(route, sanitized);
+    if (!result.ok) {
+      return { ok: false, toolResult: toCallToolResult(sidecarFailureToToolResult(result)) };
+    }
+    return { ok: true, body: result.body };
+  } catch (error) {
+    return {
+      ok: false,
+      toolResult: toCallToolResult({
+        ok: false,
+        errors: [
+          {
+            code: "CALL_FAILED",
+            message: error instanceof Error ? error.message : String(error),
+            path: "$",
+            severity: "error",
+            retryable: true,
+            requiresUserClarification: false,
+          },
+        ],
+      }),
+    };
+  }
+}
+
 async function callSidecarTool(
   route: string,
   args: unknown,
   body: Record<string, unknown>,
 ): Promise<CallToolResult> {
-  try {
-    const ingressError = validateIngress(args);
-    if (ingressError) {
-      return toCallToolResult({ ok: false, errors: [ingressError] });
-    }
-    const sanitized = pruneUndefined(body);
-    const result: SidecarResult = await fetchSidecar(route, sanitized);
-    if (!result.ok) {
-      return toCallToolResult(sidecarFailureToToolResult(result));
-    }
-    return toCallToolResult(result.body);
-  } catch (error) {
-    return toCallToolResult({
-      ok: false,
-      errors: [
-        {
-          code: "CALL_FAILED",
-          message: error instanceof Error ? error.message : String(error),
-          path: "$",
-          severity: "error",
-          retryable: true,
-          requiresUserClarification: false,
-        },
-      ],
-    });
+  const raw = await callSidecarRaw(route, args, body);
+  return raw.ok ? toCallToolResult(raw.body) : raw.toolResult;
+}
+
+// U5：apply 成功且非 dryRun 后，handler 确定性地追调一次 validate（无参 = 验库内已落库
+// 结构，与确认闸同 load_and_verify_topology），把结构结论并进 apply 工具返回——让 agent
+// 每次操作拓扑后都看到结构状态、便于自纠，不依赖它「记得」单独调 validate（弱模型尤其）。
+// 不改 Rust ApplyOpsResponse；validate 失败不掩盖 apply 成功，仅标注未取得。用户侧硬保证
+// 仍是确认闸（阶段推进前 verify_topology 确定性跑一次）。
+async function applyOperationsWithValidation(args: unknown): Promise<CallToolResult> {
+  const dryRun = pickValue(args, "dryRun") ?? false;
+  const applied = await callSidecarRaw("/db/topology/apply_operations", args, {
+    operations: pickValue(args, "operations") ?? [],
+    dryRun,
+  });
+  if (!applied.ok) {
+    return applied.toolResult;
   }
+  // dryRun 预演不落库、apply 自身 ok:false 已是结论——都不追 validate。
+  if (dryRun === true || !isOkBody(applied.body)) {
+    return toCallToolResult(applied.body);
+  }
+  const validated = await callSidecarRaw("/db/topology/validate", {}, {});
+  return toCallToolResult(mergeStructuralValidation(applied.body, validated));
+}
+
+function isOkBody(body: unknown): boolean {
+  return isRecord(body) && body.ok === true;
+}
+
+function mergeStructuralValidation(applyBody: unknown, validated: SidecarRawResult): Record<string, unknown> {
+  const merged: Record<string, unknown> = isRecord(applyBody) ? { ...applyBody } : { value: applyBody };
+  if (!validated.ok) {
+    // validate 调用本身失败（sidecar 不可达等）：不掩盖 apply 成功，标注结构校验未取得。
+    merged.validation = { ran: false, reason: "structural validate call failed" };
+    return merged;
+  }
+  const summary = isRecord(validated.body) ? validated.body.summary : undefined;
+  merged.validation = isRecord(summary)
+    ? {
+        ran: true,
+        valid: summary.valid ?? null,
+        errors: summary.errors ?? [],
+        caliber: summary.caliber ?? null,
+      }
+    : { ran: true, valid: null, errors: [] };
+  return merged;
 }
 
 function sidecarFailureToToolResult(failure: SidecarFailure): Record<string, unknown> {
@@ -417,6 +473,10 @@ function pickString(args: unknown, key: string): string | undefined {
     return typeof v === "string" ? v : undefined;
   }
   return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function pickValue(args: unknown, key: string): unknown {
