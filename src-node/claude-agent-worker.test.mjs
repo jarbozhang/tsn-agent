@@ -115,7 +115,8 @@ describe("claude-agent-worker", () => {
       expect(input.options.systemPrompt).toContain("工程状态只接受结构化校验结果");
       expect(input.options.systemPrompt).toContain("tsn_topology MCP 工具");
       expect(input.options.systemPrompt).toContain("拓扑、时间同步、流量规划、模拟仿真");
-      expect(input.options.systemPrompt).toContain("不能声称已启动仿真");
+      // U3：仿真「不得声称」已移出骨架（收敛到 SKILL.md 指引 + sanitizeClaudeAssistantText 输出守卫）。
+      expect(input.options.systemPrompt).not.toContain("不能声称已启动仿真");
       expect(input.prompt).toContain("TSN_AGENT_SKILL_OUTPUT_DIR");
       expect(input.prompt).toContain("tsn_topology MCP 工具");
       expect(input.prompt).not.toContain("--stage topology");
@@ -1184,7 +1185,8 @@ describe("claude-agent-worker", () => {
     expect(prompt).toContain('"scenarioConfigId": "generic-tsn"');
     expect(prompt).toContain("只描述当前阶段已经完成或正在等待确认的内容");
     expect(prompt).toContain("拓扑 -> 时间同步 -> 流量规划 -> 模拟仿真");
-    expect(prompt).toContain("当前应用没有接入 OMNeT++/远程服务器仿真 runner");
+    // U3：仿真「不得声称」从 buildPrompt 移出（SKILL.md 指引 + sanitize 守卫承载）。
+    expect(prompt).not.toContain("当前应用没有接入 OMNeT++/远程服务器仿真 runner");
     expect(prompt).not.toContain("/tmp/result.json");
     expect(prompt).toContain("/tmp/skill-output");
     expect(prompt).toContain("tsn_topology MCP 工具");
