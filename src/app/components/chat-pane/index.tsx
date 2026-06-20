@@ -2,11 +2,12 @@ import { Fragment, type RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage } from "../../../sessions/session-repository";
-import type { ScenarioConfig } from "../../../domain/scenario-config";
+import type { ScenarioConfig, ScenarioConfigId } from "../../../domain/scenario-config";
 import type { WorkflowState, WorkflowStageState, WorkflowStepStatus } from "../../../project/project-state";
 import { redactProviderNamesForDisplay } from "../../../ui/display-redaction";
 import type { AgentRunPhase } from "../../hooks/use-agent-run-controller";
 import { ToolCallCard } from "./tool-call-card";
+import { ScenarioPicker } from "../scenario-picker";
 
 const INTENT_PLACEHOLDER = "例如：我需要 4 个交换机，每个交换机连接 5 个端系统";
 const STEPPER_STEPS = ["topology", "time-sync", "flow-template", "planning-export"] as const;
@@ -37,6 +38,7 @@ export interface ChatPaneProps {
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   onConfirm: () => void;
+  onSelectScenario?: (id: ScenarioConfigId) => void;
 }
 
 export function ChatPane({
@@ -51,12 +53,23 @@ export function ChatPane({
   onInputChange,
   onSubmit,
   onConfirm,
+  onSelectScenario,
 }: ChatPaneProps) {
+  // 进门（会话尚无用户消息）显示场景选择控件；开始后锁定为静态徽章。
+  const hasUserInteraction = messages.some((message) => message.role === "user");
   return (
     <section className="chat-pane" aria-label="对话区">
       <div className="project-strip">
         <span className="project-name">当前规划</span>
-        <span className="env-badge mono">{scenarioConfig.displayName}</span>
+        {hasUserInteraction || !onSelectScenario ? (
+          <span className="env-badge mono">{scenarioConfig.displayName}</span>
+        ) : (
+          <ScenarioPicker
+            value={scenarioConfig.id}
+            onSelect={onSelectScenario}
+            disabled={isAgentRunning}
+          />
+        )}
       </div>
 
       {/* Phase B-α (plan v3 U9c)：流量规划暂下线告知 banner。 */}

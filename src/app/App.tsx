@@ -14,7 +14,7 @@ import {
   type DiagnosticLogRepository,
 } from "../diagnostics/diagnostic-log-repository";
 import { redactProviderNamesForDisplay } from "../ui/display-redaction";
-import { getScenarioConfig } from "../domain/scenario-config";
+import { getScenarioConfig, type ScenarioConfigId } from "../domain/scenario-config";
 import { appVersion } from "../release/release-info";
 import {
   createId,
@@ -262,6 +262,16 @@ export function App() {
     setActiveWorkspacePanel(undefined);
   }
 
+  // U11：进门选场景——写入当前会话 workflow.scenarioConfigId 并持久化（纯前端，不走大模型）。
+  async function handleSelectScenario(scenarioConfigId: ScenarioConfigId) {
+    const nextSession: TsnSession = {
+      ...currentSession,
+      workflow: { ...currentSession.workflow, scenarioConfigId },
+    };
+    setCurrentSession(nextSession);
+    await repository.save(nextSession);
+  }
+
   async function handleSelectSession(session: TsnSession) {
     await selectSession(session);
     setActiveWorkspacePanel(undefined);
@@ -420,6 +430,7 @@ export function App() {
           onInputChange={setInput}
           onSubmit={handleSubmit}
           onConfirm={() => submitIntent("继续", { action: "confirm-stage" })}
+          onSelectScenario={(id) => void handleSelectScenario(id)}
         />
         <WorkspacePane
           topologySnapshot={topologySnapshot}

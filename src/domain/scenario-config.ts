@@ -133,6 +133,14 @@ export function getScenarioConfig(configId?: string): ScenarioConfig {
   return resolveScenarioConfig(configId).config;
 }
 
+/** 进门场景选择控件的选项（U11）：id + 显示名，顺序同 SCENARIO_CONFIGS 声明序。 */
+export function listScenarioOptions(): Array<{ id: ScenarioConfigId; displayName: string }> {
+  return (Object.keys(SCENARIO_CONFIGS) as ScenarioConfigId[]).map((id) => ({
+    id,
+    displayName: SCENARIO_CONFIGS[id].displayName,
+  }));
+}
+
 function isScenarioConfigId(value: string): value is ScenarioConfigId {
   return Object.hasOwn(SCENARIO_CONFIGS, value);
 }

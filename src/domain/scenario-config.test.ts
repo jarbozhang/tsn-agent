@@ -4,6 +4,7 @@ import {
   SCENARIO_CONFIGS,
   WORKFLOW_STEPS,
   getScenarioConfig,
+  listScenarioOptions,
   resolveScenarioConfig,
 } from "./scenario-config";
 
@@ -41,5 +42,12 @@ describe("scenario config", () => {
     expect(resolution.config.id).toBe("generic-tsn");
     expect(resolution.fallback).toBe(true);
     expect(resolution.warning).toContain("missing-config");
+  });
+
+  it("U11: listScenarioOptions returns every scenario with its display name", () => {
+    expect(listScenarioOptions()).toEqual([
+      { id: "generic-tsn", displayName: "通用 TSN" },
+      { id: "aerospace-onboard", displayName: "箭载/舰载 TSN 典型场景" },
+    ]);
   });
 });
