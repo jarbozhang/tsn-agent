@@ -187,6 +187,29 @@ describe("App", () => {
     expect(flowStep).toHaveAttribute("aria-disabled", "true");
   });
 
+  it("U11: picking the aerospace scenario at entry applies it to the agent session", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    // 进门 picker：选「箭载/舰载」。
+    const aero = screen.getByRole("button", { name: "箭载/舰载 TSN 典型场景" });
+    await user.click(aero);
+    await waitFor(() => expect(aero).toHaveAttribute("aria-pressed", "true"));
+
+    // 提交后 agent 收到的会话 scenarioConfigId 已是 aerospace-onboard。
+    await typeDefaultIntent(user);
+    await user.click(screen.getByRole("button", { name: "生成规划草案" }));
+    await waitFor(() => {
+      expect(runTsnAgentMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          session: expect.objectContaining({
+            workflow: expect.objectContaining({ scenarioConfigId: "aerospace-onboard" }),
+          }),
+        }),
+      );
+    });
+  });
+
   it("runs the agent and applies workflow from the result", async () => {
     const user = userEvent.setup();
     render(<App />);
