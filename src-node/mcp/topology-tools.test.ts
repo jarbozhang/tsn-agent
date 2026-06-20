@@ -602,6 +602,17 @@ describe("applyOperationsInputSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("U9: node_add accepts optional name (omitted still valid)", () => {
+    const withName = schema.safeParse({
+      operations: [{ op: "node_add", syncName: "5", name: "SW-5", x: 0, y: 0, nodeType: "switch", insertOrder: 5 }],
+    });
+    expect(withName.success).toBe(true);
+    const noName = schema.safeParse({
+      operations: [{ op: "node_add", syncName: "6", x: 0, y: 0, nodeType: "switch", insertOrder: 6 }],
+    });
+    expect(noName.success).toBe(true);
+  });
+
   it("rejects the round-3 invented {kind: insert-switch} shape with an op hint", () => {
     const result = schema.safeParse({ operations: [{ kind: "insert-switch" }] });
     expect(result.success).toBe(false);

@@ -23,6 +23,9 @@ pub enum TopologyOp {
 pub struct NodeAddArgs {
     /// 节点逻辑序号（新主键，每会话唯一）。
     pub sync_name: String,
+    /// 显示名（如 SW-1/ES-1）；省略则落 NULL、由展示层派生（U9，镜像 LinkAddArgs.name）。
+    #[serde(default)]
+    pub name: Option<String>,
     pub x: f64,
     pub y: f64,
     #[serde(default)]
@@ -115,12 +118,13 @@ pub async fn apply_op(
             // 无 SELECT-then-INSERT 的 TOCTOU 窗口。
             let res = sqlx::query(
                 r#"INSERT INTO topology_nodes
-                   (session_id, sync_name, x, y, node_type, insert_order)
-                   VALUES (?, ?, ?, ?, ?, ?)
+                   (session_id, sync_name, name, x, y, node_type, insert_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(session_id, sync_name) DO NOTHING"#,
             )
             .bind(session_id)
             .bind(&a.sync_name)
+            .bind(&a.name)
             .bind(a.x)
             .bind(a.y)
             .bind(&a.node_type)
@@ -130,7 +134,7 @@ pub async fn apply_op(
             .map_err(|e| OpError::Database(e.to_string()))?;
             if res.rows_affected() == 0 {
                 let row = sqlx::query(
-                    r#"SELECT x, y, node_type, insert_order
+                    r#"SELECT name, x, y, node_type, insert_order
                        FROM topology_nodes WHERE session_id = ? AND sync_name = ?"#,
                 )
                 .bind(session_id)
@@ -144,6 +148,9 @@ pub async fn apply_op(
                     // optional 字段仅在请求提供时参与判定（防重试省略时假阳性）
                     && a.node_type.as_ref().is_none_or(|nt| {
                         row.get::<Option<String>, _>("node_type").as_deref() == Some(nt.as_str())
+                    })
+                    && a.name.as_ref().is_none_or(|n| {
+                        row.get::<Option<String>, _>("name").as_deref() == Some(n.as_str())
                     });
                 if !same_provided {
                     return Err(OpError::SyncNameTaken(format!(
@@ -374,7 +381,7 @@ mod tests {
             apply_op(
                 &mut *tx,
                 "s1",
-                &TopologyOp::NodeAdd(NodeAddArgs {
+                &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                     sync_name: "0".to_string(),
                     x: 1.0,
                     y: 2.0,
@@ -390,6 +397,42 @@ mod tests {
                 .fetch_one(&pool).await.unwrap();
             assert_eq!(row.get::<String, _>("sync_name"), "0");
             assert_eq!(row.get::<i64, _>("insert_order"), 0);
+        });
+    }
+
+    #[test]
+    fn node_add_with_name_persists() {
+        // U9：node_add 带 name 落库（镜像 link_add）。
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let mut tx = pool.begin().await.unwrap();
+            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                name: Some("SW-5".into()),
+                sync_name: "5".into(), x: 1.0, y: 2.0, node_type: Some("switch".into()), insert_order: 5,
+            })).await.unwrap();
+            tx.commit().await.unwrap();
+            let row = sqlx::query("SELECT name FROM topology_nodes WHERE session_id='s1' AND sync_name='5'")
+                .fetch_one(&pool).await.unwrap();
+            assert_eq!(row.get::<Option<String>, _>("name"), Some("SW-5".to_string()));
+        });
+    }
+
+    #[test]
+    fn node_add_rename_only_is_not_silent_noop() {
+        // U9：三态读回含 name——同 syncName 但只改 name → 取值不同 → SyncNameTaken，
+        // 不被当幂等 no-op 漏掉（没有 name 比对就会静默放过）。
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let mut tx = pool.begin().await.unwrap();
+            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                name: Some("SW-1".into()),
+                sync_name: "1".into(), x: 0.0, y: 0.0, node_type: Some("switch".into()), insert_order: 1,
+            })).await.unwrap();
+            let err = apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                name: Some("SW-99".into()),
+                sync_name: "1".into(), x: 0.0, y: 0.0, node_type: Some("switch".into()), insert_order: 1,
+            })).await.unwrap_err();
+            assert!(matches!(err, OpError::SyncNameTaken(_)), "只改 name 应被当取值不同: {:?}", err);
         });
     }
 
@@ -419,7 +462,7 @@ mod tests {
             let pool = fresh_pool().await;
             let mut seed = pool.begin().await.unwrap();
             for order in [0_i64, 1] {
-                apply_op(&mut *seed, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                apply_op(&mut *seed, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                     sync_name: order.to_string(), x: 0.0, y: 0.0,
                     node_type: None, insert_order: order,
                 })).await.unwrap();
@@ -431,7 +474,7 @@ mod tests {
 
             let batch = vec![
                 TopologyOp::LinkDelete(LinkDeleteArgs { link_seq: 0 }),
-                TopologyOp::NodeAdd(NodeAddArgs {
+                TopologyOp::NodeAdd(NodeAddArgs { name: None,
                     sync_name: "2".into(), x: 0.5, y: 0.5,
                     node_type: Some("switch".into()), insert_order: 2,
                 }),
@@ -467,13 +510,13 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                 sync_name: "0".into(), x: 1.0, y: 2.0,
                 node_type: Some("switch".into()), insert_order: 0,
             })).await.unwrap();
             // 重放省略 optional 的 nodeType（存量行 nodeType="switch"）：
             // absent 字段不参与异值判定 → 仍判同值 no-op（假阳性回归）。
-            let s = apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+            let s = apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                 sync_name: "0".into(), x: 1.0, y: 2.0,
                 node_type: None, insert_order: 0,
             })).await.unwrap();
@@ -492,7 +535,7 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut seed = pool.begin().await.unwrap();
-            apply_op(&mut *seed, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+            apply_op(&mut *seed, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                 sync_name: "0".into(), x: 1.0, y: 2.0,
                 node_type: None, insert_order: 0,
             })).await.unwrap();
@@ -500,7 +543,7 @@ mod tests {
 
             // 同 syncName、不同坐标 → 碰撞报错（三态拒绝静默覆盖）。
             let mut tx = pool.begin().await.unwrap();
-            let err = apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+            let err = apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                 sync_name: "0".into(), x: 9.0, y: 9.0,
                 node_type: None, insert_order: 0,
             })).await.unwrap_err();
@@ -523,7 +566,7 @@ mod tests {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
             for order in [0_i64, 1, 2] {
-                apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                     sync_name: order.to_string(), x: 0.0, y: 0.0,
                     node_type: None, insert_order: order,
                 })).await.unwrap();
@@ -553,7 +596,7 @@ mod tests {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
             for order in [0_i64, 1] {
-                apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                     sync_name: order.to_string(), x: 0.0, y: 0.0,
                     node_type: None, insert_order: order,
                 })).await.unwrap();
@@ -585,7 +628,7 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                 sync_name: "0".into(), x: 0.0, y: 0.0,
                 node_type: None, insert_order: 0,
             })).await.unwrap();
@@ -621,7 +664,7 @@ mod tests {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
             for order in [0_i64, 1] {
-                apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                     sync_name: order.to_string(), x: 0.0, y: 0.0,
                     node_type: None, insert_order: order,
                 })).await.unwrap();
@@ -651,11 +694,11 @@ mod tests {
             let mut tx = pool.begin().await.unwrap();
 
             // 先 seed 两端点节点（topology_links 无 FK 到 topology_nodes，但语义需要）
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                 sync_name: "0".into(), x: 0.0, y: 0.0,
                 node_type: None, insert_order: 0,
             })).await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                 sync_name: "1".into(), x: 1.0, y: 1.0,
                 node_type: None, insert_order: 1,
             })).await.unwrap();
@@ -706,7 +749,7 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
                 sync_name: "5".into(), x: 1.0, y: 2.0,
                 node_type: None, insert_order: 0,
             })).await.unwrap();

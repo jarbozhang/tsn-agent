@@ -58,7 +58,7 @@ description: TSN Agent 拓扑阶段主索引。承载场景无关的领域语义
 
 1. 调 `mcp__tsn_topology__topology_inspect`（无参数）拿该会话全部 rows：nodes（syncName/name/nodeType/x/y/insertOrder）+ links（linkSeq/name/srcSyncName/dstSyncName/stylesJson）。节点身份是 `syncName`（逻辑序号），连线两端 `srcSyncName`/`dstSyncName` 引用节点的 syncName。
 2. 在 rows 里按 name/nodeType/连接关系找到目标节点和链路，拿到准确的 syncName / linkSeq。用户的指代不唯一时，先用中文数字编号给选项问清楚。匹配按上面「显示名怎么定」来。
-3. 构造原子 operations（比如插一台交换机 = `[link_delete, node_add, link_add, link_add]`）：新节点的 `nodeType` 照抄 inspect 里同类节点的原文，新链路的 `stylesJson` 参照已有链路、`srcSyncName`/`dstSyncName` 填两端节点的 syncName；新的 `syncName`/`linkSeq` 要避开 rows 里已经占用的值。
+3. 构造原子 operations（比如插一台交换机 = `[link_delete, node_add, link_add, link_add]`）：新节点的 `nodeType` 照抄 inspect 里同类节点的原文，新链路的 `stylesJson` 参照已有链路、`srcSyncName`/`dstSyncName` 填两端节点的 syncName；新的 `syncName`/`linkSeq` 要避开 rows 里已经占用的值。`node_add` 可带 `name` 显示名（交换机 `SW-N`、端系统 `ES-N`、服务器 `SRV-N`，序号 N 接现有同类最大值往下；省略则展示层按前缀+syncName 派生，但若填了 name 必须合前缀，否则结构校验报 `NODE_NAME_PREFIX`）。
 4. 调 `mcp__tsn_topology__topology_apply_operations`；不要把 rows 或 changeSet 写进对话。
 5. 看 `apply_operations` 返回的 `validation` 字段（库内结构校验结论，handler 自动追的），按它把结果告诉用户（见下「结构校验」）。
 
