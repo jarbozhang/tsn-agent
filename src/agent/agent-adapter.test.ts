@@ -430,6 +430,9 @@ describe("runTsnAgent", () => {
     // 环境问题分支：固定展示文案，不把 messageZh 当拓扑错逐条列（故意分叉，本次不收敛）。
     expect(result.assistantText).toContain("连不上远端 INET");
     expect(result.assistantText).not.toContain("INET 远端 10.0.0.9 不可达。");
+    // 校验失败必拦推进：仍停 topology/waiting_confirmation（review 补：U4 inet 后置条件）。
+    expect(result.workflow.currentStep).toBe("topology");
+    expect(result.workflow.stages.topology.status).toBe("waiting_confirmation");
   });
 
   it("advances topology confirm silently when the structural gate passes (no extra prompt; INET moved to flow-planning)", async () => {
