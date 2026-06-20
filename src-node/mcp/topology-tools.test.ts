@@ -356,6 +356,32 @@ describe("topology MCP tool registry", () => {
     expect(payload).toMatchObject({ ok: false, errors: [{ code: "SYNC_NAME_TAKEN" }] });
   });
 
+  it("U5: validate 追调失败不掩盖 apply 成功（validation.ran=false）", async () => {
+    fetchSidecarMock
+      .mockResolvedValueOnce({
+        ok: true as const,
+        status: 200,
+        body: { ok: true, summary: { mutationId: 9, dryRun: false, applied: [{}] } },
+      })
+      // 第二次（validate）sidecar 不可达。
+      .mockResolvedValueOnce({
+        ok: false as const,
+        status: 0,
+        code: "SIDECAR_UNREACHABLE",
+        message: "connection refused",
+        retryable: false,
+      });
+
+    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
+      operations: [{ op: "node_add", syncName: "1", x: 0, y: 0, nodeType: "switch", insertOrder: 1 }],
+      dryRun: false,
+    }));
+
+    expect(fetchSidecarMock).toHaveBeenCalledTimes(2);
+    // apply 成功（ok/mutationId）不被掩盖；validate 调用失败标 ran:false（非结构问题）。
+    expect(payload).toMatchObject({ ok: true, summary: { mutationId: 9 }, validation: { ran: false } });
+  });
+
   it("returns structured limit errors for oversized ingress payload shapes", async () => {
     const deepPayload = {} as Record<string, unknown>;
     let cursor = deepPayload;

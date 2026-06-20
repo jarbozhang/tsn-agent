@@ -3194,6 +3194,13 @@ mod tests {
         assert!(dp_link_connects(&topo, "e3", "sw3"));
         // crossPlaneLinks=none：A/B 平面不直连。
         assert!(!dp_link_connects(&topo, "sw1", "sw2"), "unexpected cross-plane link");
+        // U12：4 switch 命名 SW-1..SW-4（two-hop 也走 SW-/ES- 派生）。
+        let names: Vec<&str> = topo.nodes.iter().map(|n| n.name.as_str()).collect();
+        assert!(
+            names.contains(&"SW-3") && names.contains(&"SW-4"),
+            "two-hop 应有 SW-3/SW-4，实得 {:?}",
+            names
+        );
     }
 
     #[test]

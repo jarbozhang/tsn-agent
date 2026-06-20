@@ -78,6 +78,19 @@ impl TopologyMutationBuffer {
             out_of_range,
         }
     }
+
+    /// 取指定 session 在 buffer 里最新一条 mutation_id（从尾部反向找第一条匹配，不 clone）。
+    /// buffer 重启清零、或该 session 的记录已全被环形淘汰 → None（调用方据此走全量重算）。
+    /// U7：validate 廉价返回判定用它，避免 since(session,0) 为取 last 而 filter+clone 全部记录。
+    pub fn latest_mutation_id_for_session(&self, session_id: &str) -> Option<u64> {
+        let inner = self.inner.lock().expect("mutation buffer poisoned");
+        inner
+            .records
+            .iter()
+            .rev()
+            .find(|r| r.session_id == session_id)
+            .map(|r| r.mutation_id)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -139,6 +152,18 @@ mod tests {
         let resp = buf.since("s1", 0);
         assert!(!resp.out_of_range);
         assert_eq!(resp.mutations.len(), 2);
+    }
+
+    #[test]
+    fn latest_mutation_id_for_session_returns_newest_or_none() {
+        let buf = TopologyMutationBuffer::default();
+        assert_eq!(buf.latest_mutation_id_for_session("s1"), None); // 空 buffer
+        buf.push("s1".to_string(), "topology".to_string()); // 1
+        buf.push("s2".to_string(), "topology".to_string()); // 2（别的 session）
+        buf.push("s1".to_string(), "topology".to_string()); // 3
+        assert_eq!(buf.latest_mutation_id_for_session("s1"), Some(3));
+        assert_eq!(buf.latest_mutation_id_for_session("s2"), Some(2));
+        assert_eq!(buf.latest_mutation_id_for_session("nope"), None);
     }
 
     #[test]

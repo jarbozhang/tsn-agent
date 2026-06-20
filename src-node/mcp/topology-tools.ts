@@ -89,8 +89,9 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       description:
         "Validate the session's topology. Call with NO arguments to check the PERSISTED (already-applied) topology — "
         + "this runs the full structural check (connectivity, port pairing, isolated nodes, forwarding reachability, "
-        + "node roles, duplicate ids) and returns Chinese summary.errors[] you MUST relay to the user. Call it after "
-        + "each round of apply_operations to confirm structure is sound and tell the user the result. "
+        + "node roles, duplicate ids) and returns Chinese summary.errors[] you MUST relay to the user. apply_operations "
+        + "already auto-runs this check and includes it in its `validation` field, so you usually don't call this separately — "
+        + "use it only for an explicit re-check of the persisted topology. "
         + "(Passing a full draft JSON instead runs schema-level validation only.) "
         + "Do NOT call right after topology.initialize — it already validates+persists.",
       inputSchema: {
@@ -134,7 +135,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.apply_operations",
       allowedToolName: "mcp__tsn_topology__topology_apply_operations",
       title: "Apply topology operations",
-      description: "Apply atomic topology operations (node_add / node_update / node_delete / link_add / link_delete) to the session's persisted topology. Returns summary.mutationId on commit. Call topology.inspect first to locate existing syncName/linkSeq values; retries must resend the exact same batch (same syncName/linkSeq), never re-allocate keys. On a committed (non-dryRun) apply the response carries a `validation` field with the post-apply structural check (errors in Chinese) — relay any problems to the user.",
+      description: "Apply atomic topology operations (node_add / node_update / node_delete / link_add / link_delete) to the session's persisted topology. Returns summary.mutationId on commit. Call topology.inspect first to locate existing syncName/linkSeq values; retries must resend the exact same batch (same syncName/linkSeq), never re-allocate keys. On a committed (non-dryRun) apply the response carries a `validation` field with the post-apply structural check (errors in Chinese) — relay any problems to the user. validation.ran=false means the structural-check call itself failed (infra issue, NOT a structure problem); only when ran=true judge by valid/errors.",
       inputSchema: applyOperationsInputSchema(),
       handler: async (args) => applyOperationsWithValidation(args),
     },
@@ -265,7 +266,7 @@ function mergeStructuralValidation(applyBody: unknown, validated: SidecarRawResu
         errors: summary.errors ?? [],
         caliber: summary.caliber ?? null,
       }
-    : { ran: true, valid: null, errors: [] };
+    : { ran: true, valid: null, errors: [], caliber: null };
   return merged;
 }
 

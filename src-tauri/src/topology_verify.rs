@@ -435,6 +435,32 @@ mod tests {
     }
 
     #[test]
+    fn node_name_prefix_accepts_server_srv_and_rejects_wrong() {
+        let links = vec![link(0, "0", "1"), link(1, "0", "2")];
+        // server → SRV-（与 SW/ES 对称分支）。
+        let ok = vec![named_node("0", "switch", "SW-1"), named_node("1", "endSystem", "ES-1"), named_node("2", "server", "SRV-1")];
+        assert!(!codes(&verify_topology(&ok, &links)).contains(&"NODE_NAME_PREFIX"));
+        // server 叫 X-1 → 被拒。
+        let bad = vec![named_node("0", "switch", "SW-1"), named_node("1", "endSystem", "ES-1"), named_node("2", "server", "X-1")];
+        assert!(codes(&verify_topology(&bad, &links)).contains(&"NODE_NAME_PREFIX"), "server 叫 X-1 应被拒");
+    }
+
+    #[test]
+    fn node_name_prefix_skips_unknown_type_no_double_report() {
+        // 未知类型 + 非空 name：只出 UNKNOWN_NODE_ROLE，不重复出 NODE_NAME_PREFIX。
+        let nodes = vec![
+            named_node("0", "switch", "SW-1"),
+            named_node("1", "endSystem", "ES-1"),
+            VerifyNode { sync_name: "2".into(), name: Some("FOO-1".into()), node_type: None },
+        ];
+        let links = vec![link(0, "0", "1"), link(1, "0", "2")];
+        let r = verify_topology(&nodes, &links);
+        let c = codes(&r);
+        assert!(c.contains(&"UNKNOWN_NODE_ROLE"));
+        assert!(!c.contains(&"NODE_NAME_PREFIX"), "未知类型不应再报命名前缀: {:?}", c);
+    }
+
+    #[test]
     fn switches_only_no_end_system_blocks() {
         let nodes = vec![node("0", "switch"), node("1", "switch")];
         let links = vec![link(0, "0", "1")];

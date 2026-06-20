@@ -489,10 +489,7 @@ pub async fn validate(
         // 时，跳过全量重算直接回 valid。缓存只在路由层；确认闸走 load_and_verify_topology、永远全量。
         let current_mutation_id = state
             .mutation_buffer
-            .since(&req.session_id, 0)
-            .mutations
-            .last()
-            .map(|r| r.mutation_id);
+            .latest_mutation_id_for_session(&req.session_id);
         if let Ok(cache) = state.last_validated_ok.lock() {
             if validate_cache_hit(&cache, &req.session_id, current_mutation_id) {
                 let summary = json!({
