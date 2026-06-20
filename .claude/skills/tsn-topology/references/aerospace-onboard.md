@@ -2,23 +2,23 @@
 
 # 箭载/舰载 TSN 场景指引
 
-面向宇航验收场景（《TSN典型组网测试方案》）：双平面冗余（A 主路径 / B 冗余路径物理隔离）、五跳线性级联、环形冗余。用户提到规范图号或典型组网名（如「双平面双跳」「5 跳线性」「4SW_4NIC」）时优先查下方 preset 表照填参数。
+面向宇航验收（《TSN 典型组网测试方案》）：双平面冗余（A 主路径、B 冗余路径，物理隔离）、五跳线性级联、环形冗余。用户提到规范图号或典型组网名（如「双平面双跳」「5 跳线性」「4SW_4NIC」）时，优先照下方 preset 表填参数。
 
-## 推荐参数默认
+## 参数默认值
 
-用户未指定时显式传给 `topology_initialize`（`initialize` 不兜底）：
+用户没指定时，显式传给 `topology_initialize`（它不替你补默认）：
 
 - `dataRateMbps`：缺省 `1000`
-- 双平面场景按 preset 表的完整参数包；自由描述时 `switchCount` 缺省 `4`、`endSystemsPerSwitch` 缺省 `2`
+- 双平面场景按 preset 表的完整参数包来填；自由描述时 `switchCount` 缺省 `4`、`endSystemsPerSwitch` 缺省 `2`
 
-合法域以 `describe_templates` 为准，本文件只给推荐值。
+合法范围以 `describe_templates` 为准，这里只给推荐值。
 
-## 模板选择
+## 选哪个模板
 
-- **`dual-plane-redundant`**：用户要 A/B 双平面、端系统双归属冗余时。单跳（1 个 switchGroup）与双跳（2 个 group + 平面内级联 backbone）用同一模板表达。
-- **`generic-line` + `endSystemPlacement:"ends-only"`**：五跳线性（端系统仅链两端各 1 台，`endSystemsPerSwitch` 必须为 1）；switchCount ≥ 5 时画布自动蛇形折叠对齐规范图 5-1。
+- **`dual-plane-redundant`**：用户要 A/B 双平面、端系统双归属冗余时。单跳（1 个 switchGroup）和双跳（2 个 group + 平面内级联 backbone）都用这个模板表达。
+- **`generic-line` + `endSystemPlacement:"ends-only"`**：五跳线性（端系统只挂链路两端各 1 台，`endSystemsPerSwitch` 必须是 1）；`switchCount ≥ 5` 时画布自动蛇形折叠，对齐规范图 5-1。
 - **`generic-ring`**：环形冗余 / 双环冗余 / 交换机环网。
-- 用户描述不带宇航语义（普通线型/规模化挂载）时按通用场景的 `generic-line` 处理。
+- 用户描述不带宇航味（普通线型、规模化挂载）时，按通用场景的 `generic-line` 处理。
 
 ## 规范图 preset 表
 
