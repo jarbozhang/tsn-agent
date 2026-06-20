@@ -102,6 +102,8 @@
 | 切回阶段口径 | 骨架 + `request_stage_change` description | ② | 切阶段 in-process 工具 + 应用层校验 + 确认按钮确定性推进 |
 | 重试复用同一 batch | 骨架 | ② | 底层写幂等（`ON CONFLICT(link_seq)`）；**同逻辑链路换 linkSeq 重发不兜** → B 档重放 defer |
 
+**Phase 3 C 档 defer 待办（enforcement mode ①，仅靠文字）**：破坏性删除确认门（删关键节点/链路前回显影响面、等用户确认）本周期评估为「需新建冗余数据模型（当前 `VerifyNode` 无 plane 字段、全仓无冗余概念、plane 仅嵌 `styles_json`）+ 图论判定、超预算」→ defer 到 ideation #6，当前仅靠 SKILL.md「删关键项前先问」告知式文字（① 纯指引，弱模型可能不遵守）。换弱模型前若要硬兜底，需先建冗余判定数据模型。
+
 **两个注入硬约束**
 
 - prompt 注入必须单字符串拼接，不能传 `string[]`（会让 `redactSecrets` / `summarizeSdkOptionsForAudit` 抛 TypeError 并破坏 `toContain` 断言）；新增片段沿用现有 `<<<SKILL_GUIDANCE>>>` / `<<<SCENARIO_REFERENCE>>>` 哨兵拼接法。

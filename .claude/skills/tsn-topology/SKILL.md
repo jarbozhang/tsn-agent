@@ -64,6 +64,8 @@ description: TSN Agent 拓扑阶段主索引。承载场景无关的领域语义
 
 支持的 op：`node_add` / `node_update` / `node_delete` / `link_add` / `link_delete`（字段 camelCase，详见工具 schema）。"移动节点""改属性"用 `node_update`；`node_add` 撞上已占用的 syncName 会报 `SYNC_NAME_TAKEN`。
 
+**删关键项前先问**：`node_delete`/`link_delete` 一个看起来关键的节点或链路（唯一骨干、双归属冗余的一侧、删了会断连通或降冗余）之前，先用中文跟用户确认再删，别擅自删——这类破坏性删除当前没有自动确认门，靠你主动问。
+
 ## 结构校验（apply 改完拓扑后自动带）
 
 `apply_operations` 提交成功（非 dryRun）后，handler **自动**追一次库内结构校验，把结论放进返回的 `validation` 字段：连通性、端口配对、孤立节点、转发可达、节点角色、编号重复、命名规范（交换机 `SW-`、端系统 `ES-` 前缀）。**你不用再单独调 validate**。（`initialize` 已经校验过，不验。）
