@@ -1474,11 +1474,14 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
     // 构建节点（只改 position 赋值；节点生成/排序顺序 = imac 身份源，不动）。
     let mut nodes: Vec<IntermediateNode> = Vec::new();
     let mut numeric_node_id: i64 = 0;
+    // U12：统一命名——无显式 name 时按 {类型前缀}+序号派生（交换机 SW-、端系统 ES-），
+    // 不再回退节点 id（旧行为落库 name=sw1/e1，与 generic 的 SW-N/ES-N 分裂）。
+    let mut sw_ordinal: i64 = 1;
     for sw in &ordered_switches {
         nodes.push(IntermediateNode {
             id: sw.id.clone(),
             numeric_id: numeric_node_id,
-            name: sw.name.clone().unwrap_or_else(|| sw.id.clone()),
+            name: sw.name.clone().unwrap_or_else(|| format!("SW-{}", sw_ordinal)),
             node_type: IntermediateNodeType::Switch,
             ports: create_ports(port_count_for(&sw.id)),
             position: positions[&sw.id].clone(),
@@ -1486,6 +1489,7 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
             ip_address: None,
         });
         numeric_node_id += 1;
+        sw_ordinal += 1;
     }
     let mut within_group: HashMap<String, usize> = HashMap::new();
     let mut es_ordinal: i64 = 1;
@@ -1500,7 +1504,7 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
         nodes.push(IntermediateNode {
             id: es.id.clone(),
             numeric_id: numeric_node_id,
-            name: es.name.clone().unwrap_or_else(|| es.id.clone()),
+            name: es.name.clone().unwrap_or_else(|| format!("ES-{}", es_ordinal)),
             node_type: IntermediateNodeType::EndSystem,
             ports: create_ports(port_count_for(&es.id)),
             position: positions[&es.id].clone(),
@@ -3136,6 +3140,41 @@ mod tests {
             assert!(dp_link_connects(&topo, &es, "sw1"), "{} not homed to sw1", es);
             assert!(dp_link_connects(&topo, &es, "sw2"), "{} not homed to sw2", es);
         }
+    }
+
+    #[test]
+    fn dual_plane_node_names_use_sw_es_prefix_not_id() {
+        // U12：dual-plane 节点 name 统一派生 SW-/ES- 前缀，不再落库 name=sw1/e1（与 generic 一致）。
+        let (topo, _) = initialize_topology(&InitializeIntent {
+            template_id: "dual-plane-redundant".into(),
+            params: dual_plane_single_hop_params(),
+        })
+        .unwrap();
+        for node in &topo.nodes {
+            let prefix = match node.node_type {
+                IntermediateNodeType::Switch => "SW-",
+                IntermediateNodeType::EndSystem => "ES-",
+                _ => continue,
+            };
+            assert!(
+                node.name.starts_with(prefix),
+                "节点 name {:?}（id {:?}）应以 {} 开头、不回退 id",
+                node.name,
+                node.id,
+                prefix
+            );
+        }
+        let names: Vec<&str> = topo.nodes.iter().map(|n| n.name.as_str()).collect();
+        assert!(
+            names.contains(&"SW-1") && names.contains(&"SW-2"),
+            "switch 应为 SW-1/SW-2，实得 {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"ES-1") && names.contains(&"ES-6"),
+            "端系统应为 ES-1..ES-6，实得 {:?}",
+            names
+        );
     }
 
     #[test]
