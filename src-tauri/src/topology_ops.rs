@@ -38,6 +38,9 @@ pub struct NodeAddArgs {
 pub struct NodeUpdateArgs {
     /// 目标节点逻辑序号（键，不可改）。
     pub sync_name: String,
+    /// 显示名（U9 闭环：node_add 设名后用本字段改名，避免「设错名只能删重建」死锁）。
+    #[serde(default)]
+    pub name: Option<String>,
     #[serde(default)]
     pub x: Option<f64>,
     #[serde(default)]
@@ -169,11 +172,13 @@ pub async fn apply_op(
             // 简化：仅在提供字段时更新；用 COALESCE 保留原值。
             let res = sqlx::query(
                 r#"UPDATE topology_nodes
-                   SET x = COALESCE(?, x),
+                   SET name = COALESCE(?, name),
+                       x = COALESCE(?, x),
                        y = COALESCE(?, y),
                        node_type = COALESCE(?, node_type)
                    WHERE session_id = ? AND sync_name = ?"#,
             )
+            .bind(&a.name)
             .bind(a.x)
             .bind(a.y)
             .bind(&a.node_type)
@@ -433,6 +438,25 @@ mod tests {
                 sync_name: "1".into(), x: 0.0, y: 0.0, node_type: Some("switch".into()), insert_order: 1,
             })).await.unwrap_err();
             assert!(matches!(err, OpError::SyncNameTaken(_)), "只改 name 应被当取值不同: {:?}", err);
+        });
+    }
+
+    #[test]
+    fn node_update_changes_name() {
+        // review 闭环：node_add 漏 name(NULL) 后用 node_update 补/改名（解「设错名只能删重建」死锁）。
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let mut tx = pool.begin().await.unwrap();
+            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
+                name: None, sync_name: "5".into(), x: 0.0, y: 0.0, node_type: Some("switch".into()), insert_order: 5,
+            })).await.unwrap();
+            apply_op(&mut *tx, "s1", &TopologyOp::NodeUpdate(NodeUpdateArgs {
+                name: Some("SW-5".into()), sync_name: "5".into(), x: None, y: None, node_type: None,
+            })).await.unwrap();
+            tx.commit().await.unwrap();
+            let row = sqlx::query("SELECT name FROM topology_nodes WHERE session_id='s1' AND sync_name='5'")
+                .fetch_one(&pool).await.unwrap();
+            assert_eq!(row.get::<Option<String>, _>("name"), Some("SW-5".to_string()));
         });
     }
 
@@ -722,7 +746,7 @@ mod tests {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
             // 更新不存在的目标是逻辑错误（非重试场景），必须报 NOT_FOUND。
-            let err = apply_op(&mut *tx, "s1", &TopologyOp::NodeUpdate(NodeUpdateArgs {
+            let err = apply_op(&mut *tx, "s1", &TopologyOp::NodeUpdate(NodeUpdateArgs { name: None,
                 sync_name: "999".into(),
                 x: None, y: None, node_type: None,
             })).await.unwrap_err();
@@ -753,7 +777,7 @@ mod tests {
                 sync_name: "5".into(), x: 1.0, y: 2.0,
                 node_type: None, insert_order: 0,
             })).await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeUpdate(NodeUpdateArgs {
+            apply_op(&mut *tx, "s1", &TopologyOp::NodeUpdate(NodeUpdateArgs { name: None,
                 sync_name: "5".into(),
                 x: None, y: Some(9.0), node_type: Some("switch".into()),
             })).await.unwrap();

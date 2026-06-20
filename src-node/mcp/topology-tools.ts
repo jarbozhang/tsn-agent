@@ -351,7 +351,7 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
   const nodeAddSchema = z.object({
     op: z.literal("node_add"),
     syncName: z.string().describe("新节点 key（逻辑序号，如 \"5\"）；必须避开已占用 syncName（先 inspect）。修改已有节点属性用 node_update，node_add 仅用于新增节点"),
-    name: z.string().optional().describe("新节点显示名（交换机 SW-N、端系统 ES-N、服务器 SRV-N；省略则展示层按前缀+syncName 派生）"),
+    name: z.string().min(1).optional().describe("新节点显示名（交换机 SW-N、端系统 ES-N、服务器 SRV-N；省略则展示层按前缀+syncName 派生）"),
     x: z.number(),
     y: z.number(),
     nodeType: z.string().describe("复制 inspect 返回的同类节点 nodeType（如 switch / endSystem）"),
@@ -360,6 +360,7 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
   const nodeUpdateSchema = z.object({
     op: z.literal("node_update"),
     syncName: z.string().describe("目标节点的既有 syncName（先 inspect）；只更新提供的字段，syncName 本身不可改"),
+    name: z.string().min(1).optional().describe("改显示名（交换机 SW-N、端系统 ES-N、服务器 SRV-N，须合前缀）"),
     x: z.number().optional(),
     y: z.number().optional(),
     nodeType: z.string().optional(),

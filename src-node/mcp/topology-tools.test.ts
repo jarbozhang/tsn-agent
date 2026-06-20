@@ -613,6 +613,16 @@ describe("applyOperationsInputSchema", () => {
     expect(noName.success).toBe(true);
   });
 
+  it("U9 review: rejects empty-string name; node_update accepts name", () => {
+    // 空串 name 被拒（避免 '' 与 NULL 两种「无名」表示）。
+    expect(schema.safeParse({
+      operations: [{ op: "node_add", syncName: "5", name: "", x: 0, y: 0, nodeType: "switch", insertOrder: 5 }],
+    }).success).toBe(false);
+    expect(schema.safeParse({ operations: [{ op: "node_update", syncName: "5", name: "" }] }).success).toBe(false);
+    // node_update 接受非空 name（改名闭环）。
+    expect(schema.safeParse({ operations: [{ op: "node_update", syncName: "5", name: "SW-9" }] }).success).toBe(true);
+  });
+
   it("rejects the round-3 invented {kind: insert-switch} shape with an op hint", () => {
     const result = schema.safeParse({ operations: [{ kind: "insert-switch" }] });
     expect(result.success).toBe(false);

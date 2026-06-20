@@ -145,6 +145,23 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
         }
     }
 
+    // 2c. U9 闭环：name 非空时唯一——inspect「按 name 匹配 SW-N」指引依赖唯一性，
+    //     重名会让 agent 删错/连错节点。apply 开放改 name 后弱模型可注入重名，确定性拦在此。
+    let mut seen_name: HashSet<&str> = HashSet::new();
+    for node in nodes {
+        let name = match node.name.as_deref() {
+            Some(n) if !n.is_empty() => n,
+            _ => continue,
+        };
+        if !seen_name.insert(name) {
+            errors.push(VerifyError::new(
+                "DUPLICATE_NAME",
+                format!("有多个节点都叫 {name}，名字要唯一（改其中一个再继续）。"),
+                Some(node.sync_name.clone()),
+            ));
+        }
+    }
+
     // 3. 链路编号重复。
     let mut seen_link: HashSet<i64> = HashSet::new();
     for link in links {
@@ -458,6 +475,23 @@ mod tests {
         let c = codes(&r);
         assert!(c.contains(&"UNKNOWN_NODE_ROLE"));
         assert!(!c.contains(&"NODE_NAME_PREFIX"), "未知类型不应再报命名前缀: {:?}", c);
+    }
+
+    #[test]
+    fn duplicate_name_blocks() {
+        // review 闭环：两个不同 syncName 节点同名 → DUPLICATE_NAME（inspect 按 name 匹配依赖唯一）。
+        let nodes = vec![
+            named_node("0", "switch", "SW-1"),
+            named_node("1", "switch", "SW-1"),
+            named_node("2", "endSystem", "ES-1"),
+        ];
+        let links = vec![link(0, "0", "2"), link(1, "1", "2")];
+        let r = verify_topology(&nodes, &links);
+        assert!(codes(&r).contains(&"DUPLICATE_NAME"), "重名应被拒: {:?}", codes(&r));
+        // 空 name 多个不算重名。
+        let with_empty = vec![named_node("0", "switch", "SW-1"), node("1", "endSystem"), node("2", "endSystem")];
+        let r2 = verify_topology(&with_empty, &vec![link(0, "0", "1"), link(1, "0", "2")]);
+        assert!(!codes(&r2).contains(&"DUPLICATE_NAME"), "空 name 不算重名: {:?}", codes(&r2));
     }
 
     #[test]
