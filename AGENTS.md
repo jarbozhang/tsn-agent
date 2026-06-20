@@ -70,6 +70,43 @@
 - stage runner：`src-node/stage-skills/` 与 worker 内 runner 引导、retry 路径、`TSN_AGENT_STAGE_RUNNER_PATH` env；worker 只服务拓扑阶段（其余阶段由 adapter 本地拦截）。
 - CI grep gate（`scripts/check-no-legacy-types.sh`，默认 `SCAN_MODE=fail`，经 `.github/workflows/ci.yml` 在 push/PR 运行）会拦截上述类型与字段的回流；`src-tauri/src/topology_backfill.rs` 是唯一豁免（一次性 skip-A 迁移读取方）。
 
+## Prompt 层归属规则
+
+> 面向 agent 的指令散在多处会让行为飘（同一规则多份、措辞互相打架）；尤其后续换偏弱模型后，靠「请模型遵守」的规则更容易跑偏。新增或修改任何面向 agent 的 prompt / 指令 / 文案前，先按这套判定它住哪层、靠什么生效。
+
+**住哪层（三层归属；同一条规则只留一处权威事实源，他处引用 / 派生、不另写措辞）**
+
+- 协议不变量（用户改坏会破坏数据对账：阶段序、必走 MCP 不自编 JSON、不写 `STAGE_RESULT_PATH`、重试复用同一 batch、节点身份键名等）→ worker 骨架 `SYSTEM_PROMPT_SKELETON`（`src-node/claude-agent-worker.mjs`，不可编辑；该文件 `:446-451` 注释已声明协议不变量收口骨架）。
+- 领域指引 / 措辞 / 参数默认（场景路由、领域语义、初始化与编辑流程、显示名映射、澄清话术）→ `SKILL.md` 与 `references/<场景id>.md`（可编辑、注入生效；改后须过 `verify:skills`）。
+- 单个工具怎么用 → 该 MCP 工具的 `description`（`src-node/mcp/topology-tools.ts`）。
+
+有些规则天然要在多个运行期表面露出（agent 指引 / 工具边界 / UI）——那要的是「单一事实源」，不是物理上只剩一处。
+
+**靠什么生效（enforcement mode；标注随归属一起记）**
+
+- ① 纯指引——违反顶多措辞 / 风格不佳，靠文字即可。
+- ② 文字 + 确定性兜底——违反会破坏数据或误导用户，必须有不经大模型的硬兜底（脚本 / MCP / Rust / app 层）。
+- ③ 纯确定性——根本不靠文字，直接代码强制。
+
+触发点本身要判用户意图的（如「这是引用还是新建」），确定性层做不全——那部分老实标 ①/②，别因为「下放了脚本」就标纯确定性自欺。代码层已有的确定性骨架可复用：按阶段工具白名单（`buildAllowedToolsForStage`）、`validate` 结构闸（`load_and_verify_topology`，「apply 后验 / initialize 不验」，且 SKILL / 工具 description / 骨架三处口径必须一致）、「确认并继续」按钮确定性推进（不走大模型）、`sanitizeClaudeAssistantText` 输出守卫。
+
+**本次七类矛盾的归属与 enforcement mode**（理顺时的判定结果，也是防复发查阅出口）
+
+| 矛盾 | 权威住所 | mode | 确定性兜底 / 备注 |
+|---|---|---|---|
+| 节点身份键名（imac→syncName） | 骨架 + MCP schema / DB 列 | ③ | 键名由代码强制（schema、列就是 syncName），文字只是复述 |
+| 仿真「不得声称」 | SKILL.md 回复边界 | ② | `sanitizeClaudeAssistantText` 正则；**有完成态/远程运行缺口**（「仿真已完成」「远程运行已启动」会漏网）→ 弱模型切换前补正则 + 针对性验证（plan OQ） |
+| initialize 后不复检 validate | `topology_validate` description（骨架 / SKILL 对齐） | ① | 纯指引（多调一次无害；U7 拟加廉价返回） |
+| 显示名映射 | SKILL.md 领域语义 + inspect description 就近精简句 | ① | 无输出守卫；fail-open 靠 description 精简句兜底，弱模型错配风险见 plan |
+| verify 错误文案 | Rust `messageZh`（确定性源）→ TS 透传 | ③ | TS 确定性消费 Rust，正常分支不另写；`inet_unreachable` 故意分叉 |
+| 切回阶段口径 | 骨架 + `request_stage_change` description | ② | 切阶段 in-process 工具 + 应用层校验 + 确认按钮确定性推进 |
+| 重试复用同一 batch | 骨架 | ② | 底层写幂等（`ON CONFLICT(link_seq)`）；**同逻辑链路换 linkSeq 重发不兜** → B 档重放 defer |
+
+**两个注入硬约束**
+
+- prompt 注入必须单字符串拼接，不能传 `string[]`（会让 `redactSecrets` / `summarizeSdkOptionsForAudit` 抛 TypeError 并破坏 `toContain` 断言）；新增片段沿用现有 `<<<SKILL_GUIDANCE>>>` / `<<<SCENARIO_REFERENCE>>>` 哨兵拼接法。
+- 改 `src-node/claude-agent-worker.mjs` 的 prompt 后必跑 `npm run build:worker`（worker 跑 dist 产物，不重建验的是旧代码）。
+
 ## 分阶段工作流约束
 
 - 稳定阶段 ID 是 `topology`、`time-sync`、`flow-template`、`planning-export`。界面文案可按场景变化，但核心状态机不要改成场景专属 ID。

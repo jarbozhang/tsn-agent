@@ -64,7 +64,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.inspect",
       allowedToolName: "mcp__tsn_topology__topology_inspect",
       title: "Inspect topology",
-      description: "Return the session's full persisted topology rows: nodes (syncName/name/nodeType/x/y/insertOrder) and links (linkSeq/name/srcSyncName/dstSyncName/stylesJson). No parameters. Call this first to locate existing syncName/linkSeq values before building apply_operations batches. 节点身份是 syncName（逻辑序号），连线两端 srcSyncName/dstSyncName 引用节点 syncName。UI 显示名优先节点 name 列（与对话命名一致），name 缺失才回退「类型前缀-syncName」派生；用户引用 SW-N/ES-N 时优先按 name 匹配。links 的 stylesJson 是 JSON 串：plane（A/B）控制画布链路配色（A=蓝、B=红，错值会误导用户）、role（access/backbone）为链路角色、leftLabel/rightLabel 作为端口号渲染在连线两端。",
+      description: "Return the session's full persisted topology rows: nodes (syncName/name/nodeType/x/y/insertOrder) and links (linkSeq/name/srcSyncName/dstSyncName/stylesJson). No parameters. Call this first to locate existing syncName/linkSeq values before building apply_operations batches. 节点身份是 syncName（逻辑序号），连线两端 srcSyncName/dstSyncName 引用节点 syncName。name 列是节点显示名（与对话命名一致）；定位用户说的 SW-N/ES-N 时优先按 name 精确匹配，勿按列表顺序/第 N 台折算（完整显示名规则见 skill 指引）。links 的 stylesJson 是 JSON 串：plane（A/B）控制画布链路配色（A=蓝、B=红，错值会误导用户）、role（access/backbone）为链路角色、leftLabel/rightLabel 作为端口号渲染在连线两端。",
       inputSchema: {},
       handler: async (args) => callSidecarTool("/db/topology/inspect", args, {}),
     },

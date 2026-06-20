@@ -381,6 +381,60 @@ describe("runTsnAgent", () => {
     expect(inetCalls).toHaveLength(0);
   });
 
+  it("U4: normal verify failure relays Rust messageZh verbatim (TS does not re-author per-error text)", async () => {
+    enableTauriRuntime();
+    mockTauriCommands({
+      verify: {
+        ok: false,
+        caliber: "structural_only",
+        errors: [
+          { code: "ISOLATED_NODE", messageZh: "ES-7 没连任何线，是个孤立节点。", nodeRef: "7" },
+          { code: "DUP_SYNC_NAME", messageZh: "syncName 3 被两个节点占用。", nodeRef: "3" },
+        ],
+      },
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "继续",
+      action: "confirm-stage",
+      session: sessionWithWorkflow(topologyWaitingWorkflow()),
+    });
+
+    // 逐条文案直接来自 Rust messageZh（节点专属串 TS 无从硬编码 → 证明透传，不另写）。
+    expect(result.assistantText).toContain("ES-7 没连任何线，是个孤立节点。");
+    expect(result.assistantText).toContain("syncName 3 被两个节点占用。");
+    // 展示框架（可修复语气 + CTA）保留，但走的是结构分支、不是 INET 分支文案。
+    expect(result.assistantText).toContain("先修好再继续");
+    expect(result.assistantText).toContain("确认并继续");
+    expect(result.assistantText).not.toContain("连不上远端 INET");
+  });
+
+  it("U4: inet_unreachable keeps its dedicated display text and drops per-error messageZh (intentional divergence, unchanged)", async () => {
+    enableTauriRuntime();
+    mockTauriCommands({
+      verify: {
+        ok: false,
+        caliber: "loadability_only",
+        errors: [{ code: "inet_unreachable", messageZh: "INET 远端 10.0.0.9 不可达。" }],
+      },
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "继续",
+      action: "confirm-stage",
+      session: sessionWithWorkflow(topologyWaitingWorkflow()),
+    });
+
+    // 环境问题分支：固定展示文案，不把 messageZh 当拓扑错逐条列（故意分叉，本次不收敛）。
+    expect(result.assistantText).toContain("连不上远端 INET");
+    expect(result.assistantText).not.toContain("INET 远端 10.0.0.9 不可达。");
+    // 校验失败必拦推进：仍停 topology/waiting_confirmation（review 补：U4 inet 后置条件）。
+    expect(result.workflow.currentStep).toBe("topology");
+    expect(result.workflow.stages.topology.status).toBe("waiting_confirmation");
+  });
+
   it("advances topology confirm silently when the structural gate passes (no extra prompt; INET moved to flow-planning)", async () => {
     enableTauriRuntime();
     mockTauriCommands(); // 结构闸默认通过
