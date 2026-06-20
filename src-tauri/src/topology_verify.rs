@@ -122,6 +122,29 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
         }
     }
 
+    // 2b. U6 命名前缀：name 非空时必须按类型前缀（交换机 SW-、端系统 ES-、服务器 SRV-）。
+    //     跳过 name 为空的节点（apply 新增节点在 U9 落地前合法无 name）；未知类型已被 #2 判错，
+    //     此处 continue 不重复报。U12 已把各场景 initialize 命名统一到 SW-/ES-，本校验才成立。
+    for node in nodes {
+        let name = match node.name.as_deref() {
+            Some(n) if !n.is_empty() => n,
+            _ => continue,
+        };
+        let (prefix, role_label) = match node.node_type.as_deref() {
+            Some(NODE_TYPE_SWITCH) => ("SW-", "交换机"),
+            Some(NODE_TYPE_END_SYSTEM) => ("ES-", "端系统"),
+            Some(NODE_TYPE_SERVER) => ("SRV-", "服务器"),
+            _ => continue,
+        };
+        if !name.starts_with(prefix) {
+            errors.push(VerifyError::new(
+                "NODE_NAME_PREFIX",
+                format!("{}（编号 {}）的名字 {} 不规范，应以 {} 开头。", role_label, node.sync_name, name, prefix),
+                Some(node.sync_name.clone()),
+            ));
+        }
+    }
+
     // 3. 链路编号重复。
     let mut seen_link: HashSet<i64> = HashSet::new();
     for link in links {
@@ -309,6 +332,9 @@ mod tests {
     fn codes(r: &VerifyResult) -> Vec<&str> {
         r.errors.iter().map(|e| e.code.as_str()).collect()
     }
+    fn named_node(sync: &str, ty: &str, name: &str) -> VerifyNode {
+        VerifyNode { sync_name: sync.into(), name: Some(name.into()), node_type: Some(ty.into()) }
+    }
 
     /// 合法星型：1 交换机 + 2 端系统全连通 → ok。
     #[test]
@@ -379,6 +405,59 @@ mod tests {
         let r = verify_topology(&nodes, &links);
         assert!(!r.ok);
         assert!(codes(&r).contains(&"UNKNOWN_NODE_ROLE"));
+    }
+
+    // U6 命名前缀校验（依赖 U12 把各场景命名统一为 SW-/ES-）。
+    #[test]
+    fn node_name_prefix_accepts_conforming_sw_es() {
+        let nodes = vec![named_node("0", "switch", "SW-1"), named_node("1", "endSystem", "ES-1")];
+        let links = vec![link(0, "0", "1")];
+        let r = verify_topology(&nodes, &links);
+        assert!(!codes(&r).contains(&"NODE_NAME_PREFIX"), "合规命名不应触发: {:?}", codes(&r));
+    }
+
+    #[test]
+    fn node_name_prefix_rejects_end_system_named_sw() {
+        // 负例：端系统 name 为 SW-2（应 ES-）→ NODE_NAME_PREFIX。
+        let nodes = vec![named_node("0", "switch", "SW-1"), named_node("1", "endSystem", "SW-2")];
+        let links = vec![link(0, "0", "1")];
+        let r = verify_topology(&nodes, &links);
+        assert!(codes(&r).contains(&"NODE_NAME_PREFIX"), "端系统叫 SW-2 应被拒: {:?}", codes(&r));
+    }
+
+    #[test]
+    fn node_name_prefix_skips_empty_name() {
+        // apply 新增节点（U9 前合法无 name）跳过命名校验、不误拦。
+        let nodes = vec![named_node("0", "switch", "SW-1"), node("1", "endSystem")];
+        let links = vec![link(0, "0", "1")];
+        let r = verify_topology(&nodes, &links);
+        assert!(!codes(&r).contains(&"NODE_NAME_PREFIX"), "空 name 应跳过: {:?}", codes(&r));
+    }
+
+    #[test]
+    fn node_name_prefix_accepts_server_srv_and_rejects_wrong() {
+        let links = vec![link(0, "0", "1"), link(1, "0", "2")];
+        // server → SRV-（与 SW/ES 对称分支）。
+        let ok = vec![named_node("0", "switch", "SW-1"), named_node("1", "endSystem", "ES-1"), named_node("2", "server", "SRV-1")];
+        assert!(!codes(&verify_topology(&ok, &links)).contains(&"NODE_NAME_PREFIX"));
+        // server 叫 X-1 → 被拒。
+        let bad = vec![named_node("0", "switch", "SW-1"), named_node("1", "endSystem", "ES-1"), named_node("2", "server", "X-1")];
+        assert!(codes(&verify_topology(&bad, &links)).contains(&"NODE_NAME_PREFIX"), "server 叫 X-1 应被拒");
+    }
+
+    #[test]
+    fn node_name_prefix_skips_unknown_type_no_double_report() {
+        // 未知类型 + 非空 name：只出 UNKNOWN_NODE_ROLE，不重复出 NODE_NAME_PREFIX。
+        let nodes = vec![
+            named_node("0", "switch", "SW-1"),
+            named_node("1", "endSystem", "ES-1"),
+            VerifyNode { sync_name: "2".into(), name: Some("FOO-1".into()), node_type: None },
+        ];
+        let links = vec![link(0, "0", "1"), link(1, "0", "2")];
+        let r = verify_topology(&nodes, &links);
+        let c = codes(&r);
+        assert!(c.contains(&"UNKNOWN_NODE_ROLE"));
+        assert!(!c.contains(&"NODE_NAME_PREFIX"), "未知类型不应再报命名前缀: {:?}", c);
     }
 
     #[test]

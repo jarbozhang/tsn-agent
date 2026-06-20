@@ -60,17 +60,19 @@ description: TSN Agent 拓扑阶段主索引。承载场景无关的领域语义
 2. 在 rows 里按 name/nodeType/连接关系找到目标节点和链路，拿到准确的 syncName / linkSeq。用户的指代不唯一时，先用中文数字编号给选项问清楚。匹配按上面「显示名怎么定」来。
 3. 构造原子 operations（比如插一台交换机 = `[link_delete, node_add, link_add, link_add]`）：新节点的 `nodeType` 照抄 inspect 里同类节点的原文，新链路的 `stylesJson` 参照已有链路、`srcSyncName`/`dstSyncName` 填两端节点的 syncName；新的 `syncName`/`linkSeq` 要避开 rows 里已经占用的值。
 4. 调 `mcp__tsn_topology__topology_apply_operations`；不要把 rows 或 changeSet 写进对话。
-5. 按下面「结构校验」验一遍库内结构，把结论告诉用户。
+5. 看 `apply_operations` 返回的 `validation` 字段（库内结构校验结论，handler 自动追的），按它把结果告诉用户（见下「结构校验」）。
 
 支持的 op：`node_add` / `node_update` / `node_delete` / `link_add` / `link_delete`（字段 camelCase，详见工具 schema）。"移动节点""改属性"用 `node_update`；`node_add` 撞上已占用的 syncName 会报 `SYNC_NAME_TAKEN`。
 
-## 结构校验（apply_operations 改完拓扑后必做）
+## 结构校验（apply 改完拓扑后自动带）
 
-每次 `mcp__tsn_topology__topology_apply_operations` 改完拓扑，调 `mcp__tsn_topology__topology_validate`（**不传任何参数**）验库内已落库拓扑的结构：连通性、端口配对、孤立节点、转发可达、节点角色、编号重复。（`initialize` 已经校验过，不用复检。）
+`apply_operations` 提交成功（非 dryRun）后，handler **自动**追一次库内结构校验，把结论放进返回的 `validation` 字段：连通性、端口配对、孤立节点、转发可达、节点角色、编号重复、命名规范（交换机 `SW-`、端系统 `ES-` 前缀）。**你不用再单独调 validate**。（`initialize` 已经校验过，不验。）
 
-- `summary.errors[]`（中文）非空 → **把问题逐条如实告诉用户、让他改**，不要声称结构没问题。
+- `validation.ran` 为 `false` → 校验调用本身没成功（基础设施问题，不代表结构有错）；`ran` 为 `true` 才看下面。
+- `validation.errors[]`（中文）非空 → **把问题逐条如实告诉用户、让他改**，不要声称结构没问题。
 - `errors[]` 为空 → 结构没问题（仅结构级），简短带过即可。
 - 这是 `仅结构级` 校验：只说明结构连通可达，**不**代表时延/调度已验（那是后面阶段的事）。
+- 需要单独复查库内结构时，可调 `mcp__tsn_topology__topology_validate`（**不传任何参数**）。
 
 ## 回复边界
 

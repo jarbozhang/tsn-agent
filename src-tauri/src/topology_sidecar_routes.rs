@@ -16,7 +16,8 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::Row;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use crate::topology_backfill::legacy_node_type;
 use crate::topology_compute::{
@@ -38,6 +39,9 @@ pub struct RouteState {
     pub pool: sqlx::Pool<sqlx::Sqlite>,
     pub mutation_buffer: Arc<TopologyMutationBuffer>,
     pub emit: MutationEmitFn,
+    /// U7：validate 廉价返回缓存——per-session「上次校验通过」的 mutationId。只在此路由层；
+    /// 确认闸（verify_topology 命令走 load_and_verify_topology）够不着它、永远全量重算。
+    pub last_validated_ok: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 fn structured_error(status: StatusCode, code: &str, message: &str, retryable: bool) -> Response {
@@ -450,6 +454,25 @@ pub struct ValidateRequest {
     topology: Option<Value>,
 }
 
+// U7：validate 廉价返回的缓存判定（纯函数，便于单测）。缓存只在 sidecar validate 路由层、
+// 只存「上次校验通过」的 mutationId。⚠️ 确认闸（verify_topology 命令）走 load_and_verify_topology、
+// 够不着此缓存，永远全量重算——本判定不影响它。
+fn validate_cache_hit(cache: &HashMap<String, u64>, session_id: &str, current: Option<u64>) -> bool {
+    matches!(current, Some(c) if cache.get(session_id) == Some(&c))
+}
+
+fn validate_cache_record(cache: &mut HashMap<String, u64>, session_id: &str, valid: bool, current: Option<u64>) {
+    match (valid, current) {
+        // 仅「通过 + 当前 mutationId 可取」时记缓存；失败/变更/buffer 淘汰都清，绝不留 stale。
+        (true, Some(c)) => {
+            cache.insert(session_id.to_string(), c);
+        }
+        _ => {
+            cache.remove(session_id);
+        }
+    }
+}
+
 pub async fn validate(
     State(state): State<Arc<RouteState>>,
     Json(req): Json<ValidateRequest>,
@@ -462,19 +485,46 @@ pub async fn validate(
     // 结构校验（连通/端口配对/孤立/可达/角色/编号重复），让 agent 每次操作拓扑后调它就拿到
     // 与确认闸一致的中文结论、当场反馈给用户。带 topology 草稿则走下面的 schema 级校验。
     let Some(topology) = req.topology else {
+        // U7：当前 mutationId（buffer 派生，淘汰/重启 → None → 全量）与「上次校验通过」相等且可取
+        // 时，跳过全量重算直接回 valid。缓存只在路由层；确认闸走 load_and_verify_topology、永远全量。
+        let current_mutation_id = state
+            .mutation_buffer
+            .latest_mutation_id_for_session(&req.session_id);
+        if let Ok(cache) = state.last_validated_ok.lock() {
+            if validate_cache_hit(&cache, &req.session_id, current_mutation_id) {
+                let summary = json!({
+                    "valid": true,
+                    "errors": [],
+                    "caliber": crate::topology_verify::CALIBER_STRUCTURAL_ONLY,
+                    "source": "p0_structural",
+                    "cached": true,
+                });
+                return (StatusCode::OK, Json(json!({ "ok": true, "summary": summary }))).into_response();
+            }
+        }
         let summary = match crate::topology_query_command::load_and_verify_topology(
             &state.pool,
             &req.session_id,
         )
         .await
         {
-            Ok(result) => json!({
-                "valid": result.ok,
-                "errors": result.errors.iter().map(|e| e.message_zh.clone()).collect::<Vec<_>>(),
-                "caliber": result.caliber,
-                "source": "p0_structural",
-            }),
-            Err(e) => json!({ "valid": false, "errors": [e], "source": "p0_structural" }),
+            Ok(result) => {
+                if let Ok(mut cache) = state.last_validated_ok.lock() {
+                    validate_cache_record(&mut cache, &req.session_id, result.ok, current_mutation_id);
+                }
+                json!({
+                    "valid": result.ok,
+                    "errors": result.errors.iter().map(|e| e.message_zh.clone()).collect::<Vec<_>>(),
+                    "caliber": result.caliber,
+                    "source": "p0_structural",
+                })
+            }
+            Err(e) => {
+                if let Ok(mut cache) = state.last_validated_ok.lock() {
+                    validate_cache_record(&mut cache, &req.session_id, false, current_mutation_id);
+                }
+                json!({ "valid": false, "errors": [e], "source": "p0_structural" })
+            }
         };
         let ok = summary.get("valid").and_then(Value::as_bool).unwrap_or(false);
         return (StatusCode::OK, Json(json!({ "ok": ok, "summary": summary }))).into_response();
@@ -808,5 +858,39 @@ mod tests {
             assert!(without_plane.get("plane").is_none(), "None 路径不得写 plane 键");
             assert!(without_plane.get("role").is_none(), "None 路径不得写 role 键");
         });
+    }
+
+    // U7：廉价返回缓存判定（纯函数）。
+    #[test]
+    fn validate_cache_hit_only_when_current_matches_recorded() {
+        let mut cache = std::collections::HashMap::new();
+        // 边界：buffer 淘汰/重启 → current None → 永远 miss（保守全量）。
+        assert!(!super::validate_cache_hit(&cache, "s1", None));
+        // 未记录 → miss。
+        assert!(!super::validate_cache_hit(&cache, "s1", Some(5)));
+        cache.insert("s1".to_string(), 5u64);
+        // 正例：稳定态、current == 已记 → hit（走廉价）。
+        assert!(super::validate_cache_hit(&cache, "s1", Some(5)));
+        // 负例：一次 mutation 后 current 变 6 → miss（全量重算、不误用旧结论）。
+        assert!(!super::validate_cache_hit(&cache, "s1", Some(6)));
+        // 有记录但 current None（淘汰）→ miss。
+        assert!(!super::validate_cache_hit(&cache, "s1", None));
+    }
+
+    #[test]
+    fn validate_cache_record_caches_only_valid_with_known_mutation() {
+        let mut cache = std::collections::HashMap::new();
+        // 通过 + 已知 mutationId → 记。
+        super::validate_cache_record(&mut cache, "s1", true, Some(7));
+        assert_eq!(cache.get("s1"), Some(&7));
+        // 失败 → 清（不把失败态缓存成「通过」）。
+        super::validate_cache_record(&mut cache, "s1", false, Some(8));
+        assert_eq!(cache.get("s1"), None);
+        // 通过但 mutationId 不可取（淘汰）→ 不记（避免无版本戳的 stale 命中）。
+        super::validate_cache_record(&mut cache, "s1", true, None);
+        assert_eq!(cache.get("s1"), None);
+        // 变更后重新通过 → 更新到新 mutationId。
+        super::validate_cache_record(&mut cache, "s1", true, Some(9));
+        assert_eq!(cache.get("s1"), Some(&9));
     }
 }

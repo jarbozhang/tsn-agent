@@ -198,6 +198,7 @@ pub(crate) async fn build_test_router_with_pool(
         pool,
         mutation_buffer,
         emit: Arc::new(|_record| {}),
+        last_validated_ok: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     });
     (build_router(token.clone(), state), token)
 }
@@ -220,6 +221,7 @@ pub async fn launch(
         pool,
         mutation_buffer,
         emit,
+        last_validated_ok: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     });
     let router = build_router(token.clone(), route_state);
 

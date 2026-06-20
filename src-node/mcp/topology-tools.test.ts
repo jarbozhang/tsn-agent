@@ -246,10 +246,105 @@ describe("topology MCP tool registry", () => {
   });
 
   it("apply_operations forwards operations + dryRun and returns mutationId", async () => {
+    fetchSidecarMock
+      .mockResolvedValueOnce({
+        ok: true as const,
+        status: 200,
+        body: { ok: true, summary: { mutationId: 42, dryRun: false, applied: [] } },
+      })
+      // U5：apply 成功非 dryRun → handler 追调 validate（库内结构）。
+      .mockResolvedValueOnce({
+        ok: true as const,
+        status: 200,
+        body: { ok: true, summary: { valid: true, errors: [], caliber: "structural_only" } },
+      });
+
+    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
+      operations: [{ op: "node_add", syncName: "0", x: 0, y: 0, nodeType: "switch", insertOrder: 0 }],
+      dryRun: false,
+    }));
+
+    // 第一次调用是 apply（携带 operations + dryRun）。
+    const applyCall = fetchSidecarMock.mock.calls[0];
+    expect(applyCall[0]).toBe("/db/topology/apply_operations");
+    expect(applyCall[1]).toHaveProperty("operations");
+    expect(applyCall[1]).toHaveProperty("dryRun", false);
+    expect(payload).toMatchObject({ ok: true, summary: { mutationId: 42 } });
+  });
+
+  it("U5: apply 成功非 dryRun 后自动追调 validate，把结构结论并进返回（正例：孤立节点）", async () => {
+    fetchSidecarMock
+      .mockResolvedValueOnce({
+        ok: true as const,
+        status: 200,
+        body: { ok: true, summary: { mutationId: 7, dryRun: false, applied: [{}] } },
+      })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        status: 200,
+        body: { ok: true, summary: { valid: false, errors: ["ES-2 没连任何线，是个孤立节点。"], caliber: "structural_only" } },
+      });
+
+    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
+      operations: [{ op: "node_add", syncName: "2", x: 0, y: 0, nodeType: "endSystem", insertOrder: 2 }],
+      dryRun: false,
+    }));
+
+    // 两次 sidecar 调用：apply → validate（无参验库内）。
+    expect(fetchSidecarMock).toHaveBeenCalledTimes(2);
+    expect(fetchSidecarMock.mock.calls[1][0]).toBe("/db/topology/validate");
+    // 即使 agent 没显式调 validate，apply 返回也带结构错误结论。
+    expect(payload).toMatchObject({
+      ok: true,
+      summary: { mutationId: 7 },
+      validation: { ran: true, valid: false, errors: ["ES-2 没连任何线，是个孤立节点。"] },
+    });
+  });
+
+  it("U5: 合法 apply 不误报结构错误（负例）", async () => {
+    fetchSidecarMock
+      .mockResolvedValueOnce({
+        ok: true as const,
+        status: 200,
+        body: { ok: true, summary: { mutationId: 8, dryRun: false, applied: [{}] } },
+      })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        status: 200,
+        body: { ok: true, summary: { valid: true, errors: [], caliber: "structural_only" } },
+      });
+
+    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
+      operations: [{ op: "node_update", syncName: "0", x: 1, y: 1 }],
+      dryRun: false,
+    }));
+
+    expect(fetchSidecarMock).toHaveBeenCalledTimes(2);
+    expect(payload).toMatchObject({ ok: true, validation: { ran: true, valid: true, errors: [] } });
+  });
+
+  it("U5: dryRun 不追 validate（只一次 sidecar 调用、无 validation 字段）", async () => {
     fetchSidecarMock.mockResolvedValueOnce({
       ok: true as const,
       status: 200,
-      body: { ok: true, summary: { mutationId: 42, dryRun: false, applied: [] } },
+      body: { ok: true, summary: { mutationId: null, dryRun: true, applied: [{}] } },
+    });
+
+    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
+      operations: [{ op: "node_delete", syncName: "3" }],
+      dryRun: true,
+    }));
+
+    expect(fetchSidecarMock).toHaveBeenCalledTimes(1);
+    expect(fetchSidecarMock.mock.calls[0][0]).toBe("/db/topology/apply_operations");
+    expect(payload).not.toHaveProperty("validation");
+  });
+
+  it("U5: apply 自身失败时不追 validate（失败已是结论）", async () => {
+    fetchSidecarMock.mockResolvedValueOnce({
+      ok: true as const,
+      status: 200,
+      body: { ok: false, errors: [{ code: "SYNC_NAME_TAKEN", message: "syncName 0 已被占用" }] },
     });
 
     const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
@@ -257,11 +352,34 @@ describe("topology MCP tool registry", () => {
       dryRun: false,
     }));
 
-    const { route, body } = lastFetchCall();
-    expect(route).toBe("/db/topology/apply_operations");
-    expect(body).toHaveProperty("operations");
-    expect(body).toHaveProperty("dryRun", false);
-    expect(payload).toMatchObject({ ok: true, summary: { mutationId: 42 } });
+    expect(fetchSidecarMock).toHaveBeenCalledTimes(1);
+    expect(payload).toMatchObject({ ok: false, errors: [{ code: "SYNC_NAME_TAKEN" }] });
+  });
+
+  it("U5: validate 追调失败不掩盖 apply 成功（validation.ran=false）", async () => {
+    fetchSidecarMock
+      .mockResolvedValueOnce({
+        ok: true as const,
+        status: 200,
+        body: { ok: true, summary: { mutationId: 9, dryRun: false, applied: [{}] } },
+      })
+      // 第二次（validate）sidecar 不可达。
+      .mockResolvedValueOnce({
+        ok: false as const,
+        status: 0,
+        code: "SIDECAR_UNREACHABLE",
+        message: "connection refused",
+        retryable: false,
+      });
+
+    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
+      operations: [{ op: "node_add", syncName: "1", x: 0, y: 0, nodeType: "switch", insertOrder: 1 }],
+      dryRun: false,
+    }));
+
+    expect(fetchSidecarMock).toHaveBeenCalledTimes(2);
+    // apply 成功（ok/mutationId）不被掩盖；validate 调用失败标 ran:false（非结构问题）。
+    expect(payload).toMatchObject({ ok: true, summary: { mutationId: 9 }, validation: { ran: false } });
   });
 
   it("returns structured limit errors for oversized ingress payload shapes", async () => {
