@@ -258,7 +258,8 @@ export function App() {
 
   async function handleNewSession() {
     await createNewSession();
-    setInput("我需要4个交换机，每个交换机连接5个端系统");
+    // 不再硬替用户打字：清空输入，由场景化 placeholder（跟着选的场景变）引导（U11 配套）。
+    setInput("");
     setActiveWorkspacePanel(undefined);
   }
 
