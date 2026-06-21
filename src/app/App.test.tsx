@@ -195,6 +195,8 @@ describe("App", () => {
     const aero = screen.getByRole("button", { name: "箭载/舰载 TSN 典型场景" });
     await user.click(aero);
     await waitFor(() => expect(aero).toHaveAttribute("aria-pressed", "true"));
+    // placeholder 跟着场景变成双平面双跳推荐。
+    expect(screen.getByPlaceholderText(/双平面双跳/)).toBeInTheDocument();
 
     // 提交后 agent 收到的会话 scenarioConfigId 已是 aerospace-onboard。
     await typeDefaultIntent(user);
@@ -510,7 +512,8 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "会话" }));
     await user.click(screen.getByRole("button", { name: "新建会话" }));
 
-    expect(screen.getByLabelText("输入你的 TSN 需求")).toHaveValue("我需要4个交换机，每个交换机连接5个端系统");
+    // 新会话清空输入（不再硬预填），由场景化 placeholder 引导。
+    expect(screen.getByLabelText("输入你的 TSN 需求")).toHaveValue("");
 
     await user.click(screen.getByRole("button", { name: "会话" }));
     await waitFor(() => {

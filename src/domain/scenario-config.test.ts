@@ -13,6 +13,7 @@ describe("scenario config", () => {
     const config = getScenarioConfig();
 
     expect(config.id).toBe(DEFAULT_SCENARIO_CONFIG_ID);
+    expect(config.exampleIntent).toContain("交换机");
     expect(config.stageLabels.topology).toBe("拓扑");
     expect(config.stageLabels["flow-template"]).toBe("流量规划");
     expect(config.stageLabels["planning-export"]).toBe("模拟仿真");
@@ -29,6 +30,7 @@ describe("scenario config", () => {
     const config = getScenarioConfig("aerospace-onboard");
 
     expect(config.displayName).toContain("箭载");
+    expect(config.exampleIntent).toContain("双平面双跳");
     expect(config.stageLabels["flow-template"]).toBe("关键流量规划");
     expect(config.stageLabels["planning-export"]).toBe("模拟仿真");
     expect(config.flowTemplates[0].name).toBe("时序控制消息-1");

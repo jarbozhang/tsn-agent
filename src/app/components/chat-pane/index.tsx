@@ -9,7 +9,6 @@ import type { AgentRunPhase } from "../../hooks/use-agent-run-controller";
 import { ToolCallCard } from "./tool-call-card";
 import { ScenarioPicker } from "../scenario-picker";
 
-const INTENT_PLACEHOLDER = "例如：我需要 4 个交换机，每个交换机连接 5 个端系统";
 const STEPPER_STEPS = ["topology", "time-sync", "flow-template", "planning-export"] as const;
 
 /** 验证口径 → 给用户看的中文标签（"绿/红"永远带它出现，杜绝误读为时延已保证）。 */
@@ -185,7 +184,7 @@ export function ChatPane({
             id="intent"
             aria-label="输入你的 TSN 需求"
             value={input}
-            placeholder={INTENT_PLACEHOLDER}
+            placeholder={`例如：${scenarioConfig.exampleIntent}`}
             onChange={(event) => onInputChange(event.target.value)}
             onKeyDown={(event) => {
               // IME 选词中的 Enter 是确认候选，不发送。

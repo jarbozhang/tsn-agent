@@ -21,6 +21,8 @@ export interface ScenarioFlowTemplate {
 export interface ScenarioConfig {
   id: ScenarioConfigId;
   displayName: string;
+  /** 进门输入框的示例需求（placeholder / 引导用户怎么描述，U11 配套）。 */
+  exampleIntent: string;
   stageLabels: Record<WorkflowStep, string>;
   // 拓扑推荐默认已收口到 skill 场景 reference（R10）：唯一事实源是
   // .claude/skills/tsn-topology/references/<场景id>.md，此处不再复制。
@@ -44,6 +46,7 @@ export const SCENARIO_CONFIGS: Record<ScenarioConfigId, ScenarioConfig> = {
   "generic-tsn": {
     id: "generic-tsn",
     displayName: "通用 TSN",
+    exampleIntent: "我需要 4 个交换机，每个交换机连接 5 个端系统",
     stageLabels: {
       topology: "拓扑",
       "time-sync": "时间同步",
@@ -75,6 +78,7 @@ export const SCENARIO_CONFIGS: Record<ScenarioConfigId, ScenarioConfig> = {
   "aerospace-onboard": {
     id: "aerospace-onboard",
     displayName: "箭载/舰载 TSN 典型场景",
+    exampleIntent: "双平面双跳冗余拓扑（图 4-5），4 个端系统、4 个交换机（A/B 平面物理隔离、端系统双归属）",
     stageLabels: {
       topology: "载荷网络拓扑",
       "time-sync": "统一时钟",
