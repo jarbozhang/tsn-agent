@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { pathToFileURL } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TOPOLOGY_TOOL_NAMES } from "../../src/topology/topology-service";
 
 // Plan v3 U4b complete: 所有 handler 走 sidecar HTTP；测试 hoist mock fetchSidecar
@@ -16,11 +16,13 @@ const fetchSidecarMock = vi.hoisted(() =>
     body: { ok: true, summary: {} },
   })),
 );
-const readSidecarEnvMock = vi.hoisted(() => vi.fn(() => ({
-  url: "http://127.0.0.1:0",
-  token: "test-token",
-  sessionId: "test-session-id",
-})));
+const readSidecarEnvMock = vi.hoisted(() =>
+  vi.fn(() => ({
+    url: "http://127.0.0.1:0",
+    token: "test-token",
+    sessionId: "test-session-id",
+  })),
+);
 
 vi.mock("./sidecar-client", () => ({
   fetchSidecar: fetchSidecarMock,
@@ -29,17 +31,19 @@ vi.mock("./sidecar-client", () => ({
 
 import { z } from "zod";
 import {
-  TOPOLOGY_MCP_ALLOWED_TOOLS,
   applyOperationsInputSchema,
   assertTopologyToolMapping,
   createTopologyToolRegistry,
   expectedAllowedToolName,
   initializeInputSchema,
   runTopologyTool,
+  TOPOLOGY_MCP_ALLOWED_TOOLS,
 } from "./topology-tools";
 import { createTsnTopologyMcpServer, isCliEntrypoint } from "./tsn-topology-server";
 
-async function parseToolText(promise: Promise<{ content: Array<{ type: string; text?: string }> }>): Promise<unknown> {
+async function parseToolText(
+  promise: Promise<{ content: Array<{ type: string; text?: string }> }>,
+): Promise<unknown> {
   const result = await promise;
   return JSON.parse(result.content[0].text ?? "{}");
 }
@@ -126,18 +130,22 @@ describe("topology MCP tool registry", () => {
       status: 200,
       body: {
         ok: false,
-        errors: [{
-          code: "INVALID_TEMPLATE_PARAM",
-          message: "$.params.switchCount must be an integer in [1, 12].",
-          path: "$.params.switchCount",
-        }],
+        errors: [
+          {
+            code: "INVALID_TEMPLATE_PARAM",
+            message: "$.params.switchCount must be an integer in [1, 12].",
+            path: "$.params.switchCount",
+          },
+        ],
       },
     });
 
-    const payload = await parseToolText(runTopologyTool("topology.initialize", {
-      templateId: "generic-line",
-      params: { switchCount: 200 },
-    }));
+    const payload = await parseToolText(
+      runTopologyTool("topology.initialize", {
+        templateId: "generic-line",
+        params: { switchCount: 200 },
+      }),
+    );
 
     const { route, body } = lastFetchCall();
     expect(route).toBe("/db/topology/initialize");
@@ -190,9 +198,11 @@ describe("topology MCP tool registry", () => {
       },
     });
 
-    const payload = await parseToolText(runTopologyTool("topology.build_artifacts", {
-      topology: { schemaVersion: "tsn-agent.topology.intermediate.v0", nodes: [], links: [] },
-    }));
+    const payload = await parseToolText(
+      runTopologyTool("topology.build_artifacts", {
+        topology: { schemaVersion: "tsn-agent.topology.intermediate.v0", nodes: [], links: [] },
+      }),
+    );
 
     const { route, body } = lastFetchCall();
     expect(route).toBe("/db/topology/build_artifacts");
@@ -210,9 +220,11 @@ describe("topology MCP tool registry", () => {
       body: { ok: true, summary: { artifactCount: 4, containsHtml: false } },
     });
 
-    const payload = await parseToolText(runTopologyTool("topology.describe_artifacts", {
-      artifacts: { "topology.json": {} },
-    }));
+    const payload = await parseToolText(
+      runTopologyTool("topology.describe_artifacts", {
+        artifacts: { "topology.json": {} },
+      }),
+    );
 
     const { route } = lastFetchCall();
     expect(route).toBe("/db/topology/describe_artifacts");
@@ -225,17 +237,21 @@ describe("topology MCP tool registry", () => {
       status: 200,
       body: {
         ok: false,
-        errors: [{
-          code: "INVALID_ARTIFACT",
-          message: "topo_feature.json must be an array.",
-          path: "$.artifacts['topo_feature.json']",
-        }],
+        errors: [
+          {
+            code: "INVALID_ARTIFACT",
+            message: "topo_feature.json must be an array.",
+            path: "$.artifacts['topo_feature.json']",
+          },
+        ],
       },
     });
 
-    const payload = await parseToolText(runTopologyTool("topology.validate_artifacts", {
-      artifacts: { "topology.json": {} },
-    }));
+    const payload = await parseToolText(
+      runTopologyTool("topology.validate_artifacts", {
+        artifacts: { "topology.json": {} },
+      }),
+    );
 
     const { route } = lastFetchCall();
     expect(route).toBe("/db/topology/validate_artifacts");
@@ -259,10 +275,14 @@ describe("topology MCP tool registry", () => {
         body: { ok: true, summary: { valid: true, errors: [], caliber: "structural_only" } },
       });
 
-    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
-      operations: [{ op: "node_add", syncName: "0", x: 0, y: 0, nodeType: "switch", insertOrder: 0 }],
-      dryRun: false,
-    }));
+    const payload = await parseToolText(
+      runTopologyTool("topology.apply_operations", {
+        operations: [
+          { op: "node_add", syncName: "0", x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
+        ],
+        dryRun: false,
+      }),
+    );
 
     // 第一次调用是 apply（携带 operations + dryRun）。
     const applyCall = fetchSidecarMock.mock.calls[0];
@@ -282,13 +302,24 @@ describe("topology MCP tool registry", () => {
       .mockResolvedValueOnce({
         ok: true as const,
         status: 200,
-        body: { ok: true, summary: { valid: false, errors: ["ES-2 没连任何线，是个孤立节点。"], caliber: "structural_only" } },
+        body: {
+          ok: true,
+          summary: {
+            valid: false,
+            errors: ["ES-2 没连任何线，是个孤立节点。"],
+            caliber: "structural_only",
+          },
+        },
       });
 
-    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
-      operations: [{ op: "node_add", syncName: "2", x: 0, y: 0, nodeType: "endSystem", insertOrder: 2 }],
-      dryRun: false,
-    }));
+    const payload = await parseToolText(
+      runTopologyTool("topology.apply_operations", {
+        operations: [
+          { op: "node_add", syncName: "2", x: 0, y: 0, nodeType: "endSystem", insertOrder: 2 },
+        ],
+        dryRun: false,
+      }),
+    );
 
     // 两次 sidecar 调用：apply → validate（无参验库内）。
     expect(fetchSidecarMock).toHaveBeenCalledTimes(2);
@@ -314,10 +345,12 @@ describe("topology MCP tool registry", () => {
         body: { ok: true, summary: { valid: true, errors: [], caliber: "structural_only" } },
       });
 
-    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
-      operations: [{ op: "node_update", syncName: "0", x: 1, y: 1 }],
-      dryRun: false,
-    }));
+    const payload = await parseToolText(
+      runTopologyTool("topology.apply_operations", {
+        operations: [{ op: "node_update", syncName: "0", x: 1, y: 1 }],
+        dryRun: false,
+      }),
+    );
 
     expect(fetchSidecarMock).toHaveBeenCalledTimes(2);
     expect(payload).toMatchObject({ ok: true, validation: { ran: true, valid: true, errors: [] } });
@@ -330,10 +363,12 @@ describe("topology MCP tool registry", () => {
       body: { ok: true, summary: { mutationId: null, dryRun: true, applied: [{}] } },
     });
 
-    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
-      operations: [{ op: "node_delete", syncName: "3" }],
-      dryRun: true,
-    }));
+    const payload = await parseToolText(
+      runTopologyTool("topology.apply_operations", {
+        operations: [{ op: "node_delete", syncName: "3" }],
+        dryRun: true,
+      }),
+    );
 
     expect(fetchSidecarMock).toHaveBeenCalledTimes(1);
     expect(fetchSidecarMock.mock.calls[0][0]).toBe("/db/topology/apply_operations");
@@ -347,10 +382,14 @@ describe("topology MCP tool registry", () => {
       body: { ok: false, errors: [{ code: "SYNC_NAME_TAKEN", message: "syncName 0 已被占用" }] },
     });
 
-    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
-      operations: [{ op: "node_add", syncName: "0", x: 0, y: 0, nodeType: "switch", insertOrder: 0 }],
-      dryRun: false,
-    }));
+    const payload = await parseToolText(
+      runTopologyTool("topology.apply_operations", {
+        operations: [
+          { op: "node_add", syncName: "0", x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
+        ],
+        dryRun: false,
+      }),
+    );
 
     expect(fetchSidecarMock).toHaveBeenCalledTimes(1);
     expect(payload).toMatchObject({ ok: false, errors: [{ code: "SYNC_NAME_TAKEN" }] });
@@ -372,14 +411,22 @@ describe("topology MCP tool registry", () => {
         retryable: false,
       });
 
-    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
-      operations: [{ op: "node_add", syncName: "1", x: 0, y: 0, nodeType: "switch", insertOrder: 1 }],
-      dryRun: false,
-    }));
+    const payload = await parseToolText(
+      runTopologyTool("topology.apply_operations", {
+        operations: [
+          { op: "node_add", syncName: "1", x: 0, y: 0, nodeType: "switch", insertOrder: 1 },
+        ],
+        dryRun: false,
+      }),
+    );
 
     expect(fetchSidecarMock).toHaveBeenCalledTimes(2);
     // apply 成功（ok/mutationId）不被掩盖；validate 调用失败标 ran:false（非结构问题）。
-    expect(payload).toMatchObject({ ok: true, summary: { mutationId: 9 }, validation: { ran: false } });
+    expect(payload).toMatchObject({
+      ok: true,
+      summary: { mutationId: 9 },
+      validation: { ran: false },
+    });
   });
 
   it("returns structured limit errors for oversized ingress payload shapes", async () => {
@@ -391,22 +438,20 @@ describe("topology MCP tool registry", () => {
     }
 
     const deepResult = await parseToolText(runTopologyTool("topology.initialize", deepPayload));
-    const wideResult = await parseToolText(runTopologyTool("topology.initialize", {
-      templateId: "generic-line",
-      values: Array.from({ length: 70_000 }, (_, index) => ({ index })),
-    }));
+    const wideResult = await parseToolText(
+      runTopologyTool("topology.initialize", {
+        templateId: "generic-line",
+        values: Array.from({ length: 70_000 }, (_, index) => ({ index })),
+      }),
+    );
 
     expect(deepResult).toMatchObject({
       ok: false,
-      errors: [
-        { code: "LIMIT_EXCEEDED", details: { limit: "maxJsonDepth" } },
-      ],
+      errors: [{ code: "LIMIT_EXCEEDED", details: { limit: "maxJsonDepth" } }],
     });
     expect(wideResult).toMatchObject({
       ok: false,
-      errors: [
-        { code: "LIMIT_EXCEEDED", details: { limit: "maxIngressPayloadBytes" } },
-      ],
+      errors: [{ code: "LIMIT_EXCEEDED", details: { limit: "maxIngressPayloadBytes" } }],
     });
   });
 
@@ -448,9 +493,15 @@ describe("topology MCP tool registry", () => {
       retryable: true,
     });
 
-    const payload = await parseToolText(runTopologyTool("topology.validate", {
-      topology: { schemaVersion: "tsn-agent.topology.intermediate.v0", nodes: [{ id: "x" }], links: [] },
-    }));
+    const payload = await parseToolText(
+      runTopologyTool("topology.validate", {
+        topology: {
+          schemaVersion: "tsn-agent.topology.intermediate.v0",
+          nodes: [{ id: "x" }],
+          links: [],
+        },
+      }),
+    );
 
     expect(payload).toMatchObject({
       ok: false,
@@ -467,9 +518,11 @@ describe("topology MCP tool registry", () => {
       retryable: false,
     });
 
-    const payload = await parseToolText(runTopologyTool("topology.apply_operations", {
-      operations: [],
-    }));
+    const payload = await parseToolText(
+      runTopologyTool("topology.apply_operations", {
+        operations: [],
+      }),
+    );
 
     expect(payload).toMatchObject({
       ok: false,
@@ -492,10 +545,7 @@ describe("topology MCP tool registry", () => {
     const server = createTsnTopologyMcpServer();
     const client = new Client({ name: "topology-tools-test", version: "0.0.0" });
 
-    await Promise.all([
-      server.connect(serverTransport),
-      client.connect(clientTransport),
-    ]);
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
     try {
       const result = await client.callTool({
@@ -545,10 +595,7 @@ describe("topology MCP tool registry", () => {
     const server = createTsnTopologyMcpServer();
     const client = new Client({ name: "topology-tools-test", version: "0.0.0" });
 
-    await Promise.all([
-      server.connect(serverTransport),
-      client.connect(clientTransport),
-    ]);
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
     try {
       // 轮 3 真机错误输入：模型发明的 {"kind":"insert-switch"}。
@@ -592,8 +639,20 @@ describe("applyOperationsInputSchema", () => {
     operations: [
       { op: "link_delete", linkSeq: 0 },
       { op: "node_add", syncName: "24", x: 150, y: 40, nodeType: "switch", insertOrder: 24 },
-      { op: "link_add", linkSeq: 23, srcSyncName: "0", dstSyncName: "24", stylesJson: '{"leftLabel":"P1","rightLabel":"P1","speed":1000}' },
-      { op: "link_add", linkSeq: 24, srcSyncName: "24", dstSyncName: "1", stylesJson: '{"leftLabel":"P2","rightLabel":"P1","speed":1000}' },
+      {
+        op: "link_add",
+        linkSeq: 23,
+        srcSyncName: "0",
+        dstSyncName: "24",
+        stylesJson: '{"leftLabel":"P1","rightLabel":"P1","speed":1000}',
+      },
+      {
+        op: "link_add",
+        linkSeq: 24,
+        srcSyncName: "24",
+        dstSyncName: "1",
+        stylesJson: '{"leftLabel":"P2","rightLabel":"P1","speed":1000}',
+      },
     ],
   };
 
@@ -604,23 +663,52 @@ describe("applyOperationsInputSchema", () => {
 
   it("U9: node_add accepts optional name (omitted still valid)", () => {
     const withName = schema.safeParse({
-      operations: [{ op: "node_add", syncName: "5", name: "SW-5", x: 0, y: 0, nodeType: "switch", insertOrder: 5 }],
+      operations: [
+        {
+          op: "node_add",
+          syncName: "5",
+          name: "SW-5",
+          x: 0,
+          y: 0,
+          nodeType: "switch",
+          insertOrder: 5,
+        },
+      ],
     });
     expect(withName.success).toBe(true);
     const noName = schema.safeParse({
-      operations: [{ op: "node_add", syncName: "6", x: 0, y: 0, nodeType: "switch", insertOrder: 6 }],
+      operations: [
+        { op: "node_add", syncName: "6", x: 0, y: 0, nodeType: "switch", insertOrder: 6 },
+      ],
     });
     expect(noName.success).toBe(true);
   });
 
   it("U9 review: rejects empty-string name; node_update accepts name", () => {
     // 空串 name 被拒（避免 '' 与 NULL 两种「无名」表示）。
-    expect(schema.safeParse({
-      operations: [{ op: "node_add", syncName: "5", name: "", x: 0, y: 0, nodeType: "switch", insertOrder: 5 }],
-    }).success).toBe(false);
-    expect(schema.safeParse({ operations: [{ op: "node_update", syncName: "5", name: "" }] }).success).toBe(false);
+    expect(
+      schema.safeParse({
+        operations: [
+          {
+            op: "node_add",
+            syncName: "5",
+            name: "",
+            x: 0,
+            y: 0,
+            nodeType: "switch",
+            insertOrder: 5,
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({ operations: [{ op: "node_update", syncName: "5", name: "" }] }).success,
+    ).toBe(false);
     // node_update 接受非空 name（改名闭环）。
-    expect(schema.safeParse({ operations: [{ op: "node_update", syncName: "5", name: "SW-9" }] }).success).toBe(true);
+    expect(
+      schema.safeParse({ operations: [{ op: "node_update", syncName: "5", name: "SW-9" }] })
+        .success,
+    ).toBe(true);
   });
 
   it("rejects the round-3 invented {kind: insert-switch} shape with an op hint", () => {

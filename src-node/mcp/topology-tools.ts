@@ -1,15 +1,8 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import {
-  TOPOLOGY_TOOL_NAMES,
-  type TopologyToolName,
-} from "../../src/topology/topology-service";
-import { TOPOLOGY_LIMITS, measureJsonBytes, measureJsonDepth } from "../../src/topology/limits";
-import {
-  fetchSidecar,
-  type SidecarFailure,
-  type SidecarResult,
-} from "./sidecar-client";
+import { measureJsonBytes, measureJsonDepth, TOPOLOGY_LIMITS } from "../../src/topology/limits";
+import { TOPOLOGY_TOOL_NAMES, type TopologyToolName } from "../../src/topology/topology-service";
+import { fetchSidecar, type SidecarFailure, type SidecarResult } from "./sidecar-client";
 
 export const TOPOLOGY_MCP_ALLOWED_TOOLS = TOPOLOGY_TOOL_NAMES.map(expectedAllowedToolName);
 
@@ -36,35 +29,36 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.describe_templates",
       allowedToolName: "mcp__tsn_topology__topology_describe_templates",
       title: "Describe topology templates",
-      description: "Return the deterministic P0 topology template catalog. Pass scenario to filter templates applicable to the active scenario; omit for the full catalog.",
+      description:
+        "Return the deterministic P0 topology template catalog. Pass scenario to filter templates applicable to the active scenario; omit for the full catalog.",
       inputSchema: {
         scenario: z.string().optional(),
       },
       // 注意：body 须显式转发 scenario——callSidecarTool 第三参才是发往 sidecar 的 body。
-      handler: async (args) => callSidecarTool("/db/topology/describe_templates", args, {
-        scenario: pickString(args, "scenario"),
-      }),
+      handler: async (args) =>
+        callSidecarTool("/db/topology/describe_templates", args, {
+          scenario: pickString(args, "scenario"),
+        }),
     },
     {
       name: "topology.initialize",
       allowedToolName: "mcp__tsn_topology__topology_initialize",
       title: "Initialize topology",
-      description: "Compute a topology from a template and persist it into the project DB, replacing the session's current topology. Returns summary.mutationId; use topology.inspect to query the persisted result.",
+      description:
+        "Compute a topology from a template and persist it into the project DB, replacing the session's current topology. Returns summary.mutationId; use topology.inspect to query the persisted result.",
       inputSchema: initializeInputSchema(),
-      handler: async (args) => callSidecarTool(
-        "/db/topology/initialize",
-        args,
-        {
+      handler: async (args) =>
+        callSidecarTool("/db/topology/initialize", args, {
           templateId: pickString(args, "templateId"),
           params: pickValue(args, "params"),
-        },
-      ),
+        }),
     },
     {
       name: "topology.inspect",
       allowedToolName: "mcp__tsn_topology__topology_inspect",
       title: "Inspect topology",
-      description: "Return the session's full persisted topology rows: nodes (syncName/name/nodeType/x/y/insertOrder) and links (linkSeq/name/srcSyncName/dstSyncName/stylesJson). No parameters. Call this first to locate existing syncName/linkSeq values before building apply_operations batches. 节点身份是 syncName（逻辑序号），连线两端 srcSyncName/dstSyncName 引用节点 syncName。name 列是节点显示名（与对话命名一致）；定位用户说的 SW-N/ES-N 时优先按 name 精确匹配，勿按列表顺序/第 N 台折算（完整显示名规则见 skill 指引）。links 的 stylesJson 是 JSON 串：plane（A/B）控制画布链路配色（A=蓝、B=红，错值会误导用户）、role（access/backbone）为链路角色、leftLabel/rightLabel 作为端口号渲染在连线两端。",
+      description:
+        "Return the session's full persisted topology rows: nodes (syncName/name/nodeType/x/y/insertOrder) and links (linkSeq/name/srcSyncName/dstSyncName/stylesJson). No parameters. Call this first to locate existing syncName/linkSeq values before building apply_operations batches. 节点身份是 syncName（逻辑序号），连线两端 srcSyncName/dstSyncName 引用节点 syncName。name 列是节点显示名（与对话命名一致）；定位用户说的 SW-N/ES-N 时优先按 name 精确匹配，勿按列表顺序/第 N 台折算（完整显示名规则见 skill 指引）。links 的 stylesJson 是 JSON 串：plane（A/B）控制画布链路配色（A=蓝、B=红，错值会误导用户）、role（access/backbone）为链路角色、leftLabel/rightLabel 作为端口号渲染在连线两端。",
       inputSchema: {},
       handler: async (args) => callSidecarTool("/db/topology/inspect", args, {}),
     },
@@ -76,32 +70,28 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       inputSchema: {
         artifacts: z.unknown().optional(),
       },
-      handler: async (args) => callSidecarTool(
-        "/db/topology/describe_artifacts",
-        args,
-        { artifacts: pickValue(args, "artifacts") ?? {} },
-      ),
+      handler: async (args) =>
+        callSidecarTool("/db/topology/describe_artifacts", args, {
+          artifacts: pickValue(args, "artifacts") ?? {},
+        }),
     },
     {
       name: "topology.validate",
       allowedToolName: "mcp__tsn_topology__topology_validate",
       title: "Validate intermediate topology",
       description:
-        "Validate the session's topology. Call with NO arguments to check the PERSISTED (already-applied) topology — "
-        + "this runs the full structural check (connectivity, port pairing, isolated nodes, forwarding reachability, "
-        + "node roles, duplicate ids) and returns Chinese summary.errors[] you MUST relay to the user. apply_operations "
-        + "already auto-runs this check and includes it in its `validation` field, so you usually don't call this separately — "
-        + "use it only for an explicit re-check of the persisted topology. "
-        + "(Passing a full draft JSON instead runs schema-level validation only.) "
-        + "Do NOT call right after topology.initialize — it already validates+persists.",
+        "Validate the session's topology. Call with NO arguments to check the PERSISTED (already-applied) topology — " +
+        "this runs the full structural check (connectivity, port pairing, isolated nodes, forwarding reachability, " +
+        "node roles, duplicate ids) and returns Chinese summary.errors[] you MUST relay to the user. apply_operations " +
+        "already auto-runs this check and includes it in its `validation` field, so you usually don't call this separately — " +
+        "use it only for an explicit re-check of the persisted topology. " +
+        "(Passing a full draft JSON instead runs schema-level validation only.) " +
+        "Do NOT call right after topology.initialize — it already validates+persists.",
       inputSchema: {
         topology: z.unknown().optional(),
       },
-      handler: async (args) => callSidecarTool(
-        "/db/topology/validate",
-        args,
-        { topology: pickValue(args, "topology") },
-      ),
+      handler: async (args) =>
+        callSidecarTool("/db/topology/validate", args, { topology: pickValue(args, "topology") }),
     },
     {
       name: "topology.build_artifacts",
@@ -111,11 +101,10 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       inputSchema: {
         topology: z.unknown().optional(),
       },
-      handler: async (args) => callSidecarTool(
-        "/db/topology/build_artifacts",
-        args,
-        { topology: pickValue(args, "topology") },
-      ),
+      handler: async (args) =>
+        callSidecarTool("/db/topology/build_artifacts", args, {
+          topology: pickValue(args, "topology"),
+        }),
     },
     {
       name: "topology.validate_artifacts",
@@ -125,24 +114,27 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       inputSchema: {
         artifacts: z.unknown().optional(),
       },
-      handler: async (args) => callSidecarTool(
-        "/db/topology/validate_artifacts",
-        args,
-        { artifacts: pickValue(args, "artifacts") ?? {} },
-      ),
+      handler: async (args) =>
+        callSidecarTool("/db/topology/validate_artifacts", args, {
+          artifacts: pickValue(args, "artifacts") ?? {},
+        }),
     },
     {
       name: "topology.apply_operations",
       allowedToolName: "mcp__tsn_topology__topology_apply_operations",
       title: "Apply topology operations",
-      description: "Apply atomic topology operations (node_add / node_update / node_delete / link_add / link_delete) to the session's persisted topology. Returns summary.mutationId on commit. Call topology.inspect first to locate existing syncName/linkSeq values; retries must resend the exact same batch (same syncName/linkSeq), never re-allocate keys. On a committed (non-dryRun) apply the response carries a `validation` field with the post-apply structural check (errors in Chinese) — relay any problems to the user. validation.ran=false means the structural-check call itself failed (infra issue, NOT a structure problem); only when ran=true judge by valid/errors.",
+      description:
+        "Apply atomic topology operations (node_add / node_update / node_delete / link_add / link_delete) to the session's persisted topology. Returns summary.mutationId on commit. Call topology.inspect first to locate existing syncName/linkSeq values; retries must resend the exact same batch (same syncName/linkSeq), never re-allocate keys. On a committed (non-dryRun) apply the response carries a `validation` field with the post-apply structural check (errors in Chinese) — relay any problems to the user. validation.ran=false means the structural-check call itself failed (infra issue, NOT a structure problem); only when ran=true judge by valid/errors.",
       inputSchema: applyOperationsInputSchema(),
       handler: async (args) => applyOperationsWithValidation(args),
     },
   ];
 }
 
-export async function runTopologyTool(name: TopologyToolName, args: unknown): Promise<CallToolResult> {
+export async function runTopologyTool(
+  name: TopologyToolName,
+  args: unknown,
+): Promise<CallToolResult> {
   const tool = createTopologyToolRegistry().find((candidate) => candidate.name === name);
 
   if (!tool) {
@@ -174,9 +166,7 @@ interface IngressError {
   requiresUserClarification: boolean;
 }
 
-type SidecarRawResult =
-  | { ok: true; body: unknown }
-  | { ok: false; toolResult: CallToolResult };
+type SidecarRawResult = { ok: true; body: unknown } | { ok: false; toolResult: CallToolResult };
 
 // 低层单次 sidecar 调用：成功返回原始 body（供 handler 串联 / 合并多次调用结果），
 // 失败返回已封装好的 CallToolResult（错误语义与 callSidecarTool 完全一致）。
@@ -251,8 +241,13 @@ function isOkBody(body: unknown): boolean {
   return isRecord(body) && body.ok === true;
 }
 
-function mergeStructuralValidation(applyBody: unknown, validated: SidecarRawResult): Record<string, unknown> {
-  const merged: Record<string, unknown> = isRecord(applyBody) ? { ...applyBody } : { value: applyBody };
+function mergeStructuralValidation(
+  applyBody: unknown,
+  validated: SidecarRawResult,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = isRecord(applyBody)
+    ? { ...applyBody }
+    : { value: applyBody };
   if (!validated.ok) {
     // validate 调用本身失败（sidecar 不可达等）：不掩盖 apply 成功，标注结构校验未取得。
     merged.validation = { ran: false, reason: "structural validate call failed" };
@@ -275,9 +270,10 @@ function sidecarFailureToToolResult(failure: SidecarFailure): Record<string, unk
     ok: false,
     errors: [
       {
-        code: failure.code === "SIDECAR_UNREACHABLE" || failure.code === "SIDECAR_TIMEOUT"
-          ? "SIDECAR_UNAVAILABLE"
-          : failure.code,
+        code:
+          failure.code === "SIDECAR_UNREACHABLE" || failure.code === "SIDECAR_TIMEOUT"
+            ? "SIDECAR_UNAVAILABLE"
+            : failure.code,
         message: failure.message || "topology sidecar returned an error",
         path: "$",
         severity: "error",
@@ -348,52 +344,90 @@ function toCallToolResult(payload: unknown): CallToolResult {
  * 导出仅供 schema 单测 safeParse（运行时校验走 registerTool/Client 路径）。
  */
 export function applyOperationsInputSchema(): z.ZodRawShape {
-  const nodeAddSchema = z.object({
-    op: z.literal("node_add"),
-    syncName: z.string().describe("新节点 key（逻辑序号，如 \"5\"）；必须避开已占用 syncName（先 inspect）。修改已有节点属性用 node_update，node_add 仅用于新增节点"),
-    name: z.string().min(1).optional().describe("新节点显示名（交换机 SW-N、端系统 ES-N、服务器 SRV-N；省略则展示层按前缀+syncName 派生）"),
-    x: z.number(),
-    y: z.number(),
-    nodeType: z.string().describe("复制 inspect 返回的同类节点 nodeType（如 switch / endSystem）"),
-    insertOrder: z.number().int(),
-  }).strict();
-  const nodeUpdateSchema = z.object({
-    op: z.literal("node_update"),
-    syncName: z.string().describe("目标节点的既有 syncName（先 inspect）；只更新提供的字段，syncName 本身不可改"),
-    name: z.string().min(1).optional().describe("改显示名（交换机 SW-N、端系统 ES-N、服务器 SRV-N，须合前缀）"),
-    x: z.number().optional(),
-    y: z.number().optional(),
-    nodeType: z.string().optional(),
-  }).strict();
-  const nodeDeleteSchema = z.object({
-    op: z.literal("node_delete"),
-    syncName: z.string().describe("目标节点的既有 syncName；仍被链路引用时会被拒绝（先 link_delete）"),
-  }).strict();
-  const linkAddSchema = z.object({
-    op: z.literal("link_add"),
-    linkSeq: z.number().int().describe("新链路 key；必须避开已占用 linkSeq（先 inspect）"),
-    name: z.string().optional(),
-    srcSyncName: z.string(),
-    dstSyncName: z.string(),
-    stylesJson: z.string().describe("复制 inspect 返回的既有链路 stylesJson 作为格式参照（leftLabel/rightLabel/speed；模板链路可能另含 plane/role）。plane 表示平面归属（A/B），新链路须按两端节点实际平面填写或直接省略该键——抄错平面会让画布配色误导用户。leftLabel/rightLabel 会作为端口号渲染在连线两端（源端/目标端），新链路应填两端节点实际端口（新生成拓扑为 P0 起编）或省略，不要照抄参照链路的值"),
-  }).strict();
-  const linkDeleteSchema = z.object({
-    op: z.literal("link_delete"),
-    linkSeq: z.number().int(),
-  }).strict();
+  const nodeAddSchema = z
+    .object({
+      op: z.literal("node_add"),
+      syncName: z
+        .string()
+        .describe(
+          '新节点 key（逻辑序号，如 "5"）；必须避开已占用 syncName（先 inspect）。修改已有节点属性用 node_update，node_add 仅用于新增节点',
+        ),
+      name: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "新节点显示名（交换机 SW-N、端系统 ES-N、服务器 SRV-N；省略则展示层按前缀+syncName 派生）",
+        ),
+      x: z.number(),
+      y: z.number(),
+      nodeType: z
+        .string()
+        .describe("复制 inspect 返回的同类节点 nodeType（如 switch / endSystem）"),
+      insertOrder: z.number().int(),
+    })
+    .strict();
+  const nodeUpdateSchema = z
+    .object({
+      op: z.literal("node_update"),
+      syncName: z
+        .string()
+        .describe("目标节点的既有 syncName（先 inspect）；只更新提供的字段，syncName 本身不可改"),
+      name: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("改显示名（交换机 SW-N、端系统 ES-N、服务器 SRV-N，须合前缀）"),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      nodeType: z.string().optional(),
+    })
+    .strict();
+  const nodeDeleteSchema = z
+    .object({
+      op: z.literal("node_delete"),
+      syncName: z
+        .string()
+        .describe("目标节点的既有 syncName；仍被链路引用时会被拒绝（先 link_delete）"),
+    })
+    .strict();
+  const linkAddSchema = z
+    .object({
+      op: z.literal("link_add"),
+      linkSeq: z.number().int().describe("新链路 key；必须避开已占用 linkSeq（先 inspect）"),
+      name: z.string().optional(),
+      srcSyncName: z.string(),
+      dstSyncName: z.string(),
+      stylesJson: z
+        .string()
+        .describe(
+          "复制 inspect 返回的既有链路 stylesJson 作为格式参照（leftLabel/rightLabel/speed；模板链路可能另含 plane/role）。plane 表示平面归属（A/B），新链路须按两端节点实际平面填写或直接省略该键——抄错平面会让画布配色误导用户。leftLabel/rightLabel 会作为端口号渲染在连线两端（源端/目标端），新链路应填两端节点实际端口（新生成拓扑为 P0 起编）或省略，不要照抄参照链路的值",
+        ),
+    })
+    .strict();
+  const linkDeleteSchema = z
+    .object({
+      op: z.literal("link_delete"),
+      linkSeq: z.number().int(),
+    })
+    .strict();
 
   return {
     operations: z
-      .array(z.discriminatedUnion("op", [
-        nodeAddSchema,
-        nodeUpdateSchema,
-        nodeDeleteSchema,
-        linkAddSchema,
-        linkDeleteSchema,
-      ]))
+      .array(
+        z.discriminatedUnion("op", [
+          nodeAddSchema,
+          nodeUpdateSchema,
+          nodeDeleteSchema,
+          linkAddSchema,
+          linkDeleteSchema,
+        ]),
+      )
       .min(1)
       .max(32)
-      .describe("原子操作 batch（1-32）。增量修改先 inspect 再构造；重试必须复用同一 batch 的 syncName/linkSeq"),
+      .describe(
+        "原子操作 batch（1-32）。增量修改先 inspect 再构造；重试必须复用同一 batch 的 syncName/linkSeq",
+      ),
     dryRun: z.boolean().optional(),
   };
 }
@@ -404,69 +438,95 @@ export function initializeInputSchema(): z.ZodRawShape {
     switchId: z.string().min(1),
     plane: planeSchema,
   });
-  const dualPlaneParamsSchema = z.object({
-    dataRateMbps: z.number().int().optional(),
-    planes: z.array(z.object({
-      id: planeSchema,
-      name: z.string().optional(),
-    })).length(2),
-    switches: z.array(z.object({
-      id: z.string().min(1),
-      name: z.string().optional(),
-      plane: planeSchema,
-      groupId: z.string().min(1),
-      role: z.literal("access").optional(),
-      portCount: z.number().int().positive().optional(),
-    })).min(1),
-    switchGroups: z.array(z.object({
-      id: z.string().min(1),
-      name: z.string().optional(),
-      planeSwitches: z.object({
-        A: z.string().min(1),
-        B: z.string().min(1),
+  const dualPlaneParamsSchema = z
+    .object({
+      dataRateMbps: z.number().int().optional(),
+      planes: z
+        .array(
+          z.object({
+            id: planeSchema,
+            name: z.string().optional(),
+          }),
+        )
+        .length(2),
+      switches: z
+        .array(
+          z.object({
+            id: z.string().min(1),
+            name: z.string().optional(),
+            plane: planeSchema,
+            groupId: z.string().min(1),
+            role: z.literal("access").optional(),
+            portCount: z.number().int().positive().optional(),
+          }),
+        )
+        .min(1),
+      switchGroups: z
+        .array(
+          z.object({
+            id: z.string().min(1),
+            name: z.string().optional(),
+            planeSwitches: z.object({
+              A: z.string().min(1),
+              B: z.string().min(1),
+            }),
+          }),
+        )
+        .min(1),
+      endSystems: z
+        .array(
+          z.object({
+            id: z.string().min(1),
+            name: z.string().optional(),
+            groupId: z.string().min(1),
+            attachment: z.object({
+              primary: attachmentEndpointSchema,
+              backup: attachmentEndpointSchema,
+            }),
+          }),
+        )
+        .min(1),
+      // Plan 2026-06-09-004 U2：收窄到已实现合法域（line/none）。ring/paired 待实现时 re-advertise。
+      backbone: z.object({
+        mode: z.literal("line"),
+        withinPlane: z.literal(true),
       }),
-    })).min(1),
-    endSystems: z.array(z.object({
-      id: z.string().min(1),
-      name: z.string().optional(),
-      groupId: z.string().min(1),
-      attachment: z.object({
-        primary: attachmentEndpointSchema,
-        backup: attachmentEndpointSchema,
+      crossPlaneLinks: z.object({
+        mode: z.literal("none"),
       }),
-    })).min(1),
-    // Plan 2026-06-09-004 U2：收窄到已实现合法域（line/none）。ring/paired 待实现时 re-advertise。
-    backbone: z.object({
-      mode: z.literal("line"),
-      withinPlane: z.literal(true),
-    }),
-    crossPlaneLinks: z.object({
-      mode: z.literal("none"),
-    }),
-    allocation: z.object({
-      idPrefix: z.object({
-        switch: z.string().optional(),
-        endSystem: z.string().optional(),
-        link: z.string().optional(),
-      }).optional(),
-      portStrategy: z.literal("first-free").optional(),
-      layoutStrategy: z.literal("dual-plane-grid").optional(),
-    }).optional(),
-  }).strict();
+      allocation: z
+        .object({
+          idPrefix: z
+            .object({
+              switch: z.string().optional(),
+              endSystem: z.string().optional(),
+              link: z.string().optional(),
+            })
+            .optional(),
+          portStrategy: z.literal("first-free").optional(),
+          layoutStrategy: z.literal("dual-plane-grid").optional(),
+        })
+        .optional(),
+    })
+    .strict();
 
   return {
     templateId: z.enum(["generic-line", "generic-ring", "dual-plane-redundant"]),
-    params: z.union([
-      z.object({
-        switchCount: z.number().int().min(1).max(12).optional(),
-        endSystemsPerSwitch: z.number().int().min(1).max(24).optional(),
-        dataRateMbps: z.number().int().optional(),
-        // R10：ends-only 仅 generic-line 支持且 endSystemsPerSwitch 必须为 1——
-        // 语义约束由 Rust 校验给出精确错误，zod 只收窄枚举形态。
-        endSystemPlacement: z.enum(["per-switch", "ends-only"]).optional(),
-      }).strict(),
-      dualPlaneParamsSchema,
-    ]).optional(),
+    params: z
+      .union([
+        z
+          .object({
+            switchCount: z.number().int().min(1).max(12).optional(),
+            endSystemsPerSwitch: z.number().int().min(1).max(24).optional(),
+            dataRateMbps: z.number().int().optional(),
+            // R10：ends-only 仅 generic-line 支持且 endSystemsPerSwitch 必须为 1——
+            // 语义约束由 Rust 校验给出精确错误，zod 只收窄枚举形态。
+            endSystemPlacement: z.enum(["per-switch", "ends-only"]).optional(),
+          })
+          .strict(),
+        dualPlaneParamsSchema,
+      ])
+      .optional(),
   };
 }
 

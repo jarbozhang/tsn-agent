@@ -109,9 +109,9 @@ pub async fn describe_templates(
     if let Err(resp) = require_session(&state.pool, &req.session_id).await {
         return resp;
     }
-    ok_summary(crate::topology_compute::describe_templates_catalog_filtered(
-        req.scenario.as_deref(),
-    ))
+    ok_summary(
+        crate::topology_compute::describe_templates_catalog_filtered(req.scenario.as_deref()),
+    )
 }
 
 // ---------- describe_artifacts ----------
@@ -215,7 +215,9 @@ pub async fn initialize(
     // 计算 + 落库一步完成：替换该 session 的 P0 拓扑行并 mint mutationId。
     // initialize 不再返回 full topology（agent 用 inspect 查询切片），
     // 也不再依赖模型「记得」追加调用 apply_operations 才能落图。
-    if let Err(message) = persist_initialized_topology(&state.pool, &req.session_id, &topology).await {
+    if let Err(message) =
+        persist_initialized_topology(&state.pool, &req.session_id, &topology).await
+    {
         return structured_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "PERSIST_FAILED",
@@ -264,7 +266,8 @@ async fn persist_initialized_topology(
         topology.nodes.iter().collect();
     sorted_nodes.sort_by_key(|node| node.numeric_id);
 
-    let mut sync_name_by_node_id: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+    let mut sync_name_by_node_id: std::collections::HashMap<&str, String> =
+        std::collections::HashMap::new();
     for (index, node) in sorted_nodes.iter().enumerate() {
         let sync_name = node.numeric_id.to_string();
         let type_str = match node.node_type {
@@ -457,11 +460,20 @@ pub struct ValidateRequest {
 // U7：validate 廉价返回的缓存判定（纯函数，便于单测）。缓存只在 sidecar validate 路由层、
 // 只存「上次校验通过」的 mutationId。⚠️ 确认闸（verify_topology 命令）走 load_and_verify_topology、
 // 够不着此缓存，永远全量重算——本判定不影响它。
-fn validate_cache_hit(cache: &HashMap<String, u64>, session_id: &str, current: Option<u64>) -> bool {
+fn validate_cache_hit(
+    cache: &HashMap<String, u64>,
+    session_id: &str,
+    current: Option<u64>,
+) -> bool {
     matches!(current, Some(c) if cache.get(session_id) == Some(&c))
 }
 
-fn validate_cache_record(cache: &mut HashMap<String, u64>, session_id: &str, valid: bool, current: Option<u64>) {
+fn validate_cache_record(
+    cache: &mut HashMap<String, u64>,
+    session_id: &str,
+    valid: bool,
+    current: Option<u64>,
+) {
     match (valid, current) {
         // 仅「通过 + 当前 mutationId 可取」时记缓存；失败/变更/buffer 淘汰都清，绝不留 stale。
         (true, Some(c)) => {
@@ -499,7 +511,11 @@ pub async fn validate(
                     "source": "p0_structural",
                     "cached": true,
                 });
-                return (StatusCode::OK, Json(json!({ "ok": true, "summary": summary }))).into_response();
+                return (
+                    StatusCode::OK,
+                    Json(json!({ "ok": true, "summary": summary })),
+                )
+                    .into_response();
             }
         }
         let summary = match crate::topology_query_command::load_and_verify_topology(
@@ -510,7 +526,12 @@ pub async fn validate(
         {
             Ok(result) => {
                 if let Ok(mut cache) = state.last_validated_ok.lock() {
-                    validate_cache_record(&mut cache, &req.session_id, result.ok, current_mutation_id);
+                    validate_cache_record(
+                        &mut cache,
+                        &req.session_id,
+                        result.ok,
+                        current_mutation_id,
+                    );
                 }
                 json!({
                     "valid": result.ok,
@@ -526,8 +547,15 @@ pub async fn validate(
                 json!({ "valid": false, "errors": [e], "source": "p0_structural" })
             }
         };
-        let ok = summary.get("valid").and_then(Value::as_bool).unwrap_or(false);
-        return (StatusCode::OK, Json(json!({ "ok": ok, "summary": summary }))).into_response();
+        let ok = summary
+            .get("valid")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        return (
+            StatusCode::OK,
+            Json(json!({ "ok": ok, "summary": summary })),
+        )
+            .into_response();
     };
 
     let report = validate_intermediate_topology(&topology);
@@ -633,17 +661,19 @@ pub async fn apply_operations(
 
     let mut tx = match state.pool.begin().await {
         Ok(tx) => tx,
-        Err(e) => return structured_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "BEGIN_FAILED",
-            &e.to_string(),
-            true,
-        ),
+        Err(e) => {
+            return structured_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "BEGIN_FAILED",
+                &e.to_string(),
+                true,
+            )
+        }
     };
 
     let mut applied = Vec::with_capacity(req.operations.len());
     for op in &req.operations {
-        match apply_op(&mut *tx, &req.session_id, op).await {
+        match apply_op(&mut tx, &req.session_id, op).await {
             Ok(s) => applied.push(s),
             Err(err) => {
                 let _ = tx.rollback().await;
@@ -757,7 +787,10 @@ mod tests {
                 .connect("sqlite::memory:")
                 .await
                 .unwrap();
-            sqlx::query(&crate::db::safety_net_schema_sql()).execute(&pool).await.unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql())
+                .execute(&pool)
+                .await
+                .unwrap();
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1', 't', 'now', 'now', '{}')")
                 .execute(&pool)
                 .await
@@ -782,16 +815,20 @@ mod tests {
                 .await
                 .unwrap();
 
-            let names: Vec<Option<String>> =
-                sqlx::query("SELECT name FROM topology_nodes WHERE session_id = 's1' ORDER BY insert_order")
-                    .fetch_all(&pool)
-                    .await
-                    .unwrap()
-                    .iter()
-                    .map(|row| row.get("name"))
-                    .collect();
+            let names: Vec<Option<String>> = sqlx::query(
+                "SELECT name FROM topology_nodes WHERE session_id = 's1' ORDER BY insert_order",
+            )
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get("name"))
+            .collect();
 
-            assert_eq!(names, vec![Some("SW-1".to_string()), Some("ES-1".to_string())]);
+            assert_eq!(
+                names,
+                vec![Some("SW-1".to_string()), Some("ES-1".to_string())]
+            );
         });
     }
 
@@ -804,7 +841,10 @@ mod tests {
                 .connect("sqlite::memory:")
                 .await
                 .unwrap();
-            sqlx::query(&crate::db::safety_net_schema_sql()).execute(&pool).await.unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql())
+                .execute(&pool)
+                .await
+                .unwrap();
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1', 't', 'now', 'now', '{}')")
                 .execute(&pool)
                 .await
@@ -841,22 +881,29 @@ mod tests {
                 .await
                 .unwrap();
 
-            let styles: Vec<String> =
-                sqlx::query("SELECT styles_json FROM topology_links WHERE session_id = 's1' ORDER BY link_seq")
-                    .fetch_all(&pool)
-                    .await
-                    .unwrap()
-                    .iter()
-                    .map(|row| row.get("styles_json"))
-                    .collect();
+            let styles: Vec<String> = sqlx::query(
+                "SELECT styles_json FROM topology_links WHERE session_id = 's1' ORDER BY link_seq",
+            )
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get("styles_json"))
+            .collect();
             let with_plane: serde_json::Value = serde_json::from_str(&styles[0]).unwrap();
             assert_eq!(with_plane["plane"], "A");
             assert_eq!(with_plane["role"], "access");
             assert_eq!(with_plane["leftLabel"], "P0");
             assert_eq!(with_plane["speed"], 1000);
             let without_plane: serde_json::Value = serde_json::from_str(&styles[1]).unwrap();
-            assert!(without_plane.get("plane").is_none(), "None 路径不得写 plane 键");
-            assert!(without_plane.get("role").is_none(), "None 路径不得写 role 键");
+            assert!(
+                without_plane.get("plane").is_none(),
+                "None 路径不得写 plane 键"
+            );
+            assert!(
+                without_plane.get("role").is_none(),
+                "None 路径不得写 role 键"
+            );
         });
     }
 

@@ -1,9 +1,9 @@
 //! Plan v3 U4a-1：topology MCP ops 白名单 enum。
 //!
 //! 跨 session_id 引用 / 写 sessions / app_state / 未声明 op 直接 400。
-//! Phase A tracer subset (per plan v3 R13) 是插入交换机：`link.delete` + `node.add`
-//! + `link.add`；本 enum 含 P0 全部所需 variant（Import session 复用相同 ops，
-//! plan v3 R19）。
+//! Phase A tracer subset (per plan v3 R13) 是插入交换机：
+//! `link.delete` + `node.add` + `link.add`；本 enum 含 P0 全部所需 variant
+//! （Import session 复用相同 ops，plan v3 R19）。
 
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
@@ -188,7 +188,10 @@ pub async fn apply_op(
             .await
             .map_err(|e| OpError::Database(e.to_string()))?;
             if res.rows_affected() == 0 {
-                return Err(OpError::NotFound(format!("topology_nodes(syncName={})", a.sync_name)));
+                return Err(OpError::NotFound(format!(
+                    "topology_nodes(syncName={})",
+                    a.sync_name
+                )));
             }
             Ok(OpResultSummary {
                 op_kind: "node.update",
@@ -211,14 +214,13 @@ pub async fn apply_op(
                     a.sync_name, link_refs
                 )));
             }
-            let res = sqlx::query(
-                "DELETE FROM topology_nodes WHERE session_id = ? AND sync_name = ?",
-            )
-            .bind(session_id)
-            .bind(&a.sync_name)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| OpError::Database(e.to_string()))?;
+            let res =
+                sqlx::query("DELETE FROM topology_nodes WHERE session_id = ? AND sync_name = ?")
+                    .bind(session_id)
+                    .bind(&a.sync_name)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| OpError::Database(e.to_string()))?;
             // 幂等：目标不存在视为已删除（重试安全），rows_affected=0 自述 no-op。
             Ok(OpResultSummary {
                 op_kind: "node.delete",
@@ -235,7 +237,11 @@ pub async fn apply_op(
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| OpError::Database(e.to_string()))?;
-            let expected = if a.src_sync_name == a.dst_sync_name { 1 } else { 2 };
+            let expected = if a.src_sync_name == a.dst_sync_name {
+                1
+            } else {
+                2
+            };
             if endpoint_count < expected {
                 return Err(OpError::UnknownNode(format!(
                     "link.add(link_seq={}) references missing node(s): srcSyncName={} dstSyncName={}",
@@ -287,14 +293,13 @@ pub async fn apply_op(
             })
         }
         TopologyOp::LinkDelete(a) => {
-            let res = sqlx::query(
-                "DELETE FROM topology_links WHERE session_id = ? AND link_seq = ?",
-            )
-            .bind(session_id)
-            .bind(a.link_seq)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| OpError::Database(e.to_string()))?;
+            let res =
+                sqlx::query("DELETE FROM topology_links WHERE session_id = ? AND link_seq = ?")
+                    .bind(session_id)
+                    .bind(a.link_seq)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| OpError::Database(e.to_string()))?;
             // 幂等：目标不存在视为已删除（重试安全），rows_affected=0 自述 no-op。
             Ok(OpResultSummary {
                 op_kind: "link.delete",
@@ -384,9 +389,10 @@ mod tests {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
             apply_op(
-                &mut *tx,
+                &mut tx,
                 "s1",
-                &TopologyOp::NodeAdd(NodeAddArgs { name: None,
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
                     sync_name: "0".to_string(),
                     x: 1.0,
                     y: 2.0,
@@ -398,8 +404,12 @@ mod tests {
             .unwrap();
             tx.commit().await.unwrap();
 
-            let row = sqlx::query("SELECT sync_name, insert_order FROM topology_nodes WHERE session_id='s1'")
-                .fetch_one(&pool).await.unwrap();
+            let row = sqlx::query(
+                "SELECT sync_name, insert_order FROM topology_nodes WHERE session_id='s1'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             assert_eq!(row.get::<String, _>("sync_name"), "0");
             assert_eq!(row.get::<i64, _>("insert_order"), 0);
         });
@@ -411,14 +421,31 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
-                name: Some("SW-5".into()),
-                sync_name: "5".into(), x: 1.0, y: 2.0, node_type: Some("switch".into()), insert_order: 5,
-            })).await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: Some("SW-5".into()),
+                    sync_name: "5".into(),
+                    x: 1.0,
+                    y: 2.0,
+                    node_type: Some("switch".into()),
+                    insert_order: 5,
+                }),
+            )
+            .await
+            .unwrap();
             tx.commit().await.unwrap();
-            let row = sqlx::query("SELECT name FROM topology_nodes WHERE session_id='s1' AND sync_name='5'")
-                .fetch_one(&pool).await.unwrap();
-            assert_eq!(row.get::<Option<String>, _>("name"), Some("SW-5".to_string()));
+            let row = sqlx::query(
+                "SELECT name FROM topology_nodes WHERE session_id='s1' AND sync_name='5'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                row.get::<Option<String>, _>("name"),
+                Some("SW-5".to_string())
+            );
         });
     }
 
@@ -429,15 +456,38 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
-                name: Some("SW-1".into()),
-                sync_name: "1".into(), x: 0.0, y: 0.0, node_type: Some("switch".into()), insert_order: 1,
-            })).await.unwrap();
-            let err = apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
-                name: Some("SW-99".into()),
-                sync_name: "1".into(), x: 0.0, y: 0.0, node_type: Some("switch".into()), insert_order: 1,
-            })).await.unwrap_err();
-            assert!(matches!(err, OpError::SyncNameTaken(_)), "只改 name 应被当取值不同: {:?}", err);
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: Some("SW-1".into()),
+                    sync_name: "1".into(),
+                    x: 0.0,
+                    y: 0.0,
+                    node_type: Some("switch".into()),
+                    insert_order: 1,
+                }),
+            )
+            .await
+            .unwrap();
+            let err = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: Some("SW-99".into()),
+                    sync_name: "1".into(),
+                    x: 0.0,
+                    y: 0.0,
+                    node_type: Some("switch".into()),
+                    insert_order: 1,
+                }),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                matches!(err, OpError::SyncNameTaken(_)),
+                "只改 name 应被当取值不同: {err:?}"
+            );
         });
     }
 
@@ -447,16 +497,44 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs {
-                name: None, sync_name: "5".into(), x: 0.0, y: 0.0, node_type: Some("switch".into()), insert_order: 5,
-            })).await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeUpdate(NodeUpdateArgs {
-                name: Some("SW-5".into()), sync_name: "5".into(), x: None, y: None, node_type: None,
-            })).await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    sync_name: "5".into(),
+                    x: 0.0,
+                    y: 0.0,
+                    node_type: Some("switch".into()),
+                    insert_order: 5,
+                }),
+            )
+            .await
+            .unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeUpdate(NodeUpdateArgs {
+                    name: Some("SW-5".into()),
+                    sync_name: "5".into(),
+                    x: None,
+                    y: None,
+                    node_type: None,
+                }),
+            )
+            .await
+            .unwrap();
             tx.commit().await.unwrap();
-            let row = sqlx::query("SELECT name FROM topology_nodes WHERE session_id='s1' AND sync_name='5'")
-                .fetch_one(&pool).await.unwrap();
-            assert_eq!(row.get::<Option<String>, _>("name"), Some("SW-5".to_string()));
+            let row = sqlx::query(
+                "SELECT name FROM topology_nodes WHERE session_id='s1' AND sync_name='5'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                row.get::<Option<String>, _>("name"),
+                Some("SW-5".to_string())
+            );
         });
     }
 
@@ -467,9 +545,11 @@ mod tests {
             let mut tx = pool.begin().await.unwrap();
             // 幂等：删除不存在的节点 = no-op 成功（重试安全），rows_affected=0。
             let s = apply_op(
-                &mut *tx,
+                &mut tx,
                 "s1",
-                &TopologyOp::NodeDelete(NodeDeleteArgs { sync_name: "999".into() }),
+                &TopologyOp::NodeDelete(NodeDeleteArgs {
+                    sync_name: "999".into(),
+                }),
             )
             .await
             .unwrap();
@@ -486,44 +566,82 @@ mod tests {
             let pool = fresh_pool().await;
             let mut seed = pool.begin().await.unwrap();
             for order in [0_i64, 1] {
-                apply_op(&mut *seed, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                    sync_name: order.to_string(), x: 0.0, y: 0.0,
-                    node_type: None, insert_order: order,
-                })).await.unwrap();
+                apply_op(
+                    &mut seed,
+                    "s1",
+                    &TopologyOp::NodeAdd(NodeAddArgs {
+                        name: None,
+                        sync_name: order.to_string(),
+                        x: 0.0,
+                        y: 0.0,
+                        node_type: None,
+                        insert_order: order,
+                    }),
+                )
+                .await
+                .unwrap();
             }
-            apply_op(&mut *seed, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
-                link_seq: 0, name: None, src_sync_name: "0".into(), dst_sync_name: "1".into(), styles_json: "{}".into(),
-            })).await.unwrap();
+            apply_op(
+                &mut seed,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_sync_name: "0".into(),
+                    dst_sync_name: "1".into(),
+                    styles_json: "{}".into(),
+                }),
+            )
+            .await
+            .unwrap();
             seed.commit().await.unwrap();
 
             let batch = vec![
                 TopologyOp::LinkDelete(LinkDeleteArgs { link_seq: 0 }),
-                TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                    sync_name: "2".into(), x: 0.5, y: 0.5,
-                    node_type: Some("switch".into()), insert_order: 2,
+                TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    sync_name: "2".into(),
+                    x: 0.5,
+                    y: 0.5,
+                    node_type: Some("switch".into()),
+                    insert_order: 2,
                 }),
                 TopologyOp::LinkAdd(LinkAddArgs {
-                    link_seq: 1, name: None, src_sync_name: "0".into(), dst_sync_name: "2".into(), styles_json: "{}".into(),
+                    link_seq: 1,
+                    name: None,
+                    src_sync_name: "0".into(),
+                    dst_sync_name: "2".into(),
+                    styles_json: "{}".into(),
                 }),
                 TopologyOp::LinkAdd(LinkAddArgs {
-                    link_seq: 2, name: None, src_sync_name: "2".into(), dst_sync_name: "1".into(), styles_json: "{}".into(),
+                    link_seq: 2,
+                    name: None,
+                    src_sync_name: "2".into(),
+                    dst_sync_name: "1".into(),
+                    styles_json: "{}".into(),
                 }),
             ];
 
             for round in 0..2 {
                 let mut tx = pool.begin().await.unwrap();
                 for op in &batch {
-                    apply_op(&mut *tx, "s1", op)
+                    apply_op(&mut tx, "s1", op)
                         .await
                         .unwrap_or_else(|e| panic!("round {round} failed: {e:?}"));
                 }
                 tx.commit().await.unwrap();
             }
 
-            let node_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
-                .fetch_one(&pool).await.unwrap();
-            let link_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_links WHERE session_id='s1'")
-                .fetch_one(&pool).await.unwrap();
+            let node_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            let link_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_links WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(node_count, 3);
             assert_eq!(link_count, 2);
         });
@@ -534,23 +652,50 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                sync_name: "0".into(), x: 1.0, y: 2.0,
-                node_type: Some("switch".into()), insert_order: 0,
-            })).await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    sync_name: "0".into(),
+                    x: 1.0,
+                    y: 2.0,
+                    node_type: Some("switch".into()),
+                    insert_order: 0,
+                }),
+            )
+            .await
+            .unwrap();
             // 重放省略 optional 的 nodeType（存量行 nodeType="switch"）：
             // absent 字段不参与异值判定 → 仍判同值 no-op（假阳性回归）。
-            let s = apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                sync_name: "0".into(), x: 1.0, y: 2.0,
-                node_type: None, insert_order: 0,
-            })).await.unwrap();
+            let s = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    sync_name: "0".into(),
+                    x: 1.0,
+                    y: 2.0,
+                    node_type: None,
+                    insert_order: 0,
+                }),
+            )
+            .await
+            .unwrap();
             assert_eq!(s.op_kind, "node.add");
             assert_eq!(s.rows_affected, 0);
             tx.commit().await.unwrap();
 
-            let row = sqlx::query("SELECT node_type FROM topology_nodes WHERE session_id='s1' AND sync_name='0'")
-                .fetch_one(&pool).await.unwrap();
-            assert_eq!(row.get::<Option<String>, _>("node_type").as_deref(), Some("switch"));
+            let row = sqlx::query(
+                "SELECT node_type FROM topology_nodes WHERE session_id='s1' AND sync_name='0'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                row.get::<Option<String>, _>("node_type").as_deref(),
+                Some("switch")
+            );
         });
     }
 
@@ -559,27 +704,54 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut seed = pool.begin().await.unwrap();
-            apply_op(&mut *seed, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                sync_name: "0".into(), x: 1.0, y: 2.0,
-                node_type: None, insert_order: 0,
-            })).await.unwrap();
+            apply_op(
+                &mut seed,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    sync_name: "0".into(),
+                    x: 1.0,
+                    y: 2.0,
+                    node_type: None,
+                    insert_order: 0,
+                }),
+            )
+            .await
+            .unwrap();
             seed.commit().await.unwrap();
 
             // 同 syncName、不同坐标 → 碰撞报错（三态拒绝静默覆盖）。
             let mut tx = pool.begin().await.unwrap();
-            let err = apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                sync_name: "0".into(), x: 9.0, y: 9.0,
-                node_type: None, insert_order: 0,
-            })).await.unwrap_err();
+            let err = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    sync_name: "0".into(),
+                    x: 9.0,
+                    y: 9.0,
+                    node_type: None,
+                    insert_order: 0,
+                }),
+            )
+            .await
+            .unwrap_err();
             assert!(matches!(err, OpError::SyncNameTaken(_)));
             assert_eq!(err.code(), "SYNC_NAME_TAKEN");
             // 错误信息给出路：改属性应走 node_update。
-            assert!(err.message().contains("node_update"), "message={}", err.message());
+            assert!(
+                err.message().contains("node_update"),
+                "message={}",
+                err.message()
+            );
             tx.rollback().await.unwrap();
 
             // 原节点完好。
-            let row = sqlx::query("SELECT x FROM topology_nodes WHERE session_id='s1' AND sync_name='0'")
-                .fetch_one(&pool).await.unwrap();
+            let row =
+                sqlx::query("SELECT x FROM topology_nodes WHERE session_id='s1' AND sync_name='0'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(row.get::<f64, _>("x"), 1.0);
         });
     }
@@ -590,26 +762,66 @@ mod tests {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
             for order in [0_i64, 1, 2] {
-                apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                    sync_name: order.to_string(), x: 0.0, y: 0.0,
-                    node_type: None, insert_order: order,
-                })).await.unwrap();
+                apply_op(
+                    &mut tx,
+                    "s1",
+                    &TopologyOp::NodeAdd(NodeAddArgs {
+                        name: None,
+                        sync_name: order.to_string(),
+                        x: 0.0,
+                        y: 0.0,
+                        node_type: None,
+                        insert_order: order,
+                    }),
+                )
+                .await
+                .unwrap();
             }
-            apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
-                link_seq: 0, name: None, src_sync_name: "0".into(), dst_sync_name: "1".into(), styles_json: "{}".into(),
-            })).await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_sync_name: "0".into(),
+                    dst_sync_name: "1".into(),
+                    styles_json: "{}".into(),
+                }),
+            )
+            .await
+            .unwrap();
 
             // 同 linkSeq、不同端点 → 碰撞报错。
-            let err = apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
-                link_seq: 0, name: None, src_sync_name: "0".into(), dst_sync_name: "2".into(), styles_json: "{}".into(),
-            })).await.unwrap_err();
+            let err = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_sync_name: "0".into(),
+                    dst_sync_name: "2".into(),
+                    styles_json: "{}".into(),
+                }),
+            )
+            .await
+            .unwrap_err();
             assert!(matches!(err, OpError::LinkSeqTaken(_)));
             assert_eq!(err.code(), "LINK_SEQ_TAKEN");
 
             // 同值重放仍是 no-op。
-            let s = apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
-                link_seq: 0, name: None, src_sync_name: "0".into(), dst_sync_name: "1".into(), styles_json: "{}".into(),
-            })).await.unwrap();
+            let s = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_sync_name: "0".into(),
+                    dst_sync_name: "1".into(),
+                    styles_json: "{}".into(),
+                }),
+            )
+            .await
+            .unwrap();
             assert_eq!(s.rows_affected, 0);
         });
     }
@@ -620,29 +832,66 @@ mod tests {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
             for order in [0_i64, 1] {
-                apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                    sync_name: order.to_string(), x: 0.0, y: 0.0,
-                    node_type: None, insert_order: order,
-                })).await.unwrap();
+                apply_op(
+                    &mut tx,
+                    "s1",
+                    &TopologyOp::NodeAdd(NodeAddArgs {
+                        name: None,
+                        sync_name: order.to_string(),
+                        x: 0.0,
+                        y: 0.0,
+                        node_type: None,
+                        insert_order: order,
+                    }),
+                )
+                .await
+                .unwrap();
             }
-            apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
-                link_seq: 0, name: None, src_sync_name: "0".into(), dst_sync_name: "1".into(),
-                styles_json: r#"{"leftLabel":"P1","speed":1000}"#.into(),
-            })).await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_sync_name: "0".into(),
+                    dst_sync_name: "1".into(),
+                    styles_json: r#"{"leftLabel":"P1","speed":1000}"#.into(),
+                }),
+            )
+            .await
+            .unwrap();
 
             // LLM 重试时重新序列化 styles_json（键序/空白变化）：语义同值必须仍判 no-op，
             // 不得误报 LINK_SEQ_TAKEN（adversarial 发现的回归）。
-            let s = apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
-                link_seq: 0, name: None, src_sync_name: "0".into(), dst_sync_name: "1".into(),
-                styles_json: r#"{ "speed": 1000, "leftLabel": "P1" }"#.into(),
-            })).await.unwrap();
+            let s = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_sync_name: "0".into(),
+                    dst_sync_name: "1".into(),
+                    styles_json: r#"{ "speed": 1000, "leftLabel": "P1" }"#.into(),
+                }),
+            )
+            .await
+            .unwrap();
             assert_eq!(s.rows_affected, 0);
 
             // 语义不同的 JSON 仍是异值碰撞。
-            let err = apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
-                link_seq: 0, name: None, src_sync_name: "0".into(), dst_sync_name: "1".into(),
-                styles_json: r#"{"leftLabel":"P1","speed":100}"#.into(),
-            })).await.unwrap_err();
+            let err = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_sync_name: "0".into(),
+                    dst_sync_name: "1".into(),
+                    styles_json: r#"{"leftLabel":"P1","speed":100}"#.into(),
+                }),
+            )
+            .await
+            .unwrap_err();
             assert!(matches!(err, OpError::LinkSeqTaken(_)));
         });
     }
@@ -652,19 +901,49 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                sync_name: "0".into(), x: 0.0, y: 0.0,
-                node_type: None, insert_order: 0,
-            })).await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    sync_name: "0".into(),
+                    x: 0.0,
+                    y: 0.0,
+                    node_type: None,
+                    insert_order: 0,
+                }),
+            )
+            .await
+            .unwrap();
             // self-loop（src==dst）端点计数 expected=1：节点存在即通过悬空校验。
-            let s = apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
-                link_seq: 0, name: None, src_sync_name: "0".into(), dst_sync_name: "0".into(), styles_json: "{}".into(),
-            })).await.unwrap();
+            let s = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_sync_name: "0".into(),
+                    dst_sync_name: "0".into(),
+                    styles_json: "{}".into(),
+                }),
+            )
+            .await
+            .unwrap();
             assert_eq!(s.rows_affected, 1);
             // 节点不存在的 self-loop 仍被拦截。
-            let err = apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
-                link_seq: 1, name: None, src_sync_name: "9".into(), dst_sync_name: "9".into(), styles_json: "{}".into(),
-            })).await.unwrap_err();
+            let err = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 1,
+                    name: None,
+                    src_sync_name: "9".into(),
+                    dst_sync_name: "9".into(),
+                    styles_json: "{}".into(),
+                }),
+            )
+            .await
+            .unwrap_err();
             assert!(matches!(err, OpError::UnknownNode(_)));
         });
     }
@@ -674,9 +953,19 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
-            let err = apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
-                link_seq: 0, name: None, src_sync_name: "7".into(), dst_sync_name: "8".into(), styles_json: "{}".into(),
-            })).await.unwrap_err();
+            let err = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_sync_name: "7".into(),
+                    dst_sync_name: "8".into(),
+                    styles_json: "{}".into(),
+                }),
+            )
+            .await
+            .unwrap_err();
             assert!(matches!(err, OpError::UnknownNode(_)));
             assert_eq!(err.code(), "UNKNOWN_NODE");
         });
@@ -688,25 +977,64 @@ mod tests {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
             for order in [0_i64, 1] {
-                apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                    sync_name: order.to_string(), x: 0.0, y: 0.0,
-                    node_type: None, insert_order: order,
-                })).await.unwrap();
+                apply_op(
+                    &mut tx,
+                    "s1",
+                    &TopologyOp::NodeAdd(NodeAddArgs {
+                        name: None,
+                        sync_name: order.to_string(),
+                        x: 0.0,
+                        y: 0.0,
+                        node_type: None,
+                        insert_order: order,
+                    }),
+                )
+                .await
+                .unwrap();
             }
-            apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
-                link_seq: 0, name: None, src_sync_name: "0".into(), dst_sync_name: "1".into(), styles_json: "{}".into(),
-            })).await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_sync_name: "0".into(),
+                    dst_sync_name: "1".into(),
+                    styles_json: "{}".into(),
+                }),
+            )
+            .await
+            .unwrap();
 
-            let err = apply_op(&mut *tx, "s1", &TopologyOp::NodeDelete(NodeDeleteArgs { sync_name: "0".into() }))
-                .await.unwrap_err();
+            let err = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeDelete(NodeDeleteArgs {
+                    sync_name: "0".into(),
+                }),
+            )
+            .await
+            .unwrap_err();
             assert!(matches!(err, OpError::NodeHasLinks(_)));
             assert_eq!(err.code(), "NODE_HAS_LINKS");
 
             // 先删链路再删节点 → 成功。
-            apply_op(&mut *tx, "s1", &TopologyOp::LinkDelete(LinkDeleteArgs { link_seq: 0 }))
-                .await.unwrap();
-            let s = apply_op(&mut *tx, "s1", &TopologyOp::NodeDelete(NodeDeleteArgs { sync_name: "0".into() }))
-                .await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkDelete(LinkDeleteArgs { link_seq: 0 }),
+            )
+            .await
+            .unwrap();
+            let s = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeDelete(NodeDeleteArgs {
+                    sync_name: "0".into(),
+                }),
+            )
+            .await
+            .unwrap();
             assert_eq!(s.rows_affected, 1);
         });
     }
@@ -718,22 +1046,56 @@ mod tests {
             let mut tx = pool.begin().await.unwrap();
 
             // 先 seed 两端点节点（topology_links 无 FK 到 topology_nodes，但语义需要）
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                sync_name: "0".into(), x: 0.0, y: 0.0,
-                node_type: None, insert_order: 0,
-            })).await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                sync_name: "1".into(), x: 1.0, y: 1.0,
-                node_type: None, insert_order: 1,
-            })).await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    sync_name: "0".into(),
+                    x: 0.0,
+                    y: 0.0,
+                    node_type: None,
+                    insert_order: 0,
+                }),
+            )
+            .await
+            .unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    sync_name: "1".into(),
+                    x: 1.0,
+                    y: 1.0,
+                    node_type: None,
+                    insert_order: 1,
+                }),
+            )
+            .await
+            .unwrap();
 
-            apply_op(&mut *tx, "s1", &TopologyOp::LinkAdd(LinkAddArgs {
-                link_seq: 0, name: None, src_sync_name: "0".into(), dst_sync_name: "1".into(),
-                styles_json: "{}".into(),
-            })).await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_sync_name: "0".into(),
+                    dst_sync_name: "1".into(),
+                    styles_json: "{}".into(),
+                }),
+            )
+            .await
+            .unwrap();
 
-            let s = apply_op(&mut *tx, "s1", &TopologyOp::LinkDelete(LinkDeleteArgs { link_seq: 0 }))
-                .await.unwrap();
+            let s = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkDelete(LinkDeleteArgs { link_seq: 0 }),
+            )
+            .await
+            .unwrap();
             assert_eq!(s.op_kind, "link.delete");
             assert_eq!(s.rows_affected, 1);
             tx.commit().await.unwrap();
@@ -746,10 +1108,19 @@ mod tests {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
             // 更新不存在的目标是逻辑错误（非重试场景），必须报 NOT_FOUND。
-            let err = apply_op(&mut *tx, "s1", &TopologyOp::NodeUpdate(NodeUpdateArgs { name: None,
-                sync_name: "999".into(),
-                x: None, y: None, node_type: None,
-            })).await.unwrap_err();
+            let err = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeUpdate(NodeUpdateArgs {
+                    name: None,
+                    sync_name: "999".into(),
+                    x: None,
+                    y: None,
+                    node_type: None,
+                }),
+            )
+            .await
+            .unwrap_err();
             assert!(matches!(err, OpError::NotFound(_)));
             assert_eq!(err.code(), "NOT_FOUND");
         });
@@ -761,8 +1132,13 @@ mod tests {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
             // 幂等：删除不存在的链路 = no-op 成功（重试安全），rows_affected=0。
-            let s = apply_op(&mut *tx, "s1", &TopologyOp::LinkDelete(LinkDeleteArgs { link_seq: 999 }))
-                .await.unwrap();
+            let s = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkDelete(LinkDeleteArgs { link_seq: 999 }),
+            )
+            .await
+            .unwrap();
             assert_eq!(s.op_kind, "link.delete");
             assert_eq!(s.rows_affected, 0);
         });
@@ -773,28 +1149,56 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut tx = pool.begin().await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeAdd(NodeAddArgs { name: None,
-                sync_name: "5".into(), x: 1.0, y: 2.0,
-                node_type: None, insert_order: 0,
-            })).await.unwrap();
-            apply_op(&mut *tx, "s1", &TopologyOp::NodeUpdate(NodeUpdateArgs { name: None,
-                sync_name: "5".into(),
-                x: None, y: Some(9.0), node_type: Some("switch".into()),
-            })).await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    sync_name: "5".into(),
+                    x: 1.0,
+                    y: 2.0,
+                    node_type: None,
+                    insert_order: 0,
+                }),
+            )
+            .await
+            .unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeUpdate(NodeUpdateArgs {
+                    name: None,
+                    sync_name: "5".into(),
+                    x: None,
+                    y: Some(9.0),
+                    node_type: Some("switch".into()),
+                }),
+            )
+            .await
+            .unwrap();
             tx.commit().await.unwrap();
 
             let row = sqlx::query("SELECT x, y, node_type FROM topology_nodes WHERE session_id='s1' AND sync_name='5'")
                 .fetch_one(&pool).await.unwrap();
             assert_eq!(row.get::<f64, _>("x"), 1.0); // 未提供 x → 保留
             assert_eq!(row.get::<f64, _>("y"), 9.0); // 提供 y → 更新
-            assert_eq!(row.get::<Option<String>, _>("node_type").as_deref(), Some("switch"));
+            assert_eq!(
+                row.get::<Option<String>, _>("node_type").as_deref(),
+                Some("switch")
+            );
         });
     }
 
     #[test]
     fn op_error_maps_to_http_codes() {
-        assert_eq!(OpError::NotFound("x".into()).http_status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(OpError::Database("y".into()).http_status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            OpError::NotFound("x".into()).http_status(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            OpError::Database("y".into()).http_status(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+        );
         assert_eq!(OpError::NotFound("x".into()).code(), "NOT_FOUND");
         assert_eq!(OpError::Database("y".into()).code(), "DATABASE_ERROR");
         assert_eq!(OpError::UnknownNode("z".into()).code(), "UNKNOWN_NODE");

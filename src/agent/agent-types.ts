@@ -7,8 +7,8 @@
  */
 
 import type { DiagnosticLogRepository } from "../diagnostics/diagnostic-log-repository";
-import type { TsnSession } from "../sessions/session-repository";
 import type { WorkflowState, WorkflowStep } from "../project/project-state";
+import type { TsnSession } from "../sessions/session-repository";
 import type { ToolCallRecord } from "./tool-call-record";
 
 export type AgentEventKind =

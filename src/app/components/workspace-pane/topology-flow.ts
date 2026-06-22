@@ -1,5 +1,9 @@
 import type { Edge, Node } from "@xyflow/react";
-import type { TopologyLinkRow, TopologyNodeRow, TopologyRowSnapshot } from "../../../sessions/topology-snapshot";
+import type {
+  TopologyLinkRow,
+  TopologyNodeRow,
+  TopologyRowSnapshot,
+} from "../../../sessions/topology-snapshot";
 
 /**
  * Plan 2026-06-11-001：DB 快照 → React Flow 的纯函数映射层。
@@ -86,10 +90,16 @@ export function nodeTypeToken(nodeType: string | null): TsnNodeKind {
   return "endSystem";
 }
 
-export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): { nodes: Node[]; edges: Edge[] } {
+export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): {
+  nodes: Node[];
+  edges: Edge[];
+} {
   // 标签防撞序数：按 DB 初始坐标统计每个节点每个方位的边数（linkSeq 序确定性）。
   const centers = new Map(
-    snapshot.nodes.map((node) => [node.syncName, { x: node.x + NODE_W / 2, y: node.y + NODE_H / 2 }]),
+    snapshot.nodes.map((node) => [
+      node.syncName,
+      { x: node.x + NODE_W / 2, y: node.y + NODE_H / 2 },
+    ]),
   );
   const sideCounter = new Map<string, number>();
   const takeOrd = (syncName: string, otherSyncName: string): number => {

@@ -19,7 +19,9 @@ describe("app diagnostics helpers", () => {
   });
 
   it("redacts user intent previews", () => {
-    expect(userIntentPreview("api_key=sk-ant-secret 我需要4个交换机").preview).not.toContain("sk-ant-secret");
+    expect(userIntentPreview("api_key=sk-ant-secret 我需要4个交换机").preview).not.toContain(
+      "sk-ant-secret",
+    );
   });
 
   it("logs best-effort without awaiting callers", () => {
@@ -32,6 +34,10 @@ describe("app diagnostics helpers", () => {
 
     logDiagnostic(repository, { sessionId: "session-1", category: "session", message: "保存会话" });
 
-    expect(append).toHaveBeenCalledWith({ sessionId: "session-1", category: "session", message: "保存会话" });
+    expect(append).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      category: "session",
+      message: "保存会话",
+    });
   });
 });

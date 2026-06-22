@@ -1,8 +1,8 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { AgentEvent, TopologyVerifyResult } from "../agent/agent-types";
-import { truncateResultForStorage, type ToolCallRecord } from "../agent/tool-call-record";
+import { type ToolCallRecord, truncateResultForStorage } from "../agent/tool-call-record";
 import { normalizePlannerRunState, type PlannerRunState } from "../planner/planner-contract";
 import { normalizeWorkflowState, type WorkflowState } from "../project/project-state";
-import { invoke } from "@tauri-apps/api/core";
 
 const STORAGE_KEY = "tsn-agent.sessions.v0";
 const CURRENT_SESSION_KEY = "tsn-agent.current-session.v0";
@@ -98,7 +98,9 @@ export class BrowserSessionRepository implements SessionRepository {
 
   async save(session: TsnSession): Promise<void> {
     const sessions = this.readSessions().filter((candidate) => candidate.id !== session.id);
-    this.writeSessions([redactSessionForStorage(session), ...sessions].slice(0, MAX_RECENT_SESSIONS));
+    this.writeSessions(
+      [redactSessionForStorage(session), ...sessions].slice(0, MAX_RECENT_SESSIONS),
+    );
     this.storage.setItem(CURRENT_SESSION_KEY, session.id);
   }
 
@@ -153,7 +155,10 @@ export class BrowserSessionRepository implements SessionRepository {
   }
 
   private writeSessions(sessions: TsnSession[]): void {
-    this.storage.setItem(STORAGE_KEY, JSON.stringify(sortSessions(sessions).slice(0, MAX_RECENT_SESSIONS)));
+    this.storage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(sortSessions(sessions).slice(0, MAX_RECENT_SESSIONS)),
+    );
   }
 }
 
@@ -245,7 +250,8 @@ export function createEmptySession(): TsnSession {
         id: createId("message"),
         role: "assistant",
         createdAt: now,
-        content: "告诉我你想搭建的 TSN 网络规模，我会按步骤给出拓扑、时间同步、流量规划和配置下发准备。",
+        content:
+          "告诉我你想搭建的 TSN 网络规模，我会按步骤给出拓扑、时间同步、流量规划和配置下发准备。",
       },
     ],
     agentEvents: [],
@@ -255,9 +261,10 @@ export function createEmptySession(): TsnSession {
 }
 
 export function createId(prefix: string): string {
-  const random = typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2);
+  const random =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
 
   return `${prefix}-${random}`;
 }
@@ -269,7 +276,9 @@ export function redactSessionForStorage(session: TsnSession): TsnSession {
     messages: session.messages.map((message) => ({
       ...message,
       content: redactSecrets(message.content),
-      ...(message.toolCalls ? { toolCalls: dropRunningToolCalls(message.toolCalls).map(redactToolCallForStorage) } : {}),
+      ...(message.toolCalls
+        ? { toolCalls: dropRunningToolCalls(message.toolCalls).map(redactToolCallForStorage) }
+        : {}),
     })),
     agentEvents: session.agentEvents.map((event) => ({
       ...event,
@@ -323,7 +332,8 @@ function normalizeSession(session: TsnSession): TsnSession {
     agentEvents: session.agentEvents ?? [],
     workflow: normalizeWorkflowState(session.workflow),
     plannerRun: normalizePlannerRunState(session.plannerRun),
-    topologyMutationId: typeof session.topologyMutationId === "number" ? session.topologyMutationId : undefined,
+    topologyMutationId:
+      typeof session.topologyMutationId === "number" ? session.topologyMutationId : undefined,
   };
 }
 
@@ -338,8 +348,14 @@ function sortSessions(sessions: TsnSession[]): TsnSession[] {
 export function redactSecrets(value: string): string {
   return value
     .replace(/(sk-ant-[A-Za-z0-9_-]+)/g, "[redacted]")
-    .replace(/((?:api[_-]?key|token|secret|password|claude_api_key)\s*[:=]\s*)([^\s,;]+)/gi, "$1[redacted]")
-    .replace(/("(?:accessToken|refreshToken|authToken|apiKey|api_key|token|secret|password)"\s*:\s*")([^"]+)(")/gi, "$1[redacted]$3")
+    .replace(
+      /((?:api[_-]?key|token|secret|password|claude_api_key)\s*[:=]\s*)([^\s,;]+)/gi,
+      "$1[redacted]",
+    )
+    .replace(
+      /("(?:accessToken|refreshToken|authToken|apiKey|api_key|token|secret|password)"\s*:\s*")([^"]+)(")/gi,
+      "$1[redacted]$3",
+    )
     .replace(/(Authorization\s*:\s*Bearer\s+)([^\s,;]+)/gi, "$1[redacted]");
 }
 
@@ -364,7 +380,11 @@ function dropRunningToolCalls(toolCalls: ToolCallRecord[]): ToolCallRecord[] {
  */
 function redactToolCallForStorage(record: ToolCallRecord): ToolCallRecord {
   const { value, truncated } = truncateResultForStorage(record.result);
-  return redactSecretsInValue({ ...record, result: value, resultTruncated: truncated }) as ToolCallRecord;
+  return redactSecretsInValue({
+    ...record,
+    result: value,
+    resultTruncated: truncated,
+  }) as ToolCallRecord;
 }
 
 /**

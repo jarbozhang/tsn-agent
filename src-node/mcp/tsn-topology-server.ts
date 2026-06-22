@@ -1,7 +1,7 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { readSidecarEnv } from "./sidecar-client";
 import { createTopologyToolRegistry } from "./topology-tools";
 

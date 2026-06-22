@@ -1,4 +1,4 @@
-import { renderHook, act } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentRunController } from "./use-agent-run-controller";
 
@@ -151,15 +151,24 @@ describe("useAgentRunController", () => {
     let scrollTopVal = 700; // 700 + 300(clientHeight) = 1000(scrollHeight) → 距底 0，粘底
     Object.defineProperty(el, "scrollHeight", { get: () => 1000 });
     Object.defineProperty(el, "clientHeight", { get: () => 300 });
-    Object.defineProperty(el, "scrollTop", { get: () => scrollTopVal, set: (v: number) => { scrollTopVal = v; } });
-    const scrollToSpy = vi.fn((opts: { top: number }) => { scrollTopVal = opts.top; });
+    Object.defineProperty(el, "scrollTop", {
+      get: () => scrollTopVal,
+      set: (v: number) => {
+        scrollTopVal = v;
+      },
+    });
+    const scrollToSpy = vi.fn((opts: { top: number }) => {
+      scrollTopVal = opts.top;
+    });
     (el as unknown as { scrollTo: typeof scrollToSpy }).scrollTo = scrollToSpy;
 
     const { result, rerender } = renderHook(
       ({ deps }: { deps: unknown[] }) => useAgentRunController({ scrollDeps: deps }),
       { initialProps: { deps: ["s1", 0] as unknown[] } },
     );
-    act(() => { result.current.scrollContainerRef.current = el; });
+    act(() => {
+      result.current.scrollContainerRef.current = el;
+    });
 
     // 新消息到达且用户在底部 → 自动滚到底。
     rerender({ deps: ["s1", 1] });
@@ -167,7 +176,9 @@ describe("useAgentRunController", () => {
 
     // 用户上滚阅读 → 释放粘底。
     scrollTopVal = 0;
-    act(() => { el.dispatchEvent(new Event("scroll")); });
+    act(() => {
+      el.dispatchEvent(new Event("scroll"));
+    });
 
     // 流式继续来新内容 → 尊重用户位置，不再自动滚。
     scrollToSpy.mockClear();
@@ -176,7 +187,9 @@ describe("useAgentRunController", () => {
 
     // 用户提交新需求（startRun）→ 重新粘底，下一轮内容滚到底。
     scrollToSpy.mockClear();
-    act(() => { result.current.actions.startRun(); });
+    act(() => {
+      result.current.actions.startRun();
+    });
     rerender({ deps: ["s1", 3] });
     expect(scrollToSpy).toHaveBeenCalledWith({ top: 1000, behavior: "auto" });
   });
@@ -186,19 +199,30 @@ describe("useAgentRunController", () => {
     let scrollTopVal = 0; // 距底 700 → 释放粘底
     Object.defineProperty(el, "scrollHeight", { get: () => 1000 });
     Object.defineProperty(el, "clientHeight", { get: () => 300 });
-    Object.defineProperty(el, "scrollTop", { get: () => scrollTopVal, set: (v: number) => { scrollTopVal = v; } });
-    const scrollToSpy = vi.fn((opts: { top: number }) => { scrollTopVal = opts.top; });
+    Object.defineProperty(el, "scrollTop", {
+      get: () => scrollTopVal,
+      set: (v: number) => {
+        scrollTopVal = v;
+      },
+    });
+    const scrollToSpy = vi.fn((opts: { top: number }) => {
+      scrollTopVal = opts.top;
+    });
     (el as unknown as { scrollTo: typeof scrollToSpy }).scrollTo = scrollToSpy;
 
     const { result, rerender } = renderHook(
       ({ deps }: { deps: unknown[] }) => useAgentRunController({ scrollDeps: deps }),
       { initialProps: { deps: ["s1", 0] as unknown[] } },
     );
-    act(() => { result.current.scrollContainerRef.current = el; });
+    act(() => {
+      result.current.scrollContainerRef.current = el;
+    });
 
     // 在 s1 里用户上滚释放粘底。
     rerender({ deps: ["s1", 1] });
-    act(() => { el.dispatchEvent(new Event("scroll")); });
+    act(() => {
+      el.dispatchEvent(new Event("scroll"));
+    });
     scrollToSpy.mockClear();
 
     // 切换到 s2 → 会话 id 变化，强制回到底部。

@@ -26,14 +26,14 @@ export function readSidecarEnv(): SidecarEnv {
   const url = process.env.TSN_AGENT_DB_RPC_URL;
   const token = process.env.TSN_AGENT_DB_RPC_TOKEN;
   const sessionId = process.env.TSN_AGENT_SESSION_ID;
-  const missing: string[] = [];
-  if (!url) missing.push("TSN_AGENT_DB_RPC_URL");
-  if (!token) missing.push("TSN_AGENT_DB_RPC_TOKEN");
-  if (!sessionId) missing.push("TSN_AGENT_SESSION_ID");
-  if (missing.length > 0) {
+  if (!url || !token || !sessionId) {
+    const missing: string[] = [];
+    if (!url) missing.push("TSN_AGENT_DB_RPC_URL");
+    if (!token) missing.push("TSN_AGENT_DB_RPC_TOKEN");
+    if (!sessionId) missing.push("TSN_AGENT_SESSION_ID");
     throw new Error(`tsn_topology MCP 服务无法启动：缺少必需环境变量 ${missing.join(", ")}`);
   }
-  return { url: url!, token: token!, sessionId: sessionId! };
+  return { url, token, sessionId };
 }
 
 export interface FetchSidecarOptions {

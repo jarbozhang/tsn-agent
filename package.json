@@ -9,6 +9,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
+    "format": "biome format --write",
     "e2e": "playwright test",
     "cargo:test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "verify:skills": "node scripts/verify-skills.mjs",
@@ -31,6 +34,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.0",
     "@playwright/test": "^1.56.1",
     "@tauri-apps/cli": "^2.9.2",
     "@testing-library/jest-dom": "^6.9.1",

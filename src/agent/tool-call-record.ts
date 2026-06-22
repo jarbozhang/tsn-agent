@@ -75,14 +75,17 @@ export function toFriendlyToolName(name: string): string {
 /** 折叠态一行摘要：失败给错误摘要；成功优先从 args、再从 result 探测显著字段。 */
 export function buildToolSummary(raw: RawToolCall): string {
   if (raw.status === "error") {
-    const detail = salientString(raw.result, ERROR_SUMMARY_MAX_LENGTH)
-      ?? salientString(raw.args, ERROR_SUMMARY_MAX_LENGTH);
+    const detail =
+      salientString(raw.result, ERROR_SUMMARY_MAX_LENGTH) ??
+      salientString(raw.args, ERROR_SUMMARY_MAX_LENGTH);
     return detail ? `失败：${detail}` : "失败";
   }
 
-  return salientString(raw.args, SUMMARY_MAX_LENGTH)
-    ?? salientString(raw.result, SUMMARY_MAX_LENGTH)
-    ?? "已完成";
+  return (
+    salientString(raw.args, SUMMARY_MAX_LENGTH) ??
+    salientString(raw.result, SUMMARY_MAX_LENGTH) ??
+    "已完成"
+  );
 }
 
 /** 给 raw 记录补 friendlyName + summary。不在此截断 result（截断只在存储层）。 */
@@ -108,7 +111,7 @@ export function truncateResultForStorage(
 
   let serialized: string;
   try {
-    serialized = typeof result === "string" ? result : JSON.stringify(result) ?? "";
+    serialized = typeof result === "string" ? result : (JSON.stringify(result) ?? "");
   } catch {
     return { value: "[结果无法序列化，已截断]", truncated: true };
   }

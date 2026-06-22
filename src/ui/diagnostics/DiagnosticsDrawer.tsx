@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { DiagnosticLogEntry } from "../../diagnostics/diagnostic-log";
 import type { DiagnosticLogRepository } from "../../diagnostics/diagnostic-log-repository";
 import { redactProviderNamesForDisplay, redactProviderNamesInValue } from "../display-redaction";
@@ -54,9 +54,15 @@ export function DiagnosticsLogView({ sessionId, repository }: DiagnosticsLogView
         </button>
       </div>
 
-      {error && <div className="diagnostics-error">日志加载失败：{redactProviderNamesForDisplay(error)}</div>}
+      {error && (
+        <div className="diagnostics-error">
+          日志加载失败：{redactProviderNamesForDisplay(error)}
+        </div>
+      )}
       {!error && logs.length === 0 && (
-        <div className="empty-panel mono">{isLoading ? "正在加载日志" : "当前会话暂无诊断日志"}</div>
+        <div className="empty-panel mono">
+          {isLoading ? "正在加载日志" : "当前会话暂无诊断日志"}
+        </div>
       )}
       {!error && logs.length > 0 && (
         <div className="master-detail-layout diagnostics-detail-layout">
@@ -66,7 +72,7 @@ export function DiagnosticsLogView({ sessionId, repository }: DiagnosticsLogView
                 <button
                   className={`diagnostics-item master-list-item ${log.level} ${selectedLog?.id === log.id ? "active" : ""}`}
                   type="button"
-                  aria-selected={selectedLog?.id === log.id}
+                  aria-current={selectedLog?.id === log.id}
                   onClick={() => setSelectedLogId(log.id)}
                 >
                   <div className="diagnostics-row">
@@ -108,8 +114,14 @@ function DiagnosticLogDetail({ log }: { log?: DiagnosticLogEntry }) {
       <div className="detail-grid">
         <DetailField label="类别" value={categoryLabel(log.category)} />
         <DetailField label="时间" value={formatDateTime(log.createdAt)} />
-        <DetailField label="Run" value={log.runId ? redactProviderNamesForDisplay(log.runId) : "无"} />
-        <DetailField label="耗时" value={typeof log.durationMs === "number" ? `${log.durationMs}ms` : "无"} />
+        <DetailField
+          label="Run"
+          value={log.runId ? redactProviderNamesForDisplay(log.runId) : "无"}
+        />
+        <DetailField
+          label="耗时"
+          value={typeof log.durationMs === "number" ? `${log.durationMs}ms` : "无"}
+        />
       </div>
       {log.details ? (
         <pre className="diagnostics-detail-json">

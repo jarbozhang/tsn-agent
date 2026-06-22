@@ -1,14 +1,19 @@
+import type { WorkflowStageSummary } from "../agent/workflow-stage-result";
 import {
   DEFAULT_SCENARIO_CONFIG_ID,
-  WORKFLOW_STEPS,
   resolveScenarioConfig,
+  WORKFLOW_STEPS,
   type WorkflowStep,
 } from "../domain/scenario-config";
-import type { WorkflowStageSummary } from "../agent/workflow-stage-result";
 
 export type { WorkflowStep };
 
-export type WorkflowStepStatus = "locked" | "current" | "waiting_confirmation" | "confirmed" | "error";
+export type WorkflowStepStatus =
+  | "locked"
+  | "current"
+  | "waiting_confirmation"
+  | "confirmed"
+  | "error";
 
 export interface WorkflowStageState {
   step: WorkflowStep;
@@ -44,7 +49,9 @@ export type WorkflowAction =
   | "send-planning"
   | "quick-generate";
 
-export function createInitialWorkflowState(scenarioConfigId: string = DEFAULT_SCENARIO_CONFIG_ID): WorkflowState {
+export function createInitialWorkflowState(
+  scenarioConfigId: string = DEFAULT_SCENARIO_CONFIG_ID,
+): WorkflowState {
   const configId = resolveScenarioConfig(scenarioConfigId).config.id;
   const stages = Object.fromEntries(
     WORKFLOW_STEPS.map((step, index) => [
@@ -98,12 +105,15 @@ export function normalizeWorkflowState(
     scenarioConfigId: configId,
     currentStep,
     stages,
-    availableActions: state.availableActions?.length ? state.availableActions : actionsForStage(stages[currentStep]),
+    availableActions: state.availableActions?.length
+      ? state.availableActions
+      : actionsForStage(stages[currentStep]),
     // 回退目标与触发原话绑定持久化：目标无效则原话也一并丢弃。
     ...(isWorkflowStep(state.pendingStageChange)
       ? {
           pendingStageChange: state.pendingStageChange,
-          ...(typeof state.pendingStageChangeIntent === "string" && state.pendingStageChangeIntent.length > 0
+          ...(typeof state.pendingStageChangeIntent === "string" &&
+          state.pendingStageChangeIntent.length > 0
             ? { pendingStageChangeIntent: state.pendingStageChangeIntent }
             : {}),
         }
@@ -123,7 +133,8 @@ export function recordStageResult(
 ): WorkflowState {
   const step = input.step ?? workflow.currentStep;
   const createdAt = input.createdAt ?? new Date().toISOString();
-  const status: WorkflowStepStatus = input.waitingConfirmation === false ? "current" : "waiting_confirmation";
+  const status: WorkflowStepStatus =
+    input.waitingConfirmation === false ? "current" : "waiting_confirmation";
   const stages = updateStagesForCurrentStep(workflow.stages, step);
 
   return {
@@ -156,7 +167,10 @@ export function clearPendingStageChange(workflow: WorkflowState): WorkflowState 
   return rest;
 }
 
-export function confirmCurrentStage(workflow: WorkflowState, createdAt = new Date().toISOString()): WorkflowState {
+export function confirmCurrentStage(
+  workflow: WorkflowState,
+  createdAt = new Date().toISOString(),
+): WorkflowState {
   const currentStep = workflow.currentStep;
   const stage = workflow.stages[currentStep];
 
@@ -261,7 +275,10 @@ function updateStagesForCurrentStep(
       const existing = stages[candidate];
 
       if (index < stepIndex) {
-        return [candidate, existing.status === "locked" ? { ...existing, status: "confirmed" } : existing];
+        return [
+          candidate,
+          existing.status === "locked" ? { ...existing, status: "confirmed" } : existing,
+        ];
       }
 
       if (candidate === step) {

@@ -44,15 +44,17 @@ describe("useTopologySnapshot", () => {
   });
 
   function mockCommands(queryImpl: (sessionId: string) => Promise<unknown>) {
-    invokeMock.mockImplementation(async (command: string, args?: { request?: { sessionId?: string } }) => {
-      if (command === "query_topology") {
-        return queryImpl(args?.request?.sessionId ?? "unknown");
-      }
-      if (command === "get_topology_mutations_since") {
-        return { mutations: [], latest: 0, outOfRange: false };
-      }
-      throw new Error(`unexpected command: ${command}`);
-    });
+    invokeMock.mockImplementation(
+      async (command: string, args?: { request?: { sessionId?: string } }) => {
+        if (command === "query_topology") {
+          return queryImpl(args?.request?.sessionId ?? "unknown");
+        }
+        if (command === "get_topology_mutations_since") {
+          return { mutations: [], latest: 0, outOfRange: false };
+        }
+        throw new Error(`unexpected command: ${command}`);
+      },
+    );
   }
 
   it("fetches the snapshot on mount", async () => {

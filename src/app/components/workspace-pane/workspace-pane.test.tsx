@@ -16,7 +16,15 @@ vi.mock("@xyflow/react", () => ({
   Background: () => null,
   Controls: () => null,
   Handle: () => null,
-  BaseEdge: ({ id, path, interactionWidth }: { id?: string; path: string; interactionWidth?: number }) => (
+  BaseEdge: ({
+    id,
+    path,
+    interactionWidth,
+  }: {
+    id?: string;
+    path: string;
+    interactionWidth?: number;
+  }) => (
     <span
       data-testid={`base-edge-${id ?? "edge"}`}
       data-path={path}
@@ -35,7 +43,10 @@ vi.mock("@xyflow/react", () => ({
     selectionOnDrag?: boolean;
     multiSelectionKeyCode?: string | null;
     fitView?: boolean;
-    onInit?: (instance: { fitView: () => void; setCenter: (x: number, y: number, options?: unknown) => Promise<boolean> }) => void;
+    onInit?: (instance: {
+      fitView: () => void;
+      setCenter: (x: number, y: number, options?: unknown) => Promise<boolean>;
+    }) => void;
     onNodeClick?: (event: unknown, node: { id: string }) => void;
     onEdgeClick?: (event: unknown, edge: { id: string }) => void;
     onNodeDragStart?: (event: unknown, node: unknown) => void;
@@ -78,7 +89,11 @@ vi.mock("@xyflow/react", () => ({
           </button>
         ))}
         {nodes.map((node) => (
-          <button key={`start-${node.id}`} type="button" onClick={() => onNodeDragStart?.({}, node)}>
+          <button
+            key={`start-${node.id}`}
+            type="button"
+            onClick={() => onNodeDragStart?.({}, node)}
+          >
             拖起节点 {node.id}
           </button>
         ))}
@@ -104,18 +119,23 @@ vi.mock("@xyflow/react", () => ({
   },
 }));
 
+import type { TopologyNodeRow, TopologyRowSnapshot } from "../../../sessions/topology-snapshot";
 import {
   nodeRowLabel,
   nodeTypeToken,
   parseLinkStyles,
   planeClassName,
+  type TsnEdgeData,
   topologySnapshotToReactFlow,
   WorkspacePane,
-  type TsnEdgeData,
   type WorkspacePaneProps,
 } from "./index";
-import { floatingEdgeAnchors, portLabelPoint, straightFloatingEdgePath, TsnFloatingEdge } from "./tsn-floating-edge";
-import type { TopologyNodeRow, TopologyRowSnapshot } from "../../../sessions/topology-snapshot";
+import {
+  floatingEdgeAnchors,
+  portLabelPoint,
+  straightFloatingEdgePath,
+  TsnFloatingEdge,
+} from "./tsn-floating-edge";
 
 function sampleSnapshot(): TopologyRowSnapshot {
   return {
@@ -332,7 +352,11 @@ describe("WorkspacePane 拖动持久化（U4）", () => {
     const commitNodePosition = vi.fn(async () => ({ mutationId: 5 }));
     const { rerender } = render(
       <WorkspacePane
-        {...baseProps({ topologySnapshot: sampleSnapshot(), lastMutationId: 4, commitNodePosition })}
+        {...baseProps({
+          topologySnapshot: sampleSnapshot(),
+          lastMutationId: 4,
+          commitNodePosition,
+        })}
       />,
     );
     await user.click(screen.getByRole("button", { name: "拖毕节点 2" }));
@@ -355,7 +379,11 @@ describe("WorkspacePane 拖动持久化（U4）", () => {
     const commitNodePosition = vi.fn(async () => ({ mutationId: 5 }));
     const { rerender } = render(
       <WorkspacePane
-        {...baseProps({ topologySnapshot: sampleSnapshot(), lastMutationId: 4, commitNodePosition })}
+        {...baseProps({
+          topologySnapshot: sampleSnapshot(),
+          lastMutationId: 4,
+          commitNodePosition,
+        })}
       />,
     );
     expect(flowMocks.setCenter).toHaveBeenCalledTimes(1);
@@ -487,7 +515,9 @@ describe("nodeTypeToken（节点类型视觉系统）", () => {
 
 describe("parseLinkStyles（R7 容错）", () => {
   it("解析 plane 与端口标签", () => {
-    expect(parseLinkStyles('{"plane":"A","leftLabel":"P0","rightLabel":"P1","speed":1000}')).toEqual({
+    expect(
+      parseLinkStyles('{"plane":"A","leftLabel":"P0","rightLabel":"P1","speed":1000}'),
+    ).toEqual({
       plane: "A",
       leftLabel: "P0",
       rightLabel: "P1",
@@ -525,7 +555,14 @@ describe("planeClassName（R3）", () => {
 
 describe("topologySnapshotToReactFlow（U3 映射）", () => {
   function node(id: number, x: number, y: number): TopologyNodeRow {
-    return { syncName: String(id), name: null, x, y, nodeType: id < 10 ? "switch" : "endSystem", insertOrder: id };
+    return {
+      syncName: String(id),
+      name: null,
+      x,
+      y,
+      nodeType: id < 10 ? "switch" : "endSystem",
+      insertOrder: id,
+    };
   }
 
   it("Covers AE1/AE4：floating 边无 handle 绑定、className 三态、存量 p1 标签透传", () => {
@@ -533,15 +570,29 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
       sessionId: "s1",
       nodes: [node(1, 120, 300), node(10, 90, 60)],
       links: [
-        { linkSeq: 0, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: '{"plane":"A","leftLabel":"P0","rightLabel":"P0"}' },
-        { linkSeq: 1, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: '{"leftLabel":"p1","rightLabel":"p2"}' },
+        {
+          linkSeq: 0,
+          name: null,
+          srcSyncName: "10",
+          dstSyncName: "1",
+          stylesJson: '{"plane":"A","leftLabel":"P0","rightLabel":"P0"}',
+        },
+        {
+          linkSeq: 1,
+          name: null,
+          srcSyncName: "10",
+          dstSyncName: "1",
+          stylesJson: '{"leftLabel":"p1","rightLabel":"p2"}',
+        },
         { linkSeq: 2, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: "broken" },
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
     expect(edges.map((e) => e.className)).toEqual(["plane-a", "plane-neutral", "plane-neutral"]);
     expect(edges.every((e) => e.type === "tsnFloating")).toBe(true);
-    expect(edges.every((e) => e.sourceHandle === undefined && e.targetHandle === undefined)).toBe(true);
+    expect(edges.every((e) => e.sourceHandle === undefined && e.targetHandle === undefined)).toBe(
+      true,
+    );
     const legacy = edges[1].data as TsnEdgeData;
     expect(legacy.leftLabel).toBe("p1");
     expect(legacy.rightLabel).toBe("p2");
@@ -552,8 +603,20 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
       sessionId: "s1",
       nodes: [node(1, 120, 300), node(10, 90, 60)],
       links: [
-        { linkSeq: 0, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}' },
-        { linkSeq: 1, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: '{"leftLabel":"P1","rightLabel":"P1"}' },
+        {
+          linkSeq: 0,
+          name: null,
+          srcSyncName: "10",
+          dstSyncName: "1",
+          stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}',
+        },
+        {
+          linkSeq: 1,
+          name: null,
+          srcSyncName: "10",
+          dstSyncName: "1",
+          stylesJson: '{"leftLabel":"P1","rightLabel":"P1"}',
+        },
         { linkSeq: 2, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: "broken" },
       ],
     };

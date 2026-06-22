@@ -167,7 +167,13 @@ pub fn read_skill_file(
     validate_skill_id(&request.skill_id)?;
     let root = resolve_existing_skill_root(&app, &request.skill_id)?;
     let path = resolve_existing_file(&root.path, &request.path)?;
-    read_text_file(&request.skill_id, &root.path, &path, root.writable, root.reason.as_deref())
+    read_text_file(
+        &request.skill_id,
+        &root.path,
+        &path,
+        root.writable,
+        root.reason.as_deref(),
+    )
 }
 
 #[tauri::command]
@@ -185,7 +191,7 @@ pub fn write_skill_file(
             .unwrap_or_else(|| "该 skill 文件目录当前是只读资源，不能保存修改。".to_string()));
     }
 
-    if request.content.as_bytes().len() as u64 > MAX_TEXT_FILE_BYTES {
+    if request.content.len() as u64 > MAX_TEXT_FILE_BYTES {
         return Err("文件内容超过轻量编辑大小限制。".to_string());
     }
 
@@ -206,7 +212,13 @@ pub fn write_skill_file(
         format!("无法保存 skill 文件：{error}")
     })?;
 
-    read_text_file(&request.skill_id, &root.path, &path, root.writable, root.reason.as_deref())
+    read_text_file(
+        &request.skill_id,
+        &root.path,
+        &path,
+        root.writable,
+        root.reason.as_deref(),
+    )
 }
 
 /// R2 恢复内置版本：dryRun=true 仅枚举差异清单，false 执行恢复并重置 manifest。
@@ -218,7 +230,8 @@ pub fn restore_factory_skills(
     request: RestoreFactorySkillsRequest,
 ) -> Result<RestoreFactorySkillsResponse, String> {
     let (dev, app_data, resource) = skill_root_candidates(&app);
-    let (app_data, resource) = restore_guard(dev.as_deref(), app_data.as_deref(), resource.as_deref())?;
+    let (app_data, resource) =
+        restore_guard(dev.as_deref(), app_data.as_deref(), resource.as_deref())?;
     restore_factory_with(
         &app_data,
         &resource,
@@ -348,9 +361,9 @@ fn restore_factory_with(
         files: manifest_files,
         ..FactoryManifest::default()
     };
-    let warning = write_manifest(app_data_root, &manifest)
-        .err()
-        .map(|error| format!("文件已恢复，但记录清单失败（{error}）；不影响使用，下次启动自动校正。"));
+    let warning = write_manifest(app_data_root, &manifest).err().map(|error| {
+        format!("文件已恢复，但记录清单失败（{error}）；不影响使用，下次启动自动校正。")
+    });
 
     Ok(RestoreFactorySkillsResponse {
         dry_run,
@@ -461,7 +474,9 @@ fn resolve_effective_root(
                             path: resource.to_path_buf(),
                             writable: false,
                             status: SkillFileRootStatus::Readonly,
-                            reason: Some(format!("可写 skill 副本不可用（{reason}），当前为内置只读副本。")),
+                            reason: Some(format!(
+                                "可写 skill 副本不可用（{reason}），当前为内置只读副本。"
+                            )),
                         };
                     }
                 }
@@ -711,12 +726,12 @@ fn ensure_seeded_with(
         };
         let hash = sha256_hex(&bytes);
         let recorded = manifest.files.get(*rel);
-        if matches_historical(historical_hashes, rel, &hash) || recorded == Some(&hash) {
-            if std::fs::remove_file(&dst).is_ok() {
-                manifest.files.remove(*rel);
-                manifest.modified.retain(|p| p != rel);
-                changed = true;
-            }
+        if (matches_historical(historical_hashes, rel, &hash) || recorded == Some(&hash))
+            && std::fs::remove_file(&dst).is_ok()
+        {
+            manifest.files.remove(*rel);
+            manifest.modified.retain(|p| p != rel);
+            changed = true;
         }
     }
 
@@ -731,7 +746,10 @@ fn resolve_skill_root(app: &tauri::AppHandle, skill_id: &str) -> Result<SkillRoo
     let effective = effective_skill_root(app);
     let resource_id_dir = app
         .path()
-        .resolve(format!("{PROJECT_SKILL_ROOT}/{skill_id}"), BaseDirectory::Resource)
+        .resolve(
+            format!("{PROJECT_SKILL_ROOT}/{skill_id}"),
+            BaseDirectory::Resource,
+        )
         .ok();
     resolve_skill_root_in(&effective, resource_id_dir.as_deref(), skill_id)
 }
@@ -1043,7 +1061,10 @@ mod tests {
         let files = list_skill_files_for_root(&root, true).expect("list skill files");
 
         assert_eq!(
-            files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(),
+            files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
             vec!["SKILL.md", "docs/rules.md", "tools/run.js"],
         );
         assert!(files.iter().all(|file| file.can_preview));
@@ -1056,8 +1077,11 @@ mod tests {
     fn marks_binary_and_large_files_as_not_previewable() {
         let root = create_test_skill_root();
         std::fs::write(root.join("binary.bin"), [0, 159, 146, 150]).expect("write binary");
-        std::fs::write(root.join("large.txt"), vec![b'a'; (MAX_TEXT_FILE_BYTES + 1) as usize])
-            .expect("write large");
+        std::fs::write(
+            root.join("large.txt"),
+            vec![b'a'; (MAX_TEXT_FILE_BYTES + 1) as usize],
+        )
+        .expect("write large");
 
         let files = list_skill_files_for_root(&root, true).expect("list skill files");
 
@@ -1108,7 +1132,10 @@ mod tests {
         assert_eq!(files.len(), 1);
         assert!(files[0].can_preview);
         assert!(!files[0].can_edit);
-        assert_eq!(files[0].reason.as_deref(), Some("只读 skill 资源不可编辑。"));
+        assert_eq!(
+            files[0].reason.as_deref(),
+            Some("只读 skill 资源不可编辑。")
+        );
 
         cleanup(root);
     }
@@ -1146,7 +1173,10 @@ mod tests {
         std::fs::write(&seeded, "user-edited").expect("user edit");
         let second = resolve_effective_root(None, Some(&app_data), Some(&resource));
         assert!(second.writable);
-        assert_eq!(std::fs::read_to_string(&seeded).expect("seeded"), "user-edited");
+        assert_eq!(
+            std::fs::read_to_string(&seeded).expect("seeded"),
+            "user-edited"
+        );
 
         cleanup(resource);
         cleanup(app_data);
@@ -1213,7 +1243,10 @@ mod tests {
         assert!(!effective.writable);
         assert_eq!(effective.status, SkillFileRootStatus::Readonly);
         assert_eq!(effective.path, resource);
-        assert!(effective.reason.is_some(), "回退必须带原因穿透 readonly_reason");
+        assert!(
+            effective.reason.is_some(),
+            "回退必须带原因穿透 readonly_reason"
+        );
 
         std::fs::set_permissions(&locked_parent, std::fs::Permissions::from_mode(0o755))
             .expect("unlock parent");
@@ -1238,9 +1271,13 @@ mod tests {
         let path = resolve_existing_file(&root, "SKILL.md").expect("resolve file");
 
         let with_root_reason =
-            read_text_file("tsn-topology", &root, &path, false, Some("根级回退原因")).expect("read");
+            read_text_file("tsn-topology", &root, &path, false, Some("根级回退原因"))
+                .expect("read");
         assert!(!with_root_reason.editable);
-        assert_eq!(with_root_reason.readonly_reason.as_deref(), Some("根级回退原因"));
+        assert_eq!(
+            with_root_reason.readonly_reason.as_deref(),
+            Some("根级回退原因")
+        );
 
         let without_root_reason =
             read_text_file("tsn-topology", &root, &path, false, None).expect("read");
@@ -1285,12 +1322,24 @@ mod tests {
         let old_factory_flow = "flow-v1";
         let old_factory_pkg = "{\"type\":\"commonjs\"}";
         write_file(&app_data.join("tsn-topology/SKILL.md"), "user-edited-v1");
-        write_file(&app_data.join("tsn-flow-planning/SKILL.md"), old_factory_flow);
+        write_file(
+            &app_data.join("tsn-flow-planning/SKILL.md"),
+            old_factory_flow,
+        );
         write_file(&app_data.join("tsn-topology/package.json"), old_factory_pkg);
         let historical = [
-            ("tsn-topology/SKILL.md", sha256_hex(old_factory_skill.as_bytes())),
-            ("tsn-flow-planning/SKILL.md", sha256_hex(old_factory_flow.as_bytes())),
-            ("tsn-topology/package.json", sha256_hex(old_factory_pkg.as_bytes())),
+            (
+                "tsn-topology/SKILL.md",
+                sha256_hex(old_factory_skill.as_bytes()),
+            ),
+            (
+                "tsn-flow-planning/SKILL.md",
+                sha256_hex(old_factory_flow.as_bytes()),
+            ),
+            (
+                "tsn-topology/package.json",
+                sha256_hex(old_factory_pkg.as_bytes()),
+            ),
         ];
         let historical_refs: Vec<(&str, &str)> =
             historical.iter().map(|(p, h)| (*p, h.as_str())).collect();
@@ -1304,7 +1353,10 @@ mod tests {
         .expect("seed");
 
         // 缺失补播。
-        assert_eq!(read(&app_data, "tsn-topology/references/aero.md"), "aero-v2");
+        assert_eq!(
+            read(&app_data, "tsn-topology/references/aero.md"),
+            "aero-v2"
+        );
         // 未编辑旧出厂 → 静默更新。
         assert_eq!(read(&app_data, "tsn-flow-planning/SKILL.md"), "flow-v2");
         // 用户改过 → 保留。
@@ -1313,9 +1365,15 @@ mod tests {
         assert!(!app_data.join("tsn-topology/package.json").exists());
         // manifest 落点不在 per-skill 目录内，且记录用户态。
         let manifest = read_manifest(&app_data);
-        assert!(manifest.modified.iter().any(|p| p == "tsn-topology/SKILL.md"));
+        assert!(manifest
+            .modified
+            .iter()
+            .any(|p| p == "tsn-topology/SKILL.md"));
         assert_eq!(
-            manifest.files.get("tsn-flow-planning/SKILL.md").map(String::as_str),
+            manifest
+                .files
+                .get("tsn-flow-planning/SKILL.md")
+                .map(String::as_str),
             Some(sha256_hex("flow-v2".as_bytes()).as_str())
         );
 
@@ -1388,12 +1446,23 @@ mod tests {
         let resource = create_test_skill_root();
         write_file(&resource.join("tsn-topology/SKILL.md"), "factory");
         let app_data = unique_temp_path("tsn-skill-appdata");
-        write_file(&app_data.join("tsn-topology/package.json"), "user-customized");
+        write_file(
+            &app_data.join("tsn-topology/package.json"),
+            "user-customized",
+        );
 
-        ensure_seeded_with(&app_data, Some(&resource), &[], &["tsn-topology/package.json"])
-            .expect("seed");
+        ensure_seeded_with(
+            &app_data,
+            Some(&resource),
+            &[],
+            &["tsn-topology/package.json"],
+        )
+        .expect("seed");
 
-        assert_eq!(read(&app_data, "tsn-topology/package.json"), "user-customized");
+        assert_eq!(
+            read(&app_data, "tsn-topology/package.json"),
+            "user-customized"
+        );
 
         cleanup(resource);
         cleanup(app_data);
@@ -1408,9 +1477,15 @@ mod tests {
         ensure_seeded_with(&app_data, Some(&resource), &[], &[]).expect("first seed");
 
         let dst = app_data.join("tsn-topology/SKILL.md");
-        let before = std::fs::metadata(&dst).expect("meta").modified().expect("mtime");
+        let before = std::fs::metadata(&dst)
+            .expect("meta")
+            .modified()
+            .expect("mtime");
         ensure_seeded_with(&app_data, Some(&resource), &[], &[]).expect("second seed");
-        let after = std::fs::metadata(&dst).expect("meta").modified().expect("mtime");
+        let after = std::fs::metadata(&dst)
+            .expect("meta")
+            .modified()
+            .expect("mtime");
 
         assert_eq!(before, after, "当前出厂内容不得被无谓重写");
 
@@ -1442,7 +1517,10 @@ mod tests {
         assert_eq!(read(&app_data, "tsn-topology/SKILL.md"), "topo-v2");
         assert_eq!(read(&app_data, "tsn-flow-planning/SKILL.md"), old_topo);
         let manifest = read_manifest(&app_data);
-        assert!(manifest.modified.iter().any(|p| p == "tsn-flow-planning/SKILL.md"));
+        assert!(manifest
+            .modified
+            .iter()
+            .any(|p| p == "tsn-flow-planning/SKILL.md"));
 
         cleanup(resource);
         cleanup(app_data);
@@ -1454,7 +1532,10 @@ mod tests {
         let resource = create_test_skill_root();
         write_file(&resource.join("tsn-topology/SKILL.md"), "factory");
         write_file(&resource.join(".DS_Store"), "finder-junk");
-        write_file(&resource.join("tsn-topology/SKILL.tmp-123-456-0"), "stale-tmp");
+        write_file(
+            &resource.join("tsn-topology/SKILL.tmp-123-456-0"),
+            "stale-tmp",
+        );
         let app_data = unique_temp_path("tsn-skill-appdata");
 
         ensure_seeded_with(&app_data, Some(&resource), &[], &[]).expect("seed");
@@ -1463,7 +1544,10 @@ mod tests {
         assert!(!app_data.join(".DS_Store").exists());
         assert!(!app_data.join("tsn-topology/SKILL.tmp-123-456-0").exists());
         let manifest = read_manifest(&app_data);
-        assert!(!manifest.files.keys().any(|k| k.contains(".DS_Store") || k.contains(".tmp-")));
+        assert!(!manifest
+            .files
+            .keys()
+            .any(|k| k.contains(".DS_Store") || k.contains(".tmp-")));
 
         cleanup(resource);
         cleanup(app_data);
@@ -1510,7 +1594,9 @@ mod tests {
 
         assert!(!app_data.join("tsn-topology/references/old.md").exists());
         let manifest = read_manifest(&app_data);
-        assert!(!manifest.files.contains_key("tsn-topology/references/old.md"));
+        assert!(!manifest
+            .files
+            .contains_key("tsn-topology/references/old.md"));
 
         cleanup(resource);
         cleanup(app_data);
@@ -1523,8 +1609,8 @@ mod tests {
         let resource = create_test_skill_root();
 
         // dev 仓库根存在 → 拒绝（无播种副本概念）。
-        let error = restore_guard(Some(&dev), Some(&app_data), Some(&resource))
-            .expect_err("dev rejects");
+        let error =
+            restore_guard(Some(&dev), Some(&app_data), Some(&resource)).expect_err("dev rejects");
         assert!(error.contains("开发模式"));
 
         // app-data 不可定位 → 拒绝。
@@ -1554,20 +1640,22 @@ mod tests {
     fn restore_factory_overwrites_edits_removes_orphans_preserves_custom_files() {
         let resource = create_test_skill_root();
         write_file(&resource.join("tsn-topology/SKILL.md"), "factory");
-        write_file(&resource.join("tsn-topology/references/aero.md"), "aero-factory");
+        write_file(
+            &resource.join("tsn-topology/references/aero.md"),
+            "aero-factory",
+        );
         let app_data = unique_temp_path("tsn-skill-appdata");
         ensure_seeded_with(&app_data, Some(&resource), &[], &[]).expect("seed");
         write_file(&app_data.join("tsn-topology/SKILL.md"), "user-edited");
-        write_file(&app_data.join("tsn-topology/package.json"), "user-customized");
+        write_file(
+            &app_data.join("tsn-topology/package.json"),
+            "user-customized",
+        );
         write_file(&app_data.join("tsn-topology/my-notes.md"), "user-own");
 
-        let result = restore_factory_with(
-            &app_data,
-            &resource,
-            &["tsn-topology/package.json"],
-            false,
-        )
-        .expect("restore");
+        let result =
+            restore_factory_with(&app_data, &resource, &["tsn-topology/package.json"], false)
+                .expect("restore");
 
         // 用户改过的出厂文件 → 覆写回出厂（与播种的保守保留不同：显式确认过）。
         assert_eq!(read(&app_data, "tsn-topology/SKILL.md"), "factory");
@@ -1582,7 +1670,10 @@ mod tests {
         let manifest = read_manifest(&app_data);
         assert!(manifest.modified.is_empty());
         assert_eq!(
-            manifest.files.get("tsn-topology/SKILL.md").map(String::as_str),
+            manifest
+                .files
+                .get("tsn-topology/SKILL.md")
+                .map(String::as_str),
             Some(sha256_hex("factory".as_bytes()).as_str())
         );
 
@@ -1599,13 +1690,9 @@ mod tests {
         write_file(&app_data.join("tsn-topology/package.json"), "{}");
         write_file(&app_data.join("tsn-topology/my-notes.md"), "user-own");
 
-        let result = restore_factory_with(
-            &app_data,
-            &resource,
-            &["tsn-topology/package.json"],
-            true,
-        )
-        .expect("dry run");
+        let result =
+            restore_factory_with(&app_data, &resource, &["tsn-topology/package.json"], true)
+                .expect("dry run");
 
         assert!(result.dry_run);
         assert_eq!(result.restored, vec!["tsn-topology/SKILL.md"]);
@@ -1634,8 +1721,8 @@ mod tests {
         };
         let resource_id = resource.join("tsn-topology");
 
-        let root = resolve_skill_root_in(&effective, Some(&resource_id), "tsn-topology")
-            .expect("resolve");
+        let root =
+            resolve_skill_root_in(&effective, Some(&resource_id), "tsn-topology").expect("resolve");
         assert!(!root.writable);
         assert_eq!(root.status, SkillFileRootStatus::Readonly);
         assert!(root.reason.is_some());

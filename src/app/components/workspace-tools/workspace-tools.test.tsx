@@ -1,9 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { WorkspaceTools, type WorkspaceToolsProps } from "./index";
 import { BrowserDiagnosticLogRepository } from "../../../diagnostics/diagnostic-log-repository";
 import { createEmptySession } from "../../../sessions/session-repository";
+import { WorkspaceTools, type WorkspaceToolsProps } from "./index";
 
 function createMemoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -81,7 +81,11 @@ describe("WorkspaceTools", () => {
     const user = userEvent.setup();
     const onExportSession = vi.fn();
     const onImportSession = vi.fn();
-    render(<WorkspaceTools {...baseProps({ activePanel: "sessions", onExportSession, onImportSession })} />);
+    render(
+      <WorkspaceTools
+        {...baseProps({ activePanel: "sessions", onExportSession, onImportSession })}
+      />,
+    );
     await user.click(screen.getByRole("button", { name: /导出当前/ }));
     expect(onExportSession).toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: /导入会话/ }));
@@ -103,7 +107,12 @@ describe("WorkspaceTools", () => {
           currentSession: session,
           sessions: [session],
           backfillFailures: [
-            { sessionId: session.id, state: "failed", errorCode: "PAYLOAD_NOT_JSON", attemptedAt: "2026-06-07T00:00:00Z" },
+            {
+              sessionId: session.id,
+              state: "failed",
+              errorCode: "PAYLOAD_NOT_JSON",
+              attemptedAt: "2026-06-07T00:00:00Z",
+            },
           ],
         })}
       />,
@@ -122,7 +131,12 @@ describe("WorkspaceTools", () => {
         {...baseProps({
           activePanel: "sessions",
           backfillFailures: [
-            { sessionId: session.id, state: "failed", errorCode: "PAYLOAD_NOT_JSON", attemptedAt: "x" },
+            {
+              sessionId: session.id,
+              state: "failed",
+              errorCode: "PAYLOAD_NOT_JSON",
+              attemptedAt: "x",
+            },
           ],
           onRequestRetry,
         })}
@@ -135,15 +149,25 @@ describe("WorkspaceTools", () => {
   it("会话预览跳过工具消息，回退到最近的自然语言对话", () => {
     const session = createEmptySession();
     session.messages = [
-      { id: "m1", role: "user", content: "在最右边添加一个交换机", createdAt: "2026-06-08T00:00:00Z" },
+      {
+        id: "m1",
+        role: "user",
+        content: "在最右边添加一个交换机",
+        createdAt: "2026-06-08T00:00:00Z",
+      },
       {
         id: "m2",
         role: "assistant",
-        content: '[工具] mcp__tsn_topology__topology_inspect: {}\n[工具结果] mcp__tsn_topology__topology_inspect 已返回: { "ok": true }',
+        content:
+          '[工具] mcp__tsn_topology__topology_inspect: {}\n[工具结果] mcp__tsn_topology__topology_inspect 已返回: { "ok": true }',
         createdAt: "2026-06-08T00:00:01Z",
       },
     ];
-    render(<WorkspaceTools {...baseProps({ activePanel: "sessions", currentSession: session, sessions: [session] })} />);
+    render(
+      <WorkspaceTools
+        {...baseProps({ activePanel: "sessions", currentSession: session, sessions: [session] })}
+      />,
+    );
     expect(screen.getByText("在最右边添加一个交换机")).toBeInTheDocument();
     expect(screen.queryByText(/\[工具\]/)).not.toBeInTheDocument();
   });
@@ -170,7 +194,11 @@ describe("WorkspaceTools", () => {
         ],
       },
     ];
-    render(<WorkspaceTools {...baseProps({ activePanel: "sessions", currentSession: session, sessions: [session] })} />);
+    render(
+      <WorkspaceTools
+        {...baseProps({ activePanel: "sessions", currentSession: session, sessions: [session] })}
+      />,
+    );
     // 预览取自然语言；不读 toolCalls、不展示卡片内容。
     expect(screen.getByText("已为你生成 4 个交换机的拓扑草案。")).toBeInTheDocument();
     expect(screen.queryByText("topology.initialize")).not.toBeInTheDocument();

@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiagnosticLogRepository } from "../diagnostics/diagnostic-log-repository";
-import { createInitialWorkflowState, recordStageResult, type WorkflowState } from "../project/project-state";
+import {
+  createInitialWorkflowState,
+  recordStageResult,
+  type WorkflowState,
+} from "../project/project-state";
 import { createEmptySession, type TsnSession } from "../sessions/session-repository";
 import { createTopologyWorkflowStageResult } from "./topology-workflow-stage-result";
 
@@ -35,13 +39,15 @@ function enableTauriRuntime() {
   });
 }
 
-function mockTauriCommands(options: {
-  claude?: Record<string, unknown>;
-  claudeError?: unknown;
-  topology?: Record<string, unknown>;
-  verify?: Record<string, unknown>;
-  verifyError?: unknown;
-} = {}) {
+function mockTauriCommands(
+  options: {
+    claude?: Record<string, unknown>;
+    claudeError?: unknown;
+    topology?: Record<string, unknown>;
+    verify?: Record<string, unknown>;
+    verifyError?: unknown;
+  } = {},
+) {
   invokeMock.mockImplementation(async (command: string) => {
     if (command === "query_topology") {
       return options.topology ?? { sessionId: "session-1", nodes: [], links: [] };
@@ -71,7 +77,10 @@ function mockTauriCommands(options: {
   });
 }
 
-function sessionWithWorkflow(workflow: WorkflowState, overrides: Partial<TsnSession> = {}): TsnSession {
+function sessionWithWorkflow(
+  workflow: WorkflowState,
+  overrides: Partial<TsnSession> = {},
+): TsnSession {
   return {
     ...createEmptySession(),
     id: "session-1",
@@ -95,7 +104,11 @@ function timeSyncWaitingWorkflow(): WorkflowState {
     stages: {
       ...base.stages,
       topology: { step: "topology", status: "confirmed" },
-      "time-sync": { step: "time-sync", status: "waiting_confirmation", summary: "时间同步默认值。" },
+      "time-sync": {
+        step: "time-sync",
+        status: "waiting_confirmation",
+        summary: "时间同步默认值。",
+      },
     },
   };
 }
@@ -132,9 +145,7 @@ describe("runTsnAgent", () => {
     expect(result.assistantText).toContain("桌面版");
     expect(result.workflow.currentStep).toBe("topology");
     expect(result.events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: "error", title: "需要桌面版" }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ kind: "error", title: "需要桌面版" })]),
     );
   });
 
@@ -142,10 +153,12 @@ describe("runTsnAgent", () => {
     enableTauriRuntime();
     let listenHandler: ((event: { payload: Record<string, unknown> }) => void) | undefined;
     const unlistenMock = vi.fn();
-    listenMock.mockImplementation(async (_name: string, handler: (event: { payload: Record<string, unknown> }) => void) => {
-      listenHandler = handler;
-      return unlistenMock;
-    });
+    listenMock.mockImplementation(
+      async (_name: string, handler: (event: { payload: Record<string, unknown> }) => void) => {
+        listenHandler = handler;
+        return unlistenMock;
+      },
+    );
     invokeMock.mockImplementation(async (command: string) => {
       if (command === "query_topology") {
         return { sessionId: "session-1", nodes: [], links: [] };
@@ -175,7 +188,13 @@ describe("runTsnAgent", () => {
           payload: {
             runId: "run-x",
             kind: "tool_call",
-            toolCall: { id: "toolu-1", name: "Bash", phase: "result", status: "success", result: { ok: true } },
+            toolCall: {
+              id: "toolu-1",
+              name: "Bash",
+              phase: "result",
+              status: "success",
+              result: { ok: true },
+            },
           },
         });
         return { assistantText: "完成。", sessionId: "claude-session-1" };
@@ -208,18 +227,34 @@ describe("runTsnAgent", () => {
   it("ignores malformed or unknown-phase tool_call payloads without throwing (U3)", async () => {
     enableTauriRuntime();
     let listenHandler: ((event: { payload: Record<string, unknown> }) => void) | undefined;
-    listenMock.mockImplementation(async (_name: string, handler: (event: { payload: Record<string, unknown> }) => void) => {
-      listenHandler = handler;
-      return vi.fn();
-    });
+    listenMock.mockImplementation(
+      async (_name: string, handler: (event: { payload: Record<string, unknown> }) => void) => {
+        listenHandler = handler;
+        return vi.fn();
+      },
+    );
     invokeMock.mockImplementation(async (command: string) => {
       if (command === "query_topology") {
         return { sessionId: "session-1", nodes: [], links: [] };
       }
       if (command === "run_claude_agent") {
-        listenHandler?.({ payload: { runId: "run-x", kind: "tool_call", toolCall: { name: "Bash", phase: "start" } } });
-        listenHandler?.({ payload: { runId: "run-x", kind: "tool_call", toolCall: "not-an-object" } });
-        listenHandler?.({ payload: { runId: "run-x", kind: "tool_call", toolCall: { id: "toolu-2", name: "Bash", phase: "later" } } });
+        listenHandler?.({
+          payload: {
+            runId: "run-x",
+            kind: "tool_call",
+            toolCall: { name: "Bash", phase: "start" },
+          },
+        });
+        listenHandler?.({
+          payload: { runId: "run-x", kind: "tool_call", toolCall: "not-an-object" },
+        });
+        listenHandler?.({
+          payload: {
+            runId: "run-x",
+            kind: "tool_call",
+            toolCall: { id: "toolu-2", name: "Bash", phase: "later" },
+          },
+        });
         return { assistantText: "完成。", sessionId: "claude-session-1" };
       }
       throw new Error(`unexpected command: ${command}`);
@@ -333,7 +368,8 @@ describe("runTsnAgent", () => {
     await runTsnAgent({ userIntent: "继续优化拓扑", session });
 
     const call = invokeMock.mock.calls.find(([command]) => command === "run_claude_agent");
-    const context = (call?.[1] as { request: { conversationContext: string } }).request.conversationContext;
+    const context = (call?.[1] as { request: { conversationContext: string } }).request
+      .conversationContext;
     expect(context).toContain("真实自然语言回复。");
     expect(context).not.toContain("[工具]");
   });
@@ -359,7 +395,9 @@ describe("runTsnAgent", () => {
       verify: {
         ok: false,
         caliber: "structural_only",
-        errors: [{ code: "ISOLATED_NODE", messageZh: "ES-2 没连任何线，是个孤立节点。", nodeRef: "2" }],
+        errors: [
+          { code: "ISOLATED_NODE", messageZh: "ES-2 没连任何线，是个孤立节点。", nodeRef: "2" },
+        ],
       },
     });
     const { runTsnAgent } = await import("./agent-adapter");
@@ -670,7 +708,11 @@ describe("runTsnAgent", () => {
     const workflow = createInitialWorkflowState();
     workflow.currentStep = "time-sync";
     workflow.stages.topology = { step: "topology", status: "confirmed" };
-    workflow.stages["time-sync"] = { step: "time-sync", status: "waiting_confirmation", summary: "时间同步默认值。" };
+    workflow.stages["time-sync"] = {
+      step: "time-sync",
+      status: "waiting_confirmation",
+      summary: "时间同步默认值。",
+    };
     const { runTsnAgent } = await import("./agent-adapter");
 
     const result = await runTsnAgent({
@@ -702,7 +744,9 @@ describe("runTsnAgent", () => {
 
   it("sends offline-stage free-form input to the model without rewriting the stage (U4)", async () => {
     enableTauriRuntime();
-    mockTauriCommands({ claude: { assistantText: "流量规划暂时下线。", sessionId: "claude-session-offline" } });
+    mockTauriCommands({
+      claude: { assistantText: "流量规划暂时下线。", sessionId: "claude-session-offline" },
+    });
     const workflow = createInitialWorkflowState();
     workflow.currentStep = "flow-template";
     workflow.stages.topology = { step: "topology", status: "confirmed" };
@@ -730,7 +774,9 @@ describe("runTsnAgent", () => {
       claude: {
         assistantText: "要切回拓扑修改吗？",
         sessionId: "claude-session-edit",
-        stageResults: [{ kind: "stage-change-request", targetStage: "topology", reason: "用户要改交换机数量" }],
+        stageResults: [
+          { kind: "stage-change-request", targetStage: "topology", reason: "用户要改交换机数量" },
+        ],
       },
     });
     const workflow = createInitialWorkflowState();
@@ -911,9 +957,7 @@ describe("runTsnAgent", () => {
           { syncName: "0", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
           { syncName: "1", name: null, x: 1, y: 0, nodeType: null, insertOrder: 1 },
         ],
-        links: [
-          { linkSeq: 0, name: null, srcSyncName: "0", dstSyncName: "1", stylesJson: "{}" },
-        ],
+        links: [{ linkSeq: 0, name: null, srcSyncName: "0", dstSyncName: "1", stylesJson: "{}" }],
       },
     });
     const { runTsnAgent } = await import("./agent-adapter");
@@ -983,7 +1027,9 @@ describe("runTsnAgent", () => {
       claude: {
         assistantText: "要切回拓扑吗？",
         sessionId: "claude-session-switch",
-        stageResults: [{ kind: "stage-change-request", targetStage: "topology", reason: "用户要加设备" }],
+        stageResults: [
+          { kind: "stage-change-request", targetStage: "topology", reason: "用户要加设备" },
+        ],
       },
     });
     const { runTsnAgent } = await import("./agent-adapter");
@@ -1061,9 +1107,7 @@ describe("runTsnAgent", () => {
     expect(result.workflow.currentStep).toBe("time-sync");
     expect(result.workflow.pendingStageChange).toBeUndefined();
     expect(result.events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: "error", title: "无法切换阶段" }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ kind: "error", title: "无法切换阶段" })]),
     );
   });
 
@@ -1085,9 +1129,7 @@ describe("runTsnAgent", () => {
 
     expect(result.workflow.currentStep).toBe("topology");
     expect(result.events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: "error", title: "无法前进" }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ kind: "error", title: "无法前进" })]),
     );
   });
 

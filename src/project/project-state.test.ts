@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { WORKFLOW_STAGE_RESULT_SCHEMA_VERSION, type WorkflowStageSummary } from "../agent/workflow-stage-result";
+import {
+  WORKFLOW_STAGE_RESULT_SCHEMA_VERSION,
+  type WorkflowStageSummary,
+} from "../agent/workflow-stage-result";
 import {
   confirmCurrentStage,
   createInitialWorkflowState,
@@ -51,7 +54,9 @@ describe("workflow state machine", () => {
   });
 
   it("rejects confirmation when the current step is not waiting", () => {
-    expect(() => confirmCurrentStage(createInitialWorkflowState())).toThrow("not waiting for confirmation");
+    expect(() => confirmCurrentStage(createInitialWorkflowState())).toThrow(
+      "not waiting for confirmation",
+    );
   });
 
   it("resets later stages when the user requests changes", () => {
@@ -90,9 +95,12 @@ describe("workflow state machine", () => {
 
   it("round-trips a valid pendingStageChange and drops an invalid one", () => {
     const base = createInitialWorkflowState();
-    expect(normalizeWorkflowState({ ...base, pendingStageChange: "topology" }).pendingStageChange).toBe("topology");
     expect(
-      normalizeWorkflowState({ ...base, pendingStageChange: "bogus-stage" as never }).pendingStageChange,
+      normalizeWorkflowState({ ...base, pendingStageChange: "topology" }).pendingStageChange,
+    ).toBe("topology");
+    expect(
+      normalizeWorkflowState({ ...base, pendingStageChange: "bogus-stage" as never })
+        .pendingStageChange,
     ).toBeUndefined();
   });
 

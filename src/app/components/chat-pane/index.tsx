@@ -1,9 +1,13 @@
 import { Fragment, type RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage } from "../../../sessions/session-repository";
 import type { ScenarioConfig } from "../../../domain/scenario-config";
-import type { WorkflowState, WorkflowStageState, WorkflowStepStatus } from "../../../project/project-state";
+import type {
+  WorkflowStageState,
+  WorkflowState,
+  WorkflowStepStatus,
+} from "../../../project/project-state";
+import type { ChatMessage } from "../../../sessions/session-repository";
 import { redactProviderNamesForDisplay } from "../../../ui/display-redaction";
 import type { AgentRunPhase } from "../../hooks/use-agent-run-controller";
 import { ToolCallCard } from "./tool-call-card";
@@ -57,7 +61,7 @@ export function ChatPane({
         <span className="project-name">当前规划</span>
       </div>
 
-      <div className="chat-stepper" aria-label="配置步骤">
+      <div className="chat-stepper" role="group" aria-label="配置步骤">
         {STEPPER_STEPS.map((step, index, steps) => {
           // Phase B-α：flow-template / planning-export 阶段 aria-disabled + tooltip
           const isFlowStage = step === "flow-template" || step === "planning-export";
@@ -68,10 +72,18 @@ export function ChatPane({
                 label={scenarioConfig.stageLabels[step]}
                 status={workflow.stages[step].status}
                 disabled={isFlowStage}
-                disabledReason={isFlowStage ? "流量规划与规划导出在当前版本暂时下线，预计 v0.X 回归" : undefined}
+                disabledReason={
+                  isFlowStage ? "流量规划与规划导出在当前版本暂时下线，预计 v0.X 回归" : undefined
+                }
               />
               {index < steps.length - 1 && (
-                <span className={workflow.stages[step].status === "confirmed" ? "stepper-conn active" : "stepper-conn"} />
+                <span
+                  className={
+                    workflow.stages[step].status === "confirmed"
+                      ? "stepper-conn active"
+                      : "stepper-conn"
+                  }
+                />
               )}
             </Fragment>
           );
@@ -87,48 +99,58 @@ export function ChatPane({
               : undefined;
           // 远端连不上（inet_unreachable）是环境问题：走中性「暂时无法验证」外观，不套红「验证未通过」
           // （否则误导用户去改一个其实没问题的拓扑）。结构错 / 跑不起来才走红 block。
-          const isEnvIssue = verifyBlock?.errors.some((error) => error.code === "inet_unreachable") ?? false;
+          const isEnvIssue =
+            verifyBlock?.errors.some((error) => error.code === "inet_unreachable") ?? false;
           const showRedBlock = Boolean(verifyBlock) && !isEnvIssue;
           return (
-          <article
-            className={[
-              message.role === "user" ? "msg-user" : "msg-agent",
-              showRedBlock ? "msg-verify-block" : "",
-              verifyBlock && isEnvIssue ? "msg-verify-pending" : "",
-              message.id === pendingAssistantMessageId ? "pending" : "",
-            ].filter(Boolean).join(" ")}
-            key={message.id}
-          >
-            <span className="message-role">{message.role === "user" ? "USER" : "AGENT"}</span>
-            {verifyBlock && (
-              <div className="verify-header">
-                <span className={isEnvIssue ? "caliber-chip caliber-pending" : "caliber-chip caliber-block"}>
-                  {isEnvIssue ? "暂时无法验证" : "验证未通过"} · {caliberLabel(verifyBlock.caliber)}
-                </span>
-              </div>
-            )}
-            {/* Plan 2026-06-10-001 U5：工具事件常先于首个文本 chunk（此时仍是 pending
+            <article
+              className={[
+                message.role === "user" ? "msg-user" : "msg-agent",
+                showRedBlock ? "msg-verify-block" : "",
+                verifyBlock && isEnvIssue ? "msg-verify-pending" : "",
+                message.id === pendingAssistantMessageId ? "pending" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              key={message.id}
+            >
+              <span className="message-role">{message.role === "user" ? "USER" : "AGENT"}</span>
+              {verifyBlock && (
+                <div className="verify-header">
+                  <span
+                    className={
+                      isEnvIssue ? "caliber-chip caliber-pending" : "caliber-chip caliber-block"
+                    }
+                  >
+                    {isEnvIssue ? "暂时无法验证" : "验证未通过"} ·{" "}
+                    {caliberLabel(verifyBlock.caliber)}
+                  </span>
+                </div>
+              )}
+              {/* Plan 2026-06-10-001 U5：工具事件常先于首个文本 chunk（此时仍是 pending
                 态）——卡片在两个分支都渲染；pending 时卡片在上、等待指示器在下。 */}
-            {message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0 && (
-              <div className="tool-call-list">
-                {message.toolCalls.map((record) => (
-                  <ToolCallCard key={record.id} record={record} />
-                ))}
-              </div>
-            )}
-            {message.id === pendingAssistantMessageId ? (
-              <AgentWaitingIndicator />
-            ) : message.role === "assistant" ? (
-              // assistant 输出按 markdown 渲染；用户输入保持纯文本不做解释。
-              <div className="msg-markdown">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {redactProviderNamesForDisplay(message.content)}
-                </ReactMarkdown>
-              </div>
-            ) : (
-              <p>{message.content}</p>
-            )}
-          </article>
+              {message.role === "assistant" &&
+                message.toolCalls &&
+                message.toolCalls.length > 0 && (
+                  <div className="tool-call-list">
+                    {message.toolCalls.map((record) => (
+                      <ToolCallCard key={record.id} record={record} />
+                    ))}
+                  </div>
+                )}
+              {message.id === pendingAssistantMessageId ? (
+                <AgentWaitingIndicator />
+              ) : message.role === "assistant" ? (
+                // assistant 输出按 markdown 渲染；用户输入保持纯文本不做解释。
+                <div className="msg-markdown">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {redactProviderNamesForDisplay(message.content)}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <p>{message.content}</p>
+              )}
+            </article>
           );
         })}
       </div>
@@ -155,7 +177,12 @@ export function ChatPane({
                 </>
               )}
             </div>
-            <button className="btn-primary" type="button" onClick={onConfirm} disabled={isAgentRunning}>
+            <button
+              className="btn-primary"
+              type="button"
+              onClick={onConfirm}
+              disabled={isAgentRunning}
+            >
               确认并继续
             </button>
           </div>
@@ -200,7 +227,12 @@ export function ChatPane({
             }}
             rows={3}
           />
-          <button type="button" aria-label="生成规划草案" onClick={onSubmit} disabled={isAgentRunning || !input.trim()}>
+          <button
+            type="button"
+            aria-label="生成规划草案"
+            onClick={onSubmit}
+            disabled={isAgentRunning || !input.trim()}
+          >
             <TelegramSendIcon />
           </button>
         </div>
@@ -219,7 +251,12 @@ export function AgentRunStatusBar({
   const message = getAgentRunStatusMessage(phase);
 
   return (
-    <div className={`agent-run-status ${phase}`} role="status" aria-live="polite" data-testid="agent-run-status">
+    <div
+      className={`agent-run-status ${phase}`}
+      role="status"
+      aria-live="polite"
+      data-testid="agent-run-status"
+    >
       <span className="agent-waiting-dots" aria-hidden="true">
         <span />
         <span />

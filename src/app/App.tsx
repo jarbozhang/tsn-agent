@@ -1,43 +1,44 @@
-import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { type Edge, type Node } from "@xyflow/react";
+import type { Edge, Node } from "@xyflow/react";
+import { useEffect, useState } from "react";
 import "@xyflow/react/dist/style.css";
 import { runTsnAgent } from "../agent/agent-adapter";
 import type { ToolCallRecord } from "../agent/tool-call-record";
-import {
-  logDiagnostic,
-  sessionSummary,
-  userIntentPreview,
-} from "../diagnostics/app-diagnostics";
+import tsnAgentMark from "../assets/tsn-agent-mark.png";
+import { logDiagnostic, sessionSummary, userIntentPreview } from "../diagnostics/app-diagnostics";
 import {
   createDiagnosticLogRepository,
   type DiagnosticLogRepository,
 } from "../diagnostics/diagnostic-log-repository";
-import { redactProviderNamesForDisplay } from "../ui/display-redaction";
 import { getScenarioConfig } from "../domain/scenario-config";
 import { appVersion } from "../release/release-info";
 import {
+  type ChatMessage,
   createId,
   createSessionRepository,
-  type ChatMessage,
   type SessionRepository,
   type TsnSession,
 } from "../sessions/session-repository";
 import { isEmptyTopologySnapshot } from "../sessions/topology-snapshot";
-import { useTopologySnapshot } from "./hooks/use-topology-snapshot";
-import { useSessionRepository } from "./hooks/use-session-repository";
-import { useAgentRunController } from "./hooks/use-agent-run-controller";
-import { useBackfillFailures } from "./hooks/use-backfill-failures";
-import { exportCurrentSession, importSessionFromFile, revealExportedFile, type TransferNotice } from "./session-transfer";
 import { ConfirmDialog } from "../ui/confirm-dialog";
-import { ChatPane, AgentRunStatusBar } from "./components/chat-pane";
+import { redactProviderNamesForDisplay } from "../ui/display-redaction";
+import { AgentRunStatusBar, ChatPane } from "./components/chat-pane";
 import {
-  WorkspacePane,
   type ConfigTabId,
   type SelectedTopologyItem,
+  WorkspacePane,
 } from "./components/workspace-pane";
-import { WorkspaceTools, type WorkspaceToolPanel } from "./components/workspace-tools";
-import tsnAgentMark from "../assets/tsn-agent-mark.png";
+import { type WorkspaceToolPanel, WorkspaceTools } from "./components/workspace-tools";
+import { useAgentRunController } from "./hooks/use-agent-run-controller";
+import { useBackfillFailures } from "./hooks/use-backfill-failures";
+import { useSessionRepository } from "./hooks/use-session-repository";
+import { useTopologySnapshot } from "./hooks/use-topology-snapshot";
+import {
+  exportCurrentSession,
+  importSessionFromFile,
+  revealExportedFile,
+  type TransferNotice,
+} from "./session-transfer";
 
 const repository: SessionRepository = createSessionRepository();
 const diagnosticsRepository: DiagnosticLogRepository = createDiagnosticLogRepository();
@@ -58,7 +59,9 @@ export function App() {
     handleDeleteSession: deleteSession,
   } = useSessionRepository({ repository, diagnostics: diagnosticsRepository });
   const [input, setInput] = useState("");
-  const [activeWorkspacePanel, setActiveWorkspacePanel] = useState<WorkspaceToolPanel | undefined>();
+  const [activeWorkspacePanel, setActiveWorkspacePanel] = useState<
+    WorkspaceToolPanel | undefined
+  >();
   const {
     isAgentRunning,
     agentRunPhase,
@@ -68,8 +71,14 @@ export function App() {
     actions: agentRun,
   } = useAgentRunController({ scrollDeps: [currentSession.id, currentSession.messages] });
   const [activeConfigTab, setActiveConfigTab] = useState<ConfigTabId>("node-detail");
-  const [selectedTopologyItem, setSelectedTopologyItem] = useState<SelectedTopologyItem | undefined>();
-  const { snapshot: topologySnapshot, refetch: refetchTopology, lastMutationId } = useTopologySnapshot(currentSession.id);
+  const [selectedTopologyItem, setSelectedTopologyItem] = useState<
+    SelectedTopologyItem | undefined
+  >();
+  const {
+    snapshot: topologySnapshot,
+    refetch: refetchTopology,
+    lastMutationId,
+  } = useTopologySnapshot(currentSession.id);
   const [transferNotice, setTransferNotice] = useState<TransferNotice | undefined>();
   const [retryTargetId, setRetryTargetId] = useState<string | undefined>();
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -92,9 +101,10 @@ export function App() {
       return;
     }
 
-    const stillExists = selectedTopologyItem.kind === "node"
-      ? topologySnapshot.nodes.some((node) => node.syncName === selectedTopologyItem.id)
-      : topologySnapshot.links.some((link) => `link-${link.linkSeq}` === selectedTopologyItem.id);
+    const stillExists =
+      selectedTopologyItem.kind === "node"
+        ? topologySnapshot.nodes.some((node) => node.syncName === selectedTopologyItem.id)
+        : topologySnapshot.links.some((link) => `link-${link.linkSeq}` === selectedTopologyItem.id);
 
     if (!stillExists) {
       setSelectedTopologyItem(undefined);
@@ -169,7 +179,11 @@ export function App() {
           agentRun.markStreaming();
           agentRun.recordChunkAt(Date.now());
           agentRun.setPendingAssistantMessageId(undefined);
-          updateAssistantMessage(pendingSession.id, assistantMessage.id, redactProviderNamesForDisplay(streamedText));
+          updateAssistantMessage(
+            pendingSession.id,
+            assistantMessage.id,
+            redactProviderNamesForDisplay(streamedText),
+          );
         },
         onToolCall: (record) => {
           const previous = streamedToolCalls.get(record.id);
@@ -178,16 +192,26 @@ export function App() {
           streamedToolCalls.set(
             record.id,
             previous
-              ? { ...previous, ...record, summary: record.status === "error" ? record.summary : previous.summary }
+              ? {
+                  ...previous,
+                  ...record,
+                  summary: record.status === "error" ? record.summary : previous.summary,
+                }
               : record,
           );
           agentRun.markStreaming();
-          updateAssistantToolCalls(pendingSession.id, assistantMessage.id, [...streamedToolCalls.values()]);
+          updateAssistantToolCalls(pendingSession.id, assistantMessage.id, [
+            ...streamedToolCalls.values(),
+          ]);
         },
       });
       const completedAt = new Date().toISOString();
-      const latestSession = (await repository.list()).find((session) => session.id === pendingSession.id) ?? pendingSession;
-      const baseMessages = latestSession.messages.some((message) => message.id === assistantMessage.id)
+      const latestSession =
+        (await repository.list()).find((session) => session.id === pendingSession.id) ??
+        pendingSession;
+      const baseMessages = latestSession.messages.some(
+        (message) => message.id === assistantMessage.id,
+      )
         ? latestSession.messages
         : pendingSession.messages;
       const nextSession: TsnSession = {
@@ -204,7 +228,10 @@ export function App() {
             : message,
         ),
         claudeSessionId: result.claudeSessionId ?? latestSession.claudeSessionId,
-        agentEvents: [...latestSession.agentEvents, ...stampAgentEvents(result.events, completedAt)],
+        agentEvents: [
+          ...latestSession.agentEvents,
+          ...stampAgentEvents(result.events, completedAt),
+        ],
         workflow: result.workflow,
         topologyMutationId: result.topologyMutationId ?? latestSession.topologyMutationId,
       };
@@ -246,7 +273,10 @@ export function App() {
           ...pendingSession,
           messages: pendingSession.messages.map((message) =>
             message.id === assistantMessage.id
-              ? { ...message, content: `本次生成失败：${redactProviderNamesForDisplay(normalizeError(error))}` }
+              ? {
+                  ...message,
+                  content: `本次生成失败：${redactProviderNamesForDisplay(normalizeError(error))}`,
+                }
               : message,
           ),
         };
@@ -317,7 +347,9 @@ export function App() {
     const outcome = await importSessionFromFile();
     if (outcome.status === "done") {
       await reloadSessionsList();
-      const imported = (await repository.list()).find((session) => session.id === outcome.sessionId);
+      const imported = (await repository.list()).find(
+        (session) => session.id === outcome.sessionId,
+      );
       if (imported) {
         await repository.setCurrent(imported.id);
         setCurrentSession(imported);
@@ -479,7 +511,10 @@ function normalizeError(error: unknown): string {
   return "未知错误";
 }
 
-function stampAgentEvents<T extends { id: string; createdAt?: string }>(events: T[], createdAt: string): T[] {
+function stampAgentEvents<T extends { id: string; createdAt?: string }>(
+  events: T[],
+  createdAt: string,
+): T[] {
   return events.map((event, index) => ({
     ...event,
     id: `${event.id}-${createdAt.replace(/[^0-9A-Za-z]/g, "")}-${index}`,

@@ -5,7 +5,7 @@
 // 故打包态由 worker 显式 pathToClaudeCodeExecutable 指向这个复制出来的副本。
 // 本地 + CI 的 build:worker 都跑此脚本，保证 tauri resources 引用的目录始终存在。
 
-import { existsSync, mkdirSync, copyFileSync, statSync, chmodSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 

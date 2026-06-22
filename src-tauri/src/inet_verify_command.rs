@@ -15,7 +15,9 @@ use sqlx::Row;
 use crate::inet_bundle::build_inet_bundle;
 use crate::inet_remote::{RemoteConfig, RemoteError, RemoteRunner, SshRunner};
 use crate::session_store::SessionStore;
-use crate::topology_verify::{VerifyError, VerifyLink, VerifyNode, VerifyResult, CALIBER_LOADABILITY_ONLY};
+use crate::topology_verify::{
+    VerifyError, VerifyLink, VerifyNode, VerifyResult, CALIBER_LOADABILITY_ONLY,
+};
 
 /// 纯编排：序列化 → 远端跑 → 判定。不读库、不碰 Tauri，便于注入 runner 单测。
 pub fn run_inet_verification(
@@ -29,7 +31,13 @@ pub fn run_inet_verification(
     let bundle = match build_inet_bundle(nodes, links, session_id, source_mutation_id) {
         Ok(b) => b,
         // 类型映射不出 → 发 INET 前就报，runner 不被调用（AE8）。
-        Err(errors) => return VerifyResult { ok: false, caliber: CALIBER_LOADABILITY_ONLY, errors },
+        Err(errors) => {
+            return VerifyResult {
+                ok: false,
+                caliber: CALIBER_LOADABILITY_ONLY,
+                errors,
+            }
+        }
     };
 
     match runner.run_bundle(&bundle, cfg) {
@@ -38,19 +46,27 @@ pub fn run_inet_verification(
             caliber: CALIBER_LOADABILITY_ONLY,
             errors: vec![VerifyError {
                 code: "inet_unreachable".to_string(),
-                message_zh: format!("校验暂时无法运行：连不上远端 INET，右侧工程保持原状态，未推进。（{msg}）"),
+                message_zh: format!(
+                    "校验暂时无法运行：连不上远端 INET，右侧工程保持原状态，未推进。（{msg}）"
+                ),
                 node_ref: None,
             }],
         },
         Ok(outcome) => match outcome.exit_code {
-            Some(0) => VerifyResult { ok: true, caliber: CALIBER_LOADABILITY_ONLY, errors: vec![] },
+            Some(0) => VerifyResult {
+                ok: true,
+                caliber: CALIBER_LOADABILITY_ONLY,
+                errors: vec![],
+            },
             // 拿不到退出码（进程被杀等）→ 当环境问题，不诬陷拓扑（SshRunner 通常已把 255/None 归不可达）。
             None => VerifyResult {
                 ok: false,
                 caliber: CALIBER_LOADABILITY_ONLY,
                 errors: vec![VerifyError {
                     code: "inet_unreachable".to_string(),
-                    message_zh: "校验暂时无法运行：远端 INET 未返回退出码，右侧工程保持原状态，未推进。".to_string(),
+                    message_zh:
+                        "校验暂时无法运行：远端 INET 未返回退出码，右侧工程保持原状态，未推进。"
+                            .to_string(),
                     node_ref: None,
                 }],
             },
@@ -59,7 +75,10 @@ pub fn run_inet_verification(
                 caliber: CALIBER_LOADABILITY_ONLY,
                 errors: vec![VerifyError {
                     code: "inet_load_failed".to_string(),
-                    message_zh: format!("拓扑在 INET 上跑不起来（退出码 {code}）。{}", outcome.output_tail),
+                    message_zh: format!(
+                        "拓扑在 INET 上跑不起来（退出码 {code}）。{}",
+                        outcome.output_tail
+                    ),
                     node_ref: None,
                 }],
             },
@@ -124,7 +143,14 @@ pub async fn verify_inet(
     let (nodes, links) = load_topology_rows(pool, &request.session_id).await?;
     let cfg = RemoteConfig::dev_default();
     // TODO（执行期）：sourceMutationId 接库内当前 mutationId；本期占位 0（不影响加载冒烟）。
-    Ok(run_inet_verification(&nodes, &links, &request.session_id, 0, &SshRunner, &cfg))
+    Ok(run_inet_verification(
+        &nodes,
+        &links,
+        &request.session_id,
+        0,
+        &SshRunner,
+        &cfg,
+    ))
 }
 
 #[cfg(test)]
@@ -136,7 +162,11 @@ mod tests {
     use std::time::Duration;
 
     fn node(sync: &str, ty: &str) -> VerifyNode {
-        VerifyNode { sync_name: sync.into(), name: None, node_type: Some(ty.into()) }
+        VerifyNode {
+            sync_name: sync.into(),
+            name: None,
+            node_type: Some(ty.into()),
+        }
     }
     fn link(seq: i64, src: &str, dst: &str) -> VerifyLink {
         VerifyLink {
@@ -148,8 +178,10 @@ mod tests {
     }
     fn cfg() -> RemoteConfig {
         RemoteConfig {
-            host: "h".into(), user: "u".into(),
-            remote_base_dir: "/b".into(), inet_path: "/i".into(),
+            host: "h".into(),
+            user: "u".into(),
+            remote_base_dir: "/b".into(),
+            inet_path: "/i".into(),
             timeout: Duration::from_secs(1),
         }
     }
@@ -161,17 +193,36 @@ mod tests {
     }
     impl StubRunner {
         fn ok(exit: i32) -> Self {
-            Self { calls: Cell::new(0), outcome: Ok(RemoteRunOutcome { exit_code: Some(exit), output_tail: "tail".into() }) }
+            Self {
+                calls: Cell::new(0),
+                outcome: Ok(RemoteRunOutcome {
+                    exit_code: Some(exit),
+                    output_tail: "tail".into(),
+                }),
+            }
         }
         fn unreachable() -> Self {
-            Self { calls: Cell::new(0), outcome: Err(RemoteError::Unreachable("connect timeout".into())) }
+            Self {
+                calls: Cell::new(0),
+                outcome: Err(RemoteError::Unreachable("connect timeout".into())),
+            }
         }
         fn no_exit_code() -> Self {
-            Self { calls: Cell::new(0), outcome: Ok(RemoteRunOutcome { exit_code: None, output_tail: "".into() }) }
+            Self {
+                calls: Cell::new(0),
+                outcome: Ok(RemoteRunOutcome {
+                    exit_code: None,
+                    output_tail: "".into(),
+                }),
+            }
         }
     }
     impl RemoteRunner for StubRunner {
-        fn run_bundle(&self, _b: &InetBundle, _c: &RemoteConfig) -> Result<RemoteRunOutcome, RemoteError> {
+        fn run_bundle(
+            &self,
+            _b: &InetBundle,
+            _c: &RemoteConfig,
+        ) -> Result<RemoteRunOutcome, RemoteError> {
             self.calls.set(self.calls.get() + 1);
             match &self.outcome {
                 Ok(o) => Ok(o.clone()),
@@ -182,7 +233,14 @@ mod tests {
 
     #[test]
     fn unmappable_type_blocks_before_remote_call() {
-        let nodes = vec![node("0", "switch"), VerifyNode { sync_name: "1".into(), name: None, node_type: None }];
+        let nodes = vec![
+            node("0", "switch"),
+            VerifyNode {
+                sync_name: "1".into(),
+                name: None,
+                node_type: None,
+            },
+        ];
         let links = vec![link(0, "0", "1")];
         let runner = StubRunner::ok(0);
         let r = run_inet_verification(&nodes, &links, "s", 0, &runner, &cfg());

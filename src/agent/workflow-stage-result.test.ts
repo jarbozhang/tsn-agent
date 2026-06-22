@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  WORKFLOW_STAGE_RESULT_SCHEMA_VERSION,
   parseWorkflowStageResult,
   summarizeWorkflowStageResult,
-  validateWorkflowStageResult,
   type TopologyWorkflowStageResult,
+  validateWorkflowStageResult,
+  WORKFLOW_STAGE_RESULT_SCHEMA_VERSION,
 } from "./workflow-stage-result";
 
-function topologyWorkflowResult(overrides: Partial<TopologyWorkflowStageResult> = {}): TopologyWorkflowStageResult {
+function topologyWorkflowResult(
+  overrides: Partial<TopologyWorkflowStageResult> = {},
+): TopologyWorkflowStageResult {
   return {
     schemaVersion: WORKFLOW_STAGE_RESULT_SCHEMA_VERSION,
     stage: "topology",
@@ -50,7 +52,9 @@ describe("workflow stage result contract", () => {
   });
 
   it("summarizes results without payload", () => {
-    const summary = summarizeWorkflowStageResult(parseWorkflowStageResult(topologyWorkflowResult()));
+    const summary = summarizeWorkflowStageResult(
+      parseWorkflowStageResult(topologyWorkflowResult()),
+    );
 
     expect(summary).toMatchObject({
       schemaVersion: WORKFLOW_STAGE_RESULT_SCHEMA_VERSION,
@@ -64,51 +68,63 @@ describe("workflow stage result contract", () => {
   });
 
   it("rejects legacy stage-skill-result.v0 schema", () => {
-    expect(validateWorkflowStageResult({
-      schemaVersion: "tsn-agent.stage-skill-result.v0",
-      stage: "topology",
-      skillName: "tsn-topology",
-      status: "success",
-      summary: "旧拓扑结果。",
-      validation: { ok: true, errors: [] },
-      payload: { kind: "topology" },
-    })).toMatchObject({
+    expect(
+      validateWorkflowStageResult({
+        schemaVersion: "tsn-agent.stage-skill-result.v0",
+        stage: "topology",
+        skillName: "tsn-topology",
+        status: "success",
+        summary: "旧拓扑结果。",
+        validation: { ok: true, errors: [] },
+        payload: { kind: "topology" },
+      }),
+    ).toMatchObject({
       ok: false,
       errors: [expect.stringContaining("Unsupported workflow stage schemaVersion")],
     });
   });
 
   it("rejects topology payload without a positive mutationId", () => {
-    expect(validateWorkflowStageResult(topologyWorkflowResult({
-      payload: {
-        kind: "topology",
-        sessionId: "session-1",
-        mutationId: 0,
-      },
-    }))).toMatchObject({
+    expect(
+      validateWorkflowStageResult(
+        topologyWorkflowResult({
+          payload: {
+            kind: "topology",
+            sessionId: "session-1",
+            mutationId: 0,
+          },
+        }),
+      ),
+    ).toMatchObject({
       ok: false,
       errors: [expect.stringContaining("payload.mutationId must be a positive integer")],
     });
   });
 
   it("rejects flow-template stage results while the stage is offline", () => {
-    expect(validateWorkflowStageResult({
-      ...topologyWorkflowResult(),
-      stage: "flow-template",
-      payload: { kind: "flow-template" },
-    })).toMatchObject({
+    expect(
+      validateWorkflowStageResult({
+        ...topologyWorkflowResult(),
+        stage: "flow-template",
+        payload: { kind: "flow-template" },
+      }),
+    ).toMatchObject({
       ok: false,
       errors: [expect.stringContaining("flow-template 阶段结果暂未启用")],
     });
   });
 
   it("rejects success results when validation is false", () => {
-    expect(validateWorkflowStageResult(topologyWorkflowResult({
-      validation: {
-        ok: false,
-        errors: ["拓扑不完整。"],
-      },
-    }))).toEqual({
+    expect(
+      validateWorkflowStageResult(
+        topologyWorkflowResult({
+          validation: {
+            ok: false,
+            errors: ["拓扑不完整。"],
+          },
+        }),
+      ),
+    ).toEqual({
       ok: false,
       errors: ["validation.ok must be true when status is success.", "拓扑不完整。"],
     });

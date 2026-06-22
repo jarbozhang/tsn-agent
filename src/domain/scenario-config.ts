@@ -1,4 +1,9 @@
-export const WORKFLOW_STEPS = ["topology", "time-sync", "flow-template", "planning-export"] as const;
+export const WORKFLOW_STEPS = [
+  "topology",
+  "time-sync",
+  "flow-template",
+  "planning-export",
+] as const;
 
 export type WorkflowStep = (typeof WORKFLOW_STEPS)[number];
 
@@ -86,7 +91,8 @@ export const SCENARIO_CONFIGS: Record<ScenarioConfigId, ScenarioConfig> = {
       "planning-export": "配置下发",
     },
     defaults: {
-      timeSyncSummary: "默认采用全网统一时钟假设，优先保留 GM 选择、同步域和从端口关系的后续扩展位置。",
+      timeSyncSummary:
+        "默认采用全网统一时钟假设，优先保留 GM 选择、同步域和从端口关系的后续扩展位置。",
     },
     flowTemplates: [
       {

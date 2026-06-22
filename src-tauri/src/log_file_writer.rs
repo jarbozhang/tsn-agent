@@ -55,7 +55,9 @@ fn session_dir(app: &tauri::AppHandle, session_id: &str) -> Result<PathBuf, Stri
 }
 
 fn run_log_path(dir: &Path, run_id: Option<&str>) -> PathBuf {
-    let safe = run_id.map(sanitize_segment).unwrap_or_else(|| "unknown".to_string());
+    let safe = run_id
+        .map(sanitize_segment)
+        .unwrap_or_else(|| "unknown".to_string());
     dir.join(format!("agent-run-{safe}.jsonl"))
 }
 
@@ -121,8 +123,8 @@ impl LogFileWriter {
             .open(&path)
             .map_err(|error| format!("无法打开日志文件 {}：{error}", path.display()))?;
 
-        let line = serde_json::to_string(&entry)
-            .map_err(|error| format!("日志序列化失败：{error}"))?;
+        let line =
+            serde_json::to_string(&entry).map_err(|error| format!("日志序列化失败：{error}"))?;
         writeln!(file, "{line}").map_err(|error| format!("日志写入失败：{error}"))?;
 
         Ok(())
@@ -170,8 +172,7 @@ impl LogFileWriter {
         let _guard = self.inner.lock().await;
         let dir = session_dir(app, session_id)?;
         if dir.exists() {
-            fs::remove_dir_all(&dir)
-                .map_err(|error| format!("无法删除会话日志目录：{error}"))?;
+            fs::remove_dir_all(&dir).map_err(|error| format!("无法删除会话日志目录：{error}"))?;
         }
         Ok(())
     }
@@ -205,7 +206,9 @@ fn redact_and_truncate(value: &str, max_chars: usize) -> String {
 }
 
 fn estimate_entry_bytes(entry: &DiagnosticLogEntry) -> u64 {
-    serde_json::to_string(entry).map(|s| (s.len() + 1) as u64).unwrap_or(512)
+    serde_json::to_string(entry)
+        .map(|s| (s.len() + 1) as u64)
+        .unwrap_or(512)
 }
 
 #[cfg(test)]
@@ -217,7 +220,11 @@ mod tests {
     fn write_directly(dir: &Path, run_id: &str, line: &str) {
         fs::create_dir_all(dir).unwrap();
         let path = dir.join(format!("agent-run-{run_id}.jsonl"));
-        let mut f = OpenOptions::new().create(true).append(true).open(path).unwrap();
+        let mut f = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap();
         writeln!(f, "{line}").unwrap();
     }
 
@@ -271,8 +278,13 @@ mod tests {
         );
         let mut entries = Vec::new();
         for dirent in fs::read_dir(&dir).unwrap().flatten() {
-            for line in BufReader::new(File::open(dirent.path()).unwrap()).lines().map_while(Result::ok) {
-                if line.trim().is_empty() { continue; }
+            for line in BufReader::new(File::open(dirent.path()).unwrap())
+                .lines()
+                .map_while(Result::ok)
+            {
+                if line.trim().is_empty() {
+                    continue;
+                }
                 entries.push(serde_json::from_str::<DiagnosticLogEntry>(&line).unwrap());
             }
         }

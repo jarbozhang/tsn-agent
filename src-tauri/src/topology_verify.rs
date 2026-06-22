@@ -33,7 +33,11 @@ pub struct VerifyError {
 
 impl VerifyError {
     fn new(code: &str, message_zh: String, node_ref: Option<String>) -> Self {
-        Self { code: code.to_string(), message_zh, node_ref }
+        Self {
+            code: code.to_string(),
+            message_zh,
+            node_ref,
+        }
     }
 }
 
@@ -79,7 +83,10 @@ fn display_name(node: &VerifyNode) -> String {
 }
 
 fn is_known_role(node_type: Option<&str>) -> bool {
-    matches!(node_type, Some(NODE_TYPE_SWITCH | NODE_TYPE_END_SYSTEM | NODE_TYPE_SERVER))
+    matches!(
+        node_type,
+        Some(NODE_TYPE_SWITCH | NODE_TYPE_END_SYSTEM | NODE_TYPE_SERVER)
+    )
 }
 
 /// 结构 + MAC 可达校验。errors 为空即 ok。caliber 恒 structural_only。
@@ -93,7 +100,11 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
             "还没有拓扑可验，请先生成拓扑。".to_string(),
             None,
         ));
-        return VerifyResult { ok: false, caliber: CALIBER_STRUCTURAL_ONLY, errors };
+        return VerifyResult {
+            ok: false,
+            caliber: CALIBER_STRUCTURAL_ONLY,
+            errors,
+        };
     }
 
     let by_sync: HashMap<&str, &VerifyNode> =
@@ -116,7 +127,10 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
         if !is_known_role(node.node_type.as_deref()) {
             errors.push(VerifyError::new(
                 "UNKNOWN_NODE_ROLE",
-                format!("{} 的类型未知，无法判断它是交换机还是端系统。", display_name(node)),
+                format!(
+                    "{} 的类型未知，无法判断它是交换机还是端系统。",
+                    display_name(node)
+                ),
                 Some(node.sync_name.clone()),
             ));
         }
@@ -139,7 +153,10 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
         if !name.starts_with(prefix) {
             errors.push(VerifyError::new(
                 "NODE_NAME_PREFIX",
-                format!("{}（编号 {}）的名字 {} 不规范，应以 {} 开头。", role_label, node.sync_name, name, prefix),
+                format!(
+                    "{}（编号 {}）的名字 {} 不规范，应以 {} 开头。",
+                    role_label, node.sync_name, name, prefix
+                ),
                 Some(node.sync_name.clone()),
             ));
         }
@@ -179,7 +196,11 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
         let src_ok = by_sync.contains_key(link.src_sync_name.as_str());
         let dst_ok = by_sync.contains_key(link.dst_sync_name.as_str());
         if !src_ok || !dst_ok {
-            let missing = if !src_ok { &link.src_sync_name } else { &link.dst_sync_name };
+            let missing = if !src_ok {
+                &link.src_sync_name
+            } else {
+                &link.dst_sync_name
+            };
             errors.push(VerifyError::new(
                 "DANGLING_LINK",
                 format!("有一条线连到了不存在的节点 {missing}，拓扑不完整。"),
@@ -232,14 +253,21 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
             if !reached.contains(node.sync_name.as_str()) {
                 errors.push(VerifyError::new(
                     "UNREACHABLE",
-                    format!("{} 和拓扑其余部分不连通，转发到不了它。", display_name(node)),
+                    format!(
+                        "{} 和拓扑其余部分不连通，转发到不了它。",
+                        display_name(node)
+                    ),
                     Some(node.sync_name.clone()),
                 ));
             }
         }
     }
 
-    VerifyResult { ok: errors.is_empty(), caliber: CALIBER_STRUCTURAL_ONLY, errors }
+    VerifyResult {
+        ok: errors.is_empty(),
+        caliber: CALIBER_STRUCTURAL_ONLY,
+        errors,
+    }
 }
 
 fn endpoint_label(link: &VerifyLink, by_sync: &HashMap<&str, &VerifyNode>) -> String {
@@ -249,7 +277,11 @@ fn endpoint_label(link: &VerifyLink, by_sync: &HashMap<&str, &VerifyNode>) -> St
             .map(|n| display_name(n))
             .unwrap_or_else(|| sync.to_string())
     };
-    format!("{}↔{}", name_of(&link.src_sync_name), name_of(&link.dst_sync_name))
+    format!(
+        "{}↔{}",
+        name_of(&link.src_sync_name),
+        name_of(&link.dst_sync_name)
+    )
 }
 
 /// styles_json 是 JSON 串，端口在 leftLabel/rightLabel；两者皆有非空值才算配对。
@@ -260,7 +292,7 @@ fn link_ports_paired(styles_json: &str) -> bool {
     let has = |key: &str| {
         value
             .get(key)
-            .map(|v| !v.is_null() && v.to_string() != "\"\"")
+            .map(|v| !v.is_null() && *v != "\"\"")
             .unwrap_or(false)
     };
     has("leftLabel") && has("rightLabel")
@@ -271,8 +303,10 @@ fn node_degrees<'a>(
     links: &[VerifyLink],
     by_sync: &HashMap<&str, &VerifyNode>,
 ) -> HashMap<&'a str, usize> {
-    let mut degree: HashMap<&str, usize> =
-        nodes.iter().map(|n| (n.sync_name.as_str(), 0usize)).collect();
+    let mut degree: HashMap<&str, usize> = nodes
+        .iter()
+        .map(|n| (n.sync_name.as_str(), 0usize))
+        .collect();
     for link in links {
         if !by_sync.contains_key(link.src_sync_name.as_str())
             || !by_sync.contains_key(link.dst_sync_name.as_str())
@@ -295,8 +329,10 @@ fn build_adjacency<'a>(
     nodes: &'a [VerifyNode],
     links: &'a [VerifyLink],
 ) -> HashMap<&'a str, Vec<&'a str>> {
-    let mut adjacency: HashMap<&str, Vec<&str>> =
-        nodes.iter().map(|n| (n.sync_name.as_str(), Vec::new())).collect();
+    let mut adjacency: HashMap<&str, Vec<&str>> = nodes
+        .iter()
+        .map(|n| (n.sync_name.as_str(), Vec::new()))
+        .collect();
     for link in links {
         if adjacency.contains_key(link.src_sync_name.as_str())
             && adjacency.contains_key(link.dst_sync_name.as_str())
@@ -314,7 +350,10 @@ fn build_adjacency<'a>(
     adjacency
 }
 
-fn reachable_from<'a>(start: &'a str, adjacency: &HashMap<&'a str, Vec<&'a str>>) -> HashSet<&'a str> {
+fn reachable_from<'a>(
+    start: &'a str,
+    adjacency: &HashMap<&'a str, Vec<&'a str>>,
+) -> HashSet<&'a str> {
     let mut seen: HashSet<&str> = HashSet::new();
     let mut queue: VecDeque<&str> = VecDeque::new();
     seen.insert(start);
@@ -336,7 +375,11 @@ mod tests {
     use super::*;
 
     fn node(sync: &str, ty: &str) -> VerifyNode {
-        VerifyNode { sync_name: sync.into(), name: None, node_type: Some(ty.into()) }
+        VerifyNode {
+            sync_name: sync.into(),
+            name: None,
+            node_type: Some(ty.into()),
+        }
     }
     fn link(seq: i64, src: &str, dst: &str) -> VerifyLink {
         VerifyLink {
@@ -350,13 +393,21 @@ mod tests {
         r.errors.iter().map(|e| e.code.as_str()).collect()
     }
     fn named_node(sync: &str, ty: &str, name: &str) -> VerifyNode {
-        VerifyNode { sync_name: sync.into(), name: Some(name.into()), node_type: Some(ty.into()) }
+        VerifyNode {
+            sync_name: sync.into(),
+            name: Some(name.into()),
+            node_type: Some(ty.into()),
+        }
     }
 
     /// 合法星型：1 交换机 + 2 端系统全连通 → ok。
     #[test]
     fn legal_star_passes() {
-        let nodes = vec![node("0", "switch"), node("1", "endSystem"), node("2", "endSystem")];
+        let nodes = vec![
+            node("0", "switch"),
+            node("1", "endSystem"),
+            node("2", "endSystem"),
+        ];
         let links = vec![link(0, "0", "1"), link(1, "0", "2")];
         let r = verify_topology(&nodes, &links);
         assert!(r.ok, "errors: {:?}", r.errors);
@@ -367,8 +418,10 @@ mod tests {
     #[test]
     fn legal_line_passes() {
         let nodes = vec![
-            node("0", "switch"), node("1", "switch"),
-            node("2", "endSystem"), node("3", "endSystem"),
+            node("0", "switch"),
+            node("1", "switch"),
+            node("2", "endSystem"),
+            node("3", "endSystem"),
         ];
         let links = vec![link(0, "0", "1"), link(1, "0", "2"), link(2, "1", "3")];
         assert!(verify_topology(&nodes, &links).ok);
@@ -387,7 +440,11 @@ mod tests {
     /// AE2：孤立端系统（未连任何线）→ ISOLATED_NODE。
     #[test]
     fn isolated_node_blocks() {
-        let nodes = vec![node("0", "switch"), node("1", "endSystem"), node("2", "endSystem")];
+        let nodes = vec![
+            node("0", "switch"),
+            node("1", "endSystem"),
+            node("2", "endSystem"),
+        ];
         let links = vec![link(0, "0", "1")]; // 节点 2 没连
         let r = verify_topology(&nodes, &links);
         assert!(!r.ok);
@@ -398,8 +455,10 @@ mod tests {
     #[test]
     fn split_subnets_unreachable() {
         let nodes = vec![
-            node("0", "switch"), node("1", "endSystem"),
-            node("2", "switch"), node("3", "endSystem"),
+            node("0", "switch"),
+            node("1", "endSystem"),
+            node("2", "switch"),
+            node("3", "endSystem"),
         ];
         let links = vec![link(0, "0", "1"), link(1, "2", "3")]; // 两个孤岛
         let r = verify_topology(&nodes, &links);
@@ -417,7 +476,11 @@ mod tests {
     #[test]
     fn unknown_node_role_blocks() {
         let mut nodes = vec![node("0", "switch"), node("1", "endSystem")];
-        nodes.push(VerifyNode { sync_name: "2".into(), name: None, node_type: None });
+        nodes.push(VerifyNode {
+            sync_name: "2".into(),
+            name: None,
+            node_type: None,
+        });
         let links = vec![link(0, "0", "1"), link(1, "0", "2")];
         let r = verify_topology(&nodes, &links);
         assert!(!r.ok);
@@ -427,19 +490,33 @@ mod tests {
     // U6 命名前缀校验（依赖 U12 把各场景命名统一为 SW-/ES-）。
     #[test]
     fn node_name_prefix_accepts_conforming_sw_es() {
-        let nodes = vec![named_node("0", "switch", "SW-1"), named_node("1", "endSystem", "ES-1")];
+        let nodes = vec![
+            named_node("0", "switch", "SW-1"),
+            named_node("1", "endSystem", "ES-1"),
+        ];
         let links = vec![link(0, "0", "1")];
         let r = verify_topology(&nodes, &links);
-        assert!(!codes(&r).contains(&"NODE_NAME_PREFIX"), "合规命名不应触发: {:?}", codes(&r));
+        assert!(
+            !codes(&r).contains(&"NODE_NAME_PREFIX"),
+            "合规命名不应触发: {:?}",
+            codes(&r)
+        );
     }
 
     #[test]
     fn node_name_prefix_rejects_end_system_named_sw() {
         // 负例：端系统 name 为 SW-2（应 ES-）→ NODE_NAME_PREFIX。
-        let nodes = vec![named_node("0", "switch", "SW-1"), named_node("1", "endSystem", "SW-2")];
+        let nodes = vec![
+            named_node("0", "switch", "SW-1"),
+            named_node("1", "endSystem", "SW-2"),
+        ];
         let links = vec![link(0, "0", "1")];
         let r = verify_topology(&nodes, &links);
-        assert!(codes(&r).contains(&"NODE_NAME_PREFIX"), "端系统叫 SW-2 应被拒: {:?}", codes(&r));
+        assert!(
+            codes(&r).contains(&"NODE_NAME_PREFIX"),
+            "端系统叫 SW-2 应被拒: {:?}",
+            codes(&r)
+        );
     }
 
     #[test]
@@ -448,18 +525,33 @@ mod tests {
         let nodes = vec![named_node("0", "switch", "SW-1"), node("1", "endSystem")];
         let links = vec![link(0, "0", "1")];
         let r = verify_topology(&nodes, &links);
-        assert!(!codes(&r).contains(&"NODE_NAME_PREFIX"), "空 name 应跳过: {:?}", codes(&r));
+        assert!(
+            !codes(&r).contains(&"NODE_NAME_PREFIX"),
+            "空 name 应跳过: {:?}",
+            codes(&r)
+        );
     }
 
     #[test]
     fn node_name_prefix_accepts_server_srv_and_rejects_wrong() {
         let links = vec![link(0, "0", "1"), link(1, "0", "2")];
         // server → SRV-（与 SW/ES 对称分支）。
-        let ok = vec![named_node("0", "switch", "SW-1"), named_node("1", "endSystem", "ES-1"), named_node("2", "server", "SRV-1")];
+        let ok = vec![
+            named_node("0", "switch", "SW-1"),
+            named_node("1", "endSystem", "ES-1"),
+            named_node("2", "server", "SRV-1"),
+        ];
         assert!(!codes(&verify_topology(&ok, &links)).contains(&"NODE_NAME_PREFIX"));
         // server 叫 X-1 → 被拒。
-        let bad = vec![named_node("0", "switch", "SW-1"), named_node("1", "endSystem", "ES-1"), named_node("2", "server", "X-1")];
-        assert!(codes(&verify_topology(&bad, &links)).contains(&"NODE_NAME_PREFIX"), "server 叫 X-1 应被拒");
+        let bad = vec![
+            named_node("0", "switch", "SW-1"),
+            named_node("1", "endSystem", "ES-1"),
+            named_node("2", "server", "X-1"),
+        ];
+        assert!(
+            codes(&verify_topology(&bad, &links)).contains(&"NODE_NAME_PREFIX"),
+            "server 叫 X-1 应被拒"
+        );
     }
 
     #[test]
@@ -468,13 +560,20 @@ mod tests {
         let nodes = vec![
             named_node("0", "switch", "SW-1"),
             named_node("1", "endSystem", "ES-1"),
-            VerifyNode { sync_name: "2".into(), name: Some("FOO-1".into()), node_type: None },
+            VerifyNode {
+                sync_name: "2".into(),
+                name: Some("FOO-1".into()),
+                node_type: None,
+            },
         ];
         let links = vec![link(0, "0", "1"), link(1, "0", "2")];
         let r = verify_topology(&nodes, &links);
         let c = codes(&r);
         assert!(c.contains(&"UNKNOWN_NODE_ROLE"));
-        assert!(!c.contains(&"NODE_NAME_PREFIX"), "未知类型不应再报命名前缀: {:?}", c);
+        assert!(
+            !c.contains(&"NODE_NAME_PREFIX"),
+            "未知类型不应再报命名前缀: {c:?}"
+        );
     }
 
     #[test]
@@ -487,11 +586,23 @@ mod tests {
         ];
         let links = vec![link(0, "0", "2"), link(1, "1", "2")];
         let r = verify_topology(&nodes, &links);
-        assert!(codes(&r).contains(&"DUPLICATE_NAME"), "重名应被拒: {:?}", codes(&r));
+        assert!(
+            codes(&r).contains(&"DUPLICATE_NAME"),
+            "重名应被拒: {:?}",
+            codes(&r)
+        );
         // 空 name 多个不算重名。
-        let with_empty = vec![named_node("0", "switch", "SW-1"), node("1", "endSystem"), node("2", "endSystem")];
-        let r2 = verify_topology(&with_empty, &vec![link(0, "0", "1"), link(1, "0", "2")]);
-        assert!(!codes(&r2).contains(&"DUPLICATE_NAME"), "空 name 不算重名: {:?}", codes(&r2));
+        let with_empty = vec![
+            named_node("0", "switch", "SW-1"),
+            node("1", "endSystem"),
+            node("2", "endSystem"),
+        ];
+        let r2 = verify_topology(&with_empty, &[link(0, "0", "1"), link(1, "0", "2")]);
+        assert!(
+            !codes(&r2).contains(&"DUPLICATE_NAME"),
+            "空 name 不算重名: {:?}",
+            codes(&r2)
+        );
     }
 
     #[test]
@@ -507,7 +618,9 @@ mod tests {
     fn unpaired_ports_block() {
         let nodes = vec![node("0", "switch"), node("1", "endSystem")];
         let links = vec![VerifyLink {
-            link_seq: 0, src_sync_name: "0".into(), dst_sync_name: "1".into(),
+            link_seq: 0,
+            src_sync_name: "0".into(),
+            dst_sync_name: "1".into(),
             styles_json: "{}".into(), // 无 leftLabel/rightLabel
         }];
         let r = verify_topology(&nodes, &links);
@@ -531,10 +644,18 @@ mod tests {
     #[test]
     fn reachability_matches_connectivity() {
         let nodes = vec![
-            node("0", "switch"), node("1", "switch"),
-            node("2", "endSystem"), node("3", "endSystem"), node("4", "endSystem"),
+            node("0", "switch"),
+            node("1", "switch"),
+            node("2", "endSystem"),
+            node("3", "endSystem"),
+            node("4", "endSystem"),
         ];
-        let links = vec![link(0, "0", "1"), link(1, "0", "2"), link(2, "0", "3"), link(3, "1", "4")];
+        let links = vec![
+            link(0, "0", "1"),
+            link(1, "0", "2"),
+            link(2, "0", "3"),
+            link(3, "1", "4"),
+        ];
         let adjacency = build_adjacency(&nodes, &links);
         let reached = reachable_from("0", &adjacency);
         // 连通 → 全部 5 个节点可达 → verify 通过。

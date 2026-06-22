@@ -23,7 +23,10 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef } from "react";
-import { listenToSessionDbChanges, type SessionDbChangedPayload } from "../../agent/listen-to-session-db-changes";
+import {
+  listenToSessionDbChanges,
+  type SessionDbChangedPayload,
+} from "../../agent/listen-to-session-db-changes";
 
 const WATCHDOG_INTERVAL_MS = 60_000;
 

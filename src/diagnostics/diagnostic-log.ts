@@ -107,9 +107,10 @@ function redactAndTruncate(value: string): string {
 }
 
 function createDiagnosticId(): string {
-  const random = typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2);
+  const random =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
 
   return `diagnostic-${random}`;
 }

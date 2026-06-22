@@ -75,14 +75,20 @@ pub fn build_inet_bundle(
                 sw_seq += 1;
                 mapped.insert(
                     node.sync_name.as_str(),
-                    MappedNode { ned_name: format!("sw{sw_seq}"), ned_type: "TsnSwitch" },
+                    MappedNode {
+                        ned_name: format!("sw{sw_seq}"),
+                        ned_type: "TsnSwitch",
+                    },
                 );
             }
             Some(ned_type) => {
                 es_seq += 1;
                 mapped.insert(
                     node.sync_name.as_str(),
-                    MappedNode { ned_name: format!("es{es_seq}"), ned_type },
+                    MappedNode {
+                        ned_name: format!("es{es_seq}"),
+                        ned_type,
+                    },
                 );
             }
             None => errors.push(VerifyError {
@@ -132,11 +138,10 @@ import inet.node.tsn.TsnDevice;\n\
 import inet.node.tsn.TsnSwitch;\n\n\
 network TsnAgentNetwork extends TsnNetworkBase\n{{\n\
     parameters:\n\
-        *.eth[*].bitrate = default({}Mbps);\n\
-    submodules:\n{}\
-    connections allowunconnected:\n{}\
-}}\n",
-        DEFAULT_DATARATE_MBPS, submodules, connections
+        *.eth[*].bitrate = default({DEFAULT_DATARATE_MBPS}Mbps);\n\
+    submodules:\n{submodules}\
+    connections allowunconnected:\n{connections}\
+}}\n"
     );
 
     let omnetpp_ini = "[General]\n\
@@ -156,9 +161,14 @@ cmdenv-express-mode = true\n"
             { "path": "omnetpp.ini", "purpose": "simulation-inet", "label": "INET/OMNeT++ 最小运行配置" }
         ]
     });
-    let manifest_json = serde_json::to_string_pretty(&manifest).unwrap_or_else(|_| "{}".to_string());
+    let manifest_json =
+        serde_json::to_string_pretty(&manifest).unwrap_or_else(|_| "{}".to_string());
 
-    Ok(InetBundle { network_ned, omnetpp_ini, manifest_json })
+    Ok(InetBundle {
+        network_ned,
+        omnetpp_ini,
+        manifest_json,
+    })
 }
 
 #[cfg(test)]
@@ -166,7 +176,11 @@ mod tests {
     use super::*;
 
     fn node(sync: &str, ty: &str) -> VerifyNode {
-        VerifyNode { sync_name: sync.into(), name: None, node_type: Some(ty.into()) }
+        VerifyNode {
+            sync_name: sync.into(),
+            name: None,
+            node_type: Some(ty.into()),
+        }
     }
     fn link(seq: i64, src: &str, dst: &str) -> VerifyLink {
         VerifyLink {
@@ -180,22 +194,34 @@ mod tests {
     /// 合法星型 → 产三文件，NED 含 package/import/network/模块/连线。
     #[test]
     fn legal_star_serializes() {
-        let nodes = vec![node("0", "switch"), node("1", "endSystem"), node("2", "endSystem")];
+        let nodes = vec![
+            node("0", "switch"),
+            node("1", "endSystem"),
+            node("2", "endSystem"),
+        ];
         let links = vec![link(0, "0", "1"), link(1, "0", "2")];
         let b = build_inet_bundle(&nodes, &links, "s1", 7).unwrap();
         assert!(b.network_ned.contains("package tsnagent.generated;"));
         assert!(b.network_ned.contains("import inet.node.tsn.TsnSwitch;"));
-        assert!(b.network_ned.contains("network TsnAgentNetwork extends TsnNetworkBase"));
+        assert!(b
+            .network_ned
+            .contains("network TsnAgentNetwork extends TsnNetworkBase"));
         assert!(b.network_ned.contains("sw1: TsnSwitch;"));
         assert!(b.network_ned.contains("es1: TsnDevice;"));
         assert!(b.network_ned.contains("es2: TsnDevice;"));
-        assert!(b.network_ned.contains("EthernetLink { datarate = 1000Mbps; }"));
+        assert!(b
+            .network_ned
+            .contains("EthernetLink { datarate = 1000Mbps; }"));
     }
 
     /// 类型映射：switch→TsnSwitch、endSystem/server→TsnDevice。
     #[test]
     fn maps_node_types_incl_server() {
-        let nodes = vec![node("0", "switch"), node("1", "endSystem"), node("2", "server")];
+        let nodes = vec![
+            node("0", "switch"),
+            node("1", "endSystem"),
+            node("2", "server"),
+        ];
         let links = vec![link(0, "0", "1"), link(1, "0", "2")];
         let b = build_inet_bundle(&nodes, &links, "s1", 1).unwrap();
         assert!(b.network_ned.contains("sw1: TsnSwitch;"));
@@ -206,25 +232,37 @@ mod tests {
     /// 命名用纯数字全局序号、唯一；NED parameters 含 bitrate、connections 含 allowunconnected。
     #[test]
     fn global_serial_naming_and_real_machine_shape() {
-        let nodes = vec![node("0", "switch"), node("1", "switch"), node("2", "endSystem")];
+        let nodes = vec![
+            node("0", "switch"),
+            node("1", "switch"),
+            node("2", "endSystem"),
+        ];
         let links = vec![link(0, "0", "1"), link(1, "0", "2")];
         let b = build_inet_bundle(&nodes, &links, "s1", 1).unwrap();
         assert!(b.network_ned.contains("sw1: TsnSwitch;"));
         assert!(b.network_ned.contains("sw2: TsnSwitch;"));
         assert!(b.network_ned.contains("es1: TsnDevice;"));
-        assert!(b.network_ned.contains("*.eth[*].bitrate = default(1000Mbps);"));
+        assert!(b
+            .network_ned
+            .contains("*.eth[*].bitrate = default(1000Mbps);"));
         assert!(b.network_ned.contains("connections allowunconnected:"));
         // omnetpp.ini 不含 bitrate（真机：bitrate 在 NED parameters）。
         assert!(!b.omnetpp_ini.contains("bitrate"));
         assert!(b.omnetpp_ini.contains("cmdenv-interactive = false"));
         assert!(b.omnetpp_ini.contains("cmdenv-express-mode = true"));
-        assert!(b.omnetpp_ini.contains("network = tsnagent.generated.TsnAgentNetwork"));
+        assert!(b
+            .omnetpp_ini
+            .contains("network = tsnagent.generated.TsnAgentNetwork"));
     }
 
     /// 双平面：端系统同时连两个交换机 → 正常产 NED、命名唯一、不判 unmappable。
     #[test]
     fn dual_homed_endsystem_supported() {
-        let nodes = vec![node("0", "switch"), node("1", "switch"), node("2", "endSystem")];
+        let nodes = vec![
+            node("0", "switch"),
+            node("1", "switch"),
+            node("2", "endSystem"),
+        ];
         // es(2) 同时连 sw(0) 和 sw(1)。
         let links = vec![link(0, "0", "1"), link(1, "2", "0"), link(2, "2", "1")];
         let b = build_inet_bundle(&nodes, &links, "s1", 1).unwrap();
@@ -246,14 +284,21 @@ mod tests {
         };
         let b = build_inet_bundle(&nodes, &[bad], "s1", 1).unwrap();
         assert!(b.network_ned.contains("datarate = 1000Mbps;"));
-        assert!(!b.network_ned.contains("import evil"), "原始非法串不得进 NED");
+        assert!(
+            !b.network_ned.contains("import evil"),
+            "原始非法串不得进 NED"
+        );
     }
 
     /// node_type 为 NULL / 未知 → unmappable_node_type，不产 NED（Covers AE8）。
     #[test]
     fn unmappable_node_type_errors() {
         let mut nodes = vec![node("0", "switch")];
-        nodes.push(VerifyNode { sync_name: "1".into(), name: None, node_type: None });
+        nodes.push(VerifyNode {
+            sync_name: "1".into(),
+            name: None,
+            node_type: None,
+        });
         let links = vec![link(0, "0", "1")];
         let err = build_inet_bundle(&nodes, &links, "s1", 1).unwrap_err();
         assert!(err.iter().any(|e| e.code == "unmappable_node_type"));

@@ -1,10 +1,10 @@
-import { query, createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
-import { z } from "zod";
-import { mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import { createTopologyWorkflowStageResult } from "../src/agent/topology-workflow-stage-result";
 
 const TOPOLOGY_MCP_SERVER_NAME = "tsn_topology";
@@ -39,7 +39,9 @@ export const requestStageChangeTool = tool(
           ok: true,
           stageChangeRequest: {
             targetStage: args.targetStage,
-            ...(typeof args.reason === "string" && args.reason.length > 0 ? { reason: args.reason } : {}),
+            ...(typeof args.reason === "string" && args.reason.length > 0
+              ? { reason: args.reason }
+              : {}),
           },
         }),
       },
@@ -67,7 +69,10 @@ export const responseSchema = {
 
 export async function runClaude(userPrompt, options = {}, queryFn = query) {
   const resolvedOptions = typeof options === "string" ? { cwd: options } : options;
-  const cwd = typeof resolvedOptions.cwd === "string" && resolvedOptions.cwd.length > 0 ? resolvedOptions.cwd : process.cwd();
+  const cwd =
+    typeof resolvedOptions.cwd === "string" && resolvedOptions.cwd.length > 0
+      ? resolvedOptions.cwd
+      : process.cwd();
   let assistantText = "";
   let sessionId;
   let emittedSessionId;
@@ -80,20 +85,25 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
   const emittedToolCallPhases = new Set();
   const capturedStageResultKeys = new Set();
   const capturedStageResults = [];
-  const stageResultPath = resolvedOptions.stageResultPath ?? await createStageResultPath();
-  const skillOutputDir = resolvedOptions.skillOutputDir ?? await createSkillOutputDir(stageResultPath);
+  const stageResultPath = resolvedOptions.stageResultPath ?? (await createStageResultPath());
+  const skillOutputDir =
+    resolvedOptions.skillOutputDir ?? (await createSkillOutputDir(stageResultPath));
   // 同源（R2）：skill 指引读取根优先取 Tauri 决策的有效根（payload skillRoot，
   // release 下指向 app-data 播种副本），缺省回退 cwd 下仓库/资源路径。
-  const skillRoot = typeof resolvedOptions.skillRoot === "string" && resolvedOptions.skillRoot.length > 0
-    ? resolvedOptions.skillRoot
-    : join(cwd, ".claude", "skills");
-  const topologyMcpServerPath = resolvedOptions.topologyMcpServerPath ?? resolveTopologyMcpServerPath(cwd);
+  const skillRoot =
+    typeof resolvedOptions.skillRoot === "string" && resolvedOptions.skillRoot.length > 0
+      ? resolvedOptions.skillRoot
+      : join(cwd, ".claude", "skills");
+  const topologyMcpServerPath =
+    resolvedOptions.topologyMcpServerPath ?? resolveTopologyMcpServerPath(cwd);
   // 打包态：Tauri 注入随 app 分发的 claude binary 路径。SDK 默认从 node_modules 的
   // 平台包（@anthropic-ai/claude-agent-sdk-{platform}）找 claude，bundle 后不存在，
   // 故打包态必须显式 pathToClaudeCodeExecutable；dev 态为 undefined，走 SDK 默认。
-  const claudeBinaryPath = typeof resolvedOptions.claudeBinaryPath === "string" && resolvedOptions.claudeBinaryPath.length > 0
-    ? resolvedOptions.claudeBinaryPath
-    : undefined;
+  const claudeBinaryPath =
+    typeof resolvedOptions.claudeBinaryPath === "string" &&
+    resolvedOptions.claudeBinaryPath.length > 0
+      ? resolvedOptions.claudeBinaryPath
+      : undefined;
   // Plan v3 U4b + Spike B：MCP child env 必须显式声明（Node child_process.spawn
   // 显式 env 字段语义是 REPLACE 不是 merge）；CLAUDECODE 必须不带过去防嵌套
   // session 拒绝。Tauri 端通过 `commands::run_claude_agent` 向 worker 注入
@@ -121,18 +131,22 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     }
     return env;
   };
-  const topologyMcpConfig = topologyMcpServerPath && existsSync(topologyMcpServerPath)
-    ? {
-        [TOPOLOGY_MCP_SERVER_NAME]: {
-          type: "stdio",
-          command: process.execPath,
-          args: [topologyMcpServerPath],
-          alwaysLoad: true,
-          env: buildTopologyMcpEnv(),
-        },
-      }
-    : undefined;
-  const stageRunnerInputPath = await writeStageRunnerInputFile(stageResultPath, resolvedOptions.stageRunnerInput);
+  const topologyMcpConfig =
+    topologyMcpServerPath && existsSync(topologyMcpServerPath)
+      ? {
+          [TOPOLOGY_MCP_SERVER_NAME]: {
+            type: "stdio",
+            command: process.execPath,
+            args: [topologyMcpServerPath],
+            alwaysLoad: true,
+            env: buildTopologyMcpEnv(),
+          },
+        }
+      : undefined;
+  const stageRunnerInputPath = await writeStageRunnerInputFile(
+    stageResultPath,
+    resolvedOptions.stageRunnerInput,
+  );
   const { systemPrompt, skillReadWarning, scenarioReference, scenarioReferenceWarning } =
     await buildSystemPromptForStage(resolvedOptions.stageRunnerInput, skillRoot);
   const finalPrompt = buildPrompt(
@@ -154,7 +168,10 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     model: "claude-sonnet-4-6",
     permissionMode: "dontAsk",
     tools: { type: "preset", preset: "claude_code" },
-    allowedTools: buildAllowedToolsForStage(resolvedOptions.stageRunnerInput, Boolean(topologyMcpConfig)),
+    allowedTools: buildAllowedToolsForStage(
+      resolvedOptions.stageRunnerInput,
+      Boolean(topologyMcpConfig),
+    ),
     // AskUserQuestion 在 dontAsk 模式下必然被拒（无终端 UI），硬禁省掉模型
     // 尝试浪费的 turn；prompt 交互规则 1 告知替代路径（中文数字编号选项）。
     disallowedTools: ["AskUserQuestion"],
@@ -169,7 +186,8 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     },
     maxTurns: resolvedOptions.maxTurns ?? 20,
     includePartialMessages: true,
-    ...(typeof resolvedOptions.resumeSessionId === "string" && resolvedOptions.resumeSessionId.length > 0
+    ...(typeof resolvedOptions.resumeSessionId === "string" &&
+    resolvedOptions.resumeSessionId.length > 0
       ? { resume: resolvedOptions.resumeSessionId }
       : {}),
     systemPrompt,
@@ -196,7 +214,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
   if (scenarioReferenceWarning) {
     recordAuditTimeline(auditLog, scenarioReferenceWarning);
   }
-  let currentPromptRunId = "initial";
+  const currentPromptRunId = "initial";
   const handleSdkMessage = (message) => {
     if (message.type === "system" && message.session_id) {
       sessionId = message.session_id;
@@ -267,7 +285,11 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     }
   };
   const captureTopologyStageResults = (message) => {
-    for (const extracted of extractTopologyWorkflowStageResults(message, toolUseNamesById, resolvedOptions.stageRunnerInput)) {
+    for (const extracted of extractTopologyWorkflowStageResults(
+      message,
+      toolUseNamesById,
+      resolvedOptions.stageRunnerInput,
+    )) {
       if (capturedStageResultKeys.has(extracted.key)) {
         continue;
       }
@@ -318,7 +340,11 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
   };
   const collectToolCalls = (message) => {
     for (const entry of extractToolCallEvents(message, toolUseNamesById)) {
-      const existing = toolCallsById.get(entry.id) ?? { id: entry.id, name: entry.name, status: "success" };
+      const existing = toolCallsById.get(entry.id) ?? {
+        id: entry.id,
+        name: entry.name,
+        status: "success",
+      };
 
       if (entry.phase === "use") {
         existing.name = entry.name ?? existing.name;
@@ -342,7 +368,13 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
           emittedToolCallPhases.add(`${entry.id}:result`);
           resolvedOptions.onEvent?.({
             event: "tool_call",
-            toolCall: { id: entry.id, name: existing.name, status: existing.status, result: existing.result, phase: "result" },
+            toolCall: {
+              id: entry.id,
+              name: existing.name,
+              status: existing.status,
+              result: existing.result,
+              phase: "result",
+            },
           });
         }
       }
@@ -359,7 +391,10 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
       handleSdkMessage(message);
     }
   } catch (error) {
-    const stageResults = mergeStageResults(capturedStageResults, await readStageResults(stageResultPath, emitOperationTrace));
+    const stageResults = mergeStageResults(
+      capturedStageResults,
+      await readStageResults(stageResultPath, emitOperationTrace),
+    );
 
     if (hasRecoverableStageResult(stageResults)) {
       const recoveredText = buildRecoveredStageResultAssistantText(stageResults);
@@ -393,7 +428,10 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     assistantText = emittedText.join("");
   }
 
-  const finalStageResults = mergeStageResults(capturedStageResults, await readStageResults(stageResultPath, emitOperationTrace));
+  const finalStageResults = mergeStageResults(
+    capturedStageResults,
+    await readStageResults(stageResultPath, emitOperationTrace),
+  );
 
   if (!assistantText.trim() && hasRecoverableStageResult(finalStageResults)) {
     assistantText = buildRecoveredStageResultAssistantText(finalStageResults);
@@ -429,9 +467,10 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
 // Phase B-β2：adapter 端非拓扑阶段全部本地拦截，worker 只会收到 topology 阶段；
 // stage runner / flow-template retry 路径已删除。
 export function buildAllowedToolsForStage(stageRunnerInput, hasTopologyMcpConfig) {
-  const stage = isRecord(stageRunnerInput) && typeof stageRunnerInput.stage === "string"
-    ? stageRunnerInput.stage
-    : undefined;
+  const stage =
+    isRecord(stageRunnerInput) && typeof stageRunnerInput.stage === "string"
+      ? stageRunnerInput.stage
+      : undefined;
   return [
     "Skill",
     "Read",
@@ -449,7 +488,8 @@ export function buildAllowedToolsForStage(stageRunnerInput, hasTopologyMcpConfig
 // R4/KTD8：协议不变量（用户改坏会破坏对账/产生数据损坏的规则）全部收口在此，
 // 不进可编辑 skill 文件。迁移自 SKILL.md：①initialize 后不复检 validate；
 // ②apply_operations 超时重试逐字节复用（重新分配 linkSeq 会产生重复平行链路）。
-const SYSTEM_PROMPT_SKELETON = "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。工程状态只接受结构化校验结果。拓扑初始化、校验、artifact 构建、inspect 和 apply_operations 必须通过 tsn_topology MCP 工具调用 sidecar，所有工具结果都已是结构化领域响应。artifact、端口表、MAC 表和完整 changeSet 不得再在自然语言里复述。不要写 TSN_AGENT_STAGE_RESULT_PATH，不要用自然语言重新构建拓扑。固定阶段顺序是拓扑、时间同步、流量规划、配置下发。前进到下一阶段由用户点「确认并继续」按钮完成，你不要自行宣称已进入下一阶段。用户在当前阶段提出的需求其实属于之前已完成的阶段（改拓扑、验时间同步）时，调用 request_stage_change 工具（参数：目标阶段 targetStage、理由 reason）表达需要切回。这一轮只做意图判断：只说明要切回哪个阶段及原因、等用户确认，不要在这一轮追问或规划具体怎么改、也不要承诺立即执行。切回会让其后的阶段重做。用户确认切回后，会用其原话在目标阶段继续处理修改；那时若需求有歧义（如有多台交换机、该删哪台不明），先用中文编号选项问清楚再动手，不要擅自替用户选。不要用该工具前进。已有拓扑用 tsn_topology inspect + apply_operations 增量编辑，initialize 仅用于从 0 生成或换模板（误用会整表重排已确认拓扑）。initialize 已校验并落库，之后无需对 initialize 结果复检；apply_operations 改动拓扑后，其返回已自动带库内结构校验结论（validation 字段），据此把中文结论告诉用户、有问题如实说。apply_operations 超时重试时逐字节复用上一次的同一 operations（相同 syncName/linkSeq），不要重新分配——重新分配 linkSeq 会产生重复的平行链路。最终工程状态只接受应用层合成的结构化结果，不要自行编写 stage result。";
+const SYSTEM_PROMPT_SKELETON =
+  "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。工程状态只接受结构化校验结果。拓扑初始化、校验、artifact 构建、inspect 和 apply_operations 必须通过 tsn_topology MCP 工具调用 sidecar，所有工具结果都已是结构化领域响应。artifact、端口表、MAC 表和完整 changeSet 不得再在自然语言里复述。不要写 TSN_AGENT_STAGE_RESULT_PATH，不要用自然语言重新构建拓扑。固定阶段顺序是拓扑、时间同步、流量规划、配置下发。前进到下一阶段由用户点「确认并继续」按钮完成，你不要自行宣称已进入下一阶段。用户在当前阶段提出的需求其实属于之前已完成的阶段（改拓扑、验时间同步）时，调用 request_stage_change 工具（参数：目标阶段 targetStage、理由 reason）表达需要切回。这一轮只做意图判断：只说明要切回哪个阶段及原因、等用户确认，不要在这一轮追问或规划具体怎么改、也不要承诺立即执行。切回会让其后的阶段重做。用户确认切回后，会用其原话在目标阶段继续处理修改；那时若需求有歧义（如有多台交换机、该删哪台不明），先用中文编号选项问清楚再动手，不要擅自替用户选。不要用该工具前进。已有拓扑用 tsn_topology inspect + apply_operations 增量编辑，initialize 仅用于从 0 生成或换模板（误用会整表重排已确认拓扑）。initialize 已校验并落库，之后无需对 initialize 结果复检；apply_operations 改动拓扑后，其返回已自动带库内结构校验结论（validation 字段），据此把中文结论告诉用户、有问题如实说。apply_operations 超时重试时逐字节复用上一次的同一 operations（相同 syncName/linkSeq），不要重新分配——重新分配 linkSeq 会产生重复的平行链路。最终工程状态只接受应用层合成的结构化结果，不要自行编写 stage result。";
 
 // SKILL.md 正文每次运行注入骨架之后，用固定 sentinel 分隔，便于切分骨架段与注入段。
 const SKILL_GUIDANCE_SENTINEL = "<<<SKILL_GUIDANCE>>>";
@@ -481,15 +521,18 @@ async function buildSystemPromptForStage(stageRunnerInput, skillRoot) {
   // 全链 fail-open：reference 缺失降级注入，不阻断运行。
   const referenceDir = join(skillRoot, "tsn-topology", "references");
   const requestedScenario =
-    typeof stageRunnerInput?.scenarioConfigId === "string" && stageRunnerInput.scenarioConfigId.length > 0
+    typeof stageRunnerInput?.scenarioConfigId === "string" &&
+    stageRunnerInput.scenarioConfigId.length > 0
       ? stageRunnerInput.scenarioConfigId
       : null;
   // 场景 id 进文件路径前做格式校验：畸形值（如含 ../ 的路径遍历）按未知场景
   // 走 generic-tsn 回退，不参与 join。
-  const isSafeScenarioId = requestedScenario !== null && /^[a-z0-9][a-z0-9-]*$/.test(requestedScenario);
-  const candidates = isSafeScenarioId && requestedScenario !== FALLBACK_SCENARIO_ID
-    ? [requestedScenario, FALLBACK_SCENARIO_ID]
-    : [FALLBACK_SCENARIO_ID];
+  const isSafeScenarioId =
+    requestedScenario !== null && /^[a-z0-9][a-z0-9-]*$/.test(requestedScenario);
+  const candidates =
+    isSafeScenarioId && requestedScenario !== FALLBACK_SCENARIO_ID
+      ? [requestedScenario, FALLBACK_SCENARIO_ID]
+      : [FALLBACK_SCENARIO_ID];
 
   let referenceBody = null;
   let resolvedScenario = null;
@@ -514,23 +557,24 @@ async function buildSystemPromptForStage(stageRunnerInput, skillRoot) {
   };
   // 降级路径产生 timeline 事件（与 skillReadWarning 同管道）：reference 全缺是
   // 播种半失败的典型症状，仅靠审计头字段排查不醒目。
-  const scenarioReferenceWarning = referenceBody === null
-    ? {
-        type: "skill_reference_unavailable",
-        level: "warn",
-        requestedScenario,
-        referenceDir,
-        errors: referenceReadErrors,
-      }
-    : scenarioReference.fallback
+  const scenarioReferenceWarning =
+    referenceBody === null
       ? {
-          type: "skill_reference_fallback",
-          level: "info",
+          type: "skill_reference_unavailable",
+          level: "warn",
           requestedScenario,
-          resolvedScenario,
+          referenceDir,
           errors: referenceReadErrors,
         }
-      : undefined;
+      : scenarioReference.fallback
+        ? {
+            type: "skill_reference_fallback",
+            level: "info",
+            requestedScenario,
+            resolvedScenario,
+            errors: referenceReadErrors,
+          }
+        : undefined;
 
   if (referenceBody === null) {
     return {
@@ -550,9 +594,10 @@ async function buildSystemPromptForStage(stageRunnerInput, skillRoot) {
   } catch {
     // 目录列举失败不阻断注入。
   }
-  const pathTable = referenceListing.length > 0
-    ? `\n\n可用参考文件（其余场景用 Read 工具按绝对路径查阅）：\n${referenceListing.join("\n")}`
-    : "";
+  const pathTable =
+    referenceListing.length > 0
+      ? `\n\n可用参考文件（其余场景用 Read 工具按绝对路径查阅）：\n${referenceListing.join("\n")}`
+      : "";
 
   return {
     systemPrompt: `${SYSTEM_PROMPT_SKELETON}\n\n${SKILL_GUIDANCE_SENTINEL}\n${guidance}\n\n${SCENARIO_REFERENCE_SENTINEL}\n${referenceBody}${pathTable}`,
@@ -564,18 +609,18 @@ async function buildSystemPromptForStage(stageRunnerInput, skillRoot) {
 export function buildPrompt(
   userPrompt,
   conversationContext,
-  stageResultPath = "$TSN_AGENT_STAGE_RESULT_PATH",
+  _stageResultPath = "$TSN_AGENT_STAGE_RESULT_PATH",
   skillOutputDir = "$TSN_AGENT_SKILL_OUTPUT_DIR",
   stageRunnerInput,
   stageRunnerInputPath,
 ) {
-  const contextBlock = conversationContext
-    ? `\n会话上下文：\n${conversationContext}\n`
-    : "";
+  const contextBlock = conversationContext ? `\n会话上下文：\n${conversationContext}\n` : "";
   const stageRunnerInputBlock = stageRunnerInput
-    ? `\n阶段结构化输入：\n${stageRunnerInputPath
-      ? `- 已写入文件：${stageRunnerInputPath}`
-      : JSON.stringify(stageRunnerInput, null, 2)}\n`
+    ? `\n阶段结构化输入：\n${
+        stageRunnerInputPath
+          ? `- 已写入文件：${stageRunnerInputPath}`
+          : JSON.stringify(stageRunnerInput, null, 2)
+      }\n`
     : "";
   // Phase B-β2：worker 只服务拓扑阶段（其余阶段由 adapter 本地拦截），
   // stage runner / flow-template 指引已删除。
@@ -596,8 +641,10 @@ export function buildPrompt(
 5. 用户的简短确认（如"速率够用"）不需要调用工具，直接推进。
 6. 增量修改已确认的拓扑时，先 topology.inspect 查 rows 再用 topology.apply_operations 构造原子操作；不要用 initialize 重建（会重排节点命名）。
 7. 不要把 inspect 返回的 rows / stylesJson 原文复述进中文回复。`;
-  const failureInstruction = "6. 如果当前阶段是拓扑，不能只返回文字说明；没有 trusted topology result 就不要声称阶段已生成。";
-  const fileInstruction = "4. 不要修改仓库文件；不要写 TSN_AGENT_STAGE_RESULT_PATH；不要输出 Markdown 表格。";
+  const failureInstruction =
+    "6. 如果当前阶段是拓扑，不能只返回文字说明；没有 trusted topology result 就不要声称阶段已生成。";
+  const fileInstruction =
+    "4. 不要修改仓库文件；不要写 TSN_AGENT_STAGE_RESULT_PATH；不要输出 Markdown 表格。";
 
   return `用户正在通过 TSN Agent 桌面应用配置一个 TSN 网络。
 ${contextBlock}
@@ -622,7 +669,10 @@ ${failureInstruction}`;
 }
 
 async function createStageResultPath() {
-  const dir = join(tmpdir(), `tsn-agent-stage-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const dir = join(
+    tmpdir(),
+    `tsn-agent-stage-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   await mkdir(dir, { recursive: true });
   return join(dir, "stage-result.json");
 }
@@ -682,7 +732,10 @@ async function createAgentRunAuditLog(input) {
       scenarioReference: input.scenarioReference ?? null,
       prompt: redactSecrets(input.prompt),
       userPrompt: redactSecrets(input.userPrompt),
-      conversationContext: typeof input.conversationContext === "string" ? redactSecrets(input.conversationContext) : null,
+      conversationContext:
+        typeof input.conversationContext === "string"
+          ? redactSecrets(input.conversationContext)
+          : null,
       stageRunnerInput: redactJsonValue(input.stageRunnerInput ?? null),
       stageRunnerInputPath: input.stageRunnerInputPath ?? null,
       promptRuns: [
@@ -707,24 +760,6 @@ async function createAgentRunAuditLog(input) {
   };
 }
 
-function recordAuditPrompt(auditLog, input) {
-  if (!auditLog) {
-    return "";
-  }
-
-  const id = `${auditLog.data.promptRuns.length + 1}-${input.kind}`;
-  auditLog.data.promptRuns.push({
-    id,
-    kind: input.kind,
-    createdAt: new Date().toISOString(),
-    promptSummary: summarizePromptForAudit(input.prompt),
-    prompt: redactSecrets(input.prompt),
-    resultText: "",
-    sessionId: null,
-  });
-  return id;
-}
-
 function recordAuditPromptResult(auditLog, promptRunId, result) {
   if (!auditLog || !promptRunId) {
     return;
@@ -745,10 +780,12 @@ function recordAuditTimeline(auditLog, event) {
     return;
   }
 
-  auditLog.data.timeline.push(redactJsonValue({
-    at: new Date().toISOString(),
-    ...event,
-  }));
+  auditLog.data.timeline.push(
+    redactJsonValue({
+      at: new Date().toISOString(),
+      ...event,
+    }),
+  );
 }
 
 function recordAuditToolTrace(auditLog, trace) {
@@ -819,15 +856,17 @@ function summarizeSdkOptionsForAudit(options) {
     disallowedTools: options.disallowedTools,
     skills: options.skills,
     mcpServers: options.mcpServers
-      ? Object.fromEntries(Object.entries(options.mcpServers).map(([name, config]) => [
-          name,
-          {
-            type: config.type,
-            command: basename(config.command ?? ""),
-            argCount: Array.isArray(config.args) ? config.args.length : 0,
-            alwaysLoad: config.alwaysLoad === true,
-          },
-        ]))
+      ? Object.fromEntries(
+          Object.entries(options.mcpServers).map(([name, config]) => [
+            name,
+            {
+              type: config.type,
+              command: basename(config.command ?? ""),
+              argCount: Array.isArray(config.args) ? config.args.length : 0,
+              alwaysLoad: config.alwaysLoad === true,
+            },
+          ]),
+        )
       : undefined,
     maxTurns: options.maxTurns,
     includePartialMessages: options.includePartialMessages,
@@ -842,20 +881,20 @@ function summarizeSdkOptionsForAudit(options) {
 }
 
 function buildAuditSummary(input) {
-  const stage = isRecord(input.stageRunnerInput) && typeof input.stageRunnerInput.stage === "string"
-    ? input.stageRunnerInput.stage
-    : undefined;
+  const stage =
+    isRecord(input.stageRunnerInput) && typeof input.stageRunnerInput.stage === "string"
+      ? input.stageRunnerInput.stage
+      : undefined;
   const stageResultSummaries = Array.isArray(input.stageResults)
-    ? input.stageResults
-        .filter(isRecord)
-        .map((result) => ({
-          stage: result.stage,
-          schemaVersion: result.schemaVersion,
-          producer: summarizeProducerForAudit(result.producer),
-          skillName: result.skillName,
-          status: result.status,
-          summary: typeof result.summary === "string" ? truncateForAudit(result.summary, 220) : undefined,
-        }))
+    ? input.stageResults.filter(isRecord).map((result) => ({
+        stage: result.stage,
+        schemaVersion: result.schemaVersion,
+        producer: summarizeProducerForAudit(result.producer),
+        skillName: result.skillName,
+        status: result.status,
+        summary:
+          typeof result.summary === "string" ? truncateForAudit(result.summary, 220) : undefined,
+      }))
     : [];
 
   return redactJsonValue({
@@ -894,7 +933,9 @@ function summarizePromptForAudit(prompt) {
     charCount: source.length,
     lineCount: source ? source.split("\n").length : 0,
     hasInlineStageRunnerInputJson: source.includes('"userIntent"') || source.includes('"project"'),
-    usesStageRunnerInputPath: source.includes("TSN_AGENT_STAGE_RUNNER_INPUT_PATH") || source.includes("stage-runner-input.json"),
+    usesStageRunnerInputPath:
+      source.includes("TSN_AGENT_STAGE_RUNNER_INPUT_PATH") ||
+      source.includes("stage-runner-input.json"),
     preview: truncateForAudit(source.replace(/\s+/g, " ").trim(), 320),
   };
 }
@@ -913,8 +954,7 @@ function summarizeContextForAudit(context) {
     includesLocalCandidate: context.includes("本地预解析候选"),
     recentMessageLines: extractContextSection(context, "最近对话：", "工程状态：")
       .split("\n")
-      .filter((line) => line.trim())
-      .length,
+      .filter((line) => line.trim()).length,
     preview: truncateForAudit(context.replace(/\s+/g, " ").trim(), 260),
   };
 }
@@ -989,26 +1029,29 @@ async function readStageResults(stageResultPath, onTrace) {
         text: `[文件] 读取阶段结果 ${formatPathForDisplay(stageResultPath)}`,
       });
       for (const result of stageResults) {
-        const producer = isRecord(result) && isRecord(result.producer) ? result.producer : undefined;
+        const producer =
+          isRecord(result) && isRecord(result.producer) ? result.producer : undefined;
         if (producer && typeof producer.name === "string") {
           const resultSummary = summarizeStageResultForTrace(result);
-          const producerName = typeof producer.tool === "string"
-            ? `${producer.name}:${producer.tool}`
-            : producer.name;
+          const producerName =
+            typeof producer.tool === "string" ? `${producer.name}:${producer.tool}` : producer.name;
           onTrace?.({
-            key: `workflow-stage-result:${isRecord(result) ? result.stage ?? "unknown" : "unknown"}:${producerName}`,
+            key: `workflow-stage-result:${isRecord(result) ? (result.stage ?? "unknown") : "unknown"}:${producerName}`,
             text: `[阶段结果] ${producerName} 结果已返回${resultSummary ? `：${resultSummary}` : ""}`,
           });
           continue;
         }
 
-        const skillName = isRecord(result) && typeof result.skillName === "string"
-          ? result.skillName
-          : skillNameForStage(isRecord(result) && typeof result.stage === "string" ? result.stage : undefined);
+        const skillName =
+          isRecord(result) && typeof result.skillName === "string"
+            ? result.skillName
+            : skillNameForStage(
+                isRecord(result) && typeof result.stage === "string" ? result.stage : undefined,
+              );
         if (skillName) {
           const resultSummary = summarizeStageResultForTrace(result);
           onTrace?.({
-            key: `skill:result:${isRecord(result) ? result.stage ?? "unknown" : "unknown"}:${skillName}`,
+            key: `skill:result:${isRecord(result) ? (result.stage ?? "unknown") : "unknown"}:${skillName}`,
             text: `[Skill] ${skillName} 结果已返回${resultSummary ? `：${resultSummary}` : ""}`,
           });
         }
@@ -1064,23 +1107,27 @@ function summarizeStageResultForTrace(result) {
 }
 
 function hasRecoverableStageResult(stageResults) {
-  return stageResults.some((result) =>
-    isRecord(result)
-      && result.stage === "topology"
-      && result.status === "success"
-      && isRecord(result.validation)
-      && result.validation.ok === true
-      && isRecord(result.payload)
-      && result.payload.kind === "topology"
-      && typeof result.payload.mutationId === "number"
+  return stageResults.some(
+    (result) =>
+      isRecord(result) &&
+      result.stage === "topology" &&
+      result.status === "success" &&
+      isRecord(result.validation) &&
+      result.validation.ok === true &&
+      isRecord(result.payload) &&
+      result.payload.kind === "topology" &&
+      typeof result.payload.mutationId === "number",
   );
 }
 
 function buildRecoveredStageResultAssistantText(stageResults) {
-  const result = stageResults.find((candidate) => isRecord(candidate) && candidate.stage === "topology");
-  const summary = isRecord(result) && typeof result.summary === "string"
-    ? result.summary
-    : "已生成当前阶段结构化结果。";
+  const result = stageResults.find(
+    (candidate) => isRecord(candidate) && candidate.stage === "topology",
+  );
+  const summary =
+    isRecord(result) && typeof result.summary === "string"
+      ? result.summary
+      : "已生成当前阶段结构化结果。";
 
   return [
     "已根据本轮需求生成拓扑草案。",
@@ -1106,7 +1153,9 @@ export function extractAssistantTextBlocks(message) {
   }
 
   return content
-    .filter((block) => block?.type === "text" && typeof block.text === "string" && block.text.length > 0)
+    .filter(
+      (block) => block?.type === "text" && typeof block.text === "string" && block.text.length > 0,
+    )
     .map((block) => block.text);
 }
 
@@ -1199,7 +1248,13 @@ function toolResultRawContent(block) {
 
   if (Array.isArray(content)) {
     const text = content
-      .map((item) => (typeof item === "string" ? item : isRecord(item) && typeof item.text === "string" ? item.text : ""))
+      .map((item) =>
+        typeof item === "string"
+          ? item
+          : isRecord(item) && typeof item.text === "string"
+            ? item.text
+            : "",
+      )
       .filter(Boolean)
       .join("\n");
     return text || content;
@@ -1220,7 +1275,11 @@ function isNonEmptyToolInput(input) {
   return true;
 }
 
-export function extractTopologyWorkflowStageResults(message, toolUseNamesById = new Map(), stageRunnerInput) {
+export function extractTopologyWorkflowStageResults(
+  message,
+  toolUseNamesById = new Map(),
+  stageRunnerInput,
+) {
   if (!isRecord(stageRunnerInput) || stageRunnerInput.stage !== "topology") {
     return [];
   }
@@ -1235,7 +1294,10 @@ export function extractTopologyWorkflowStageResults(message, toolUseNamesById = 
 
     const toolUseId = typeof block.tool_use_id === "string" ? block.tool_use_id : undefined;
     const toolName = toolUseId ? toolUseNamesById.get(toolUseId) : undefined;
-    if (toolName !== "mcp__tsn_topology__topology_initialize" && toolName !== "mcp__tsn_topology__topology_apply_operations") {
+    if (
+      toolName !== "mcp__tsn_topology__topology_initialize" &&
+      toolName !== "mcp__tsn_topology__topology_apply_operations"
+    ) {
       continue;
     }
 
@@ -1423,30 +1485,39 @@ function formatToolUseTrace(name, input) {
   const inputSummary = summarizeInput(input);
 
   if (normalizedName === "skill") {
-    const skillName = stringValue(inputRecord.skill)
-      ?? stringValue(inputRecord.skillName)
-      ?? stringValue(inputRecord.name);
+    const skillName =
+      stringValue(inputRecord.skill) ??
+      stringValue(inputRecord.skillName) ??
+      stringValue(inputRecord.name);
     return skillName ? `[Skill] 调用 ${skillName}` : "";
   }
 
   if (normalizedName === "read") {
-    const path = formatPathForDisplay(stringValue(inputRecord.file_path) ?? stringValue(inputRecord.path));
+    const path = formatPathForDisplay(
+      stringValue(inputRecord.file_path) ?? stringValue(inputRecord.path),
+    );
     return path ? `[文件] 读取 ${path}` : "";
   }
 
   if (normalizedName === "write") {
-    const path = formatPathForDisplay(stringValue(inputRecord.file_path) ?? stringValue(inputRecord.path));
+    const path = formatPathForDisplay(
+      stringValue(inputRecord.file_path) ?? stringValue(inputRecord.path),
+    );
     const contentSummary = summarizeWriteContent(inputRecord.content);
     return path ? `[文件] 写入 ${path}${contentSummary}` : "";
   }
 
   if (normalizedName === "edit" || normalizedName === "multiedit") {
-    const path = formatPathForDisplay(stringValue(inputRecord.file_path) ?? stringValue(inputRecord.path));
+    const path = formatPathForDisplay(
+      stringValue(inputRecord.file_path) ?? stringValue(inputRecord.path),
+    );
     return path ? `[文件] 修改 ${path}` : "";
   }
 
   if (normalizedName === "bash") {
-    const command = summarizeCommand(stringValue(inputRecord.command) ?? stringValue(inputRecord.cmd));
+    const command = summarizeCommand(
+      stringValue(inputRecord.command) ?? stringValue(inputRecord.cmd),
+    );
     const description = stringValue(inputRecord.description);
     if (command && description) {
       return `[工具] Bash: ${command}（${truncate(redactSecrets(description), 60)}）`;
@@ -1477,12 +1548,18 @@ function isFailedToolResult(block) {
   }
 
   const content = block?.content;
-  if (typeof content === "string" && /<tool_use_error>|^Error:|Exit code\s+[1-9]/i.test(content.trim())) {
+  if (
+    typeof content === "string" &&
+    /<tool_use_error>|^Error:|Exit code\s+[1-9]/i.test(content.trim())
+  ) {
     return true;
   }
 
   const toolUseResult = block?.toolUseResult;
-  if (typeof toolUseResult === "string" && /^Error:|Exit code\s+[1-9]/i.test(toolUseResult.trim())) {
+  if (
+    typeof toolUseResult === "string" &&
+    /^Error:|Exit code\s+[1-9]/i.test(toolUseResult.trim())
+  ) {
     return true;
   }
 
@@ -1490,7 +1567,7 @@ function isFailedToolResult(block) {
     const interrupted = toolUseResult.interrupted === true;
     const stderr = stringValue(toolUseResult.stderr);
     const exitCode = Number(toolUseResult.exitCode ?? toolUseResult.code);
-    return interrupted || Boolean(stderr) && Number.isFinite(exitCode) && exitCode !== 0;
+    return interrupted || (Boolean(stderr) && Number.isFinite(exitCode) && exitCode !== 0);
   }
 
   return false;
@@ -1519,12 +1596,13 @@ function summarizeInput(input) {
     return "";
   }
 
-  const candidate = stringValue(input.description)
-    ?? stringValue(input.summary)
-    ?? stringValue(input.path)
-    ?? stringValue(input.file_path)
-    ?? stringValue(input.command)
-    ?? stringValue(input.cmd);
+  const candidate =
+    stringValue(input.description) ??
+    stringValue(input.summary) ??
+    stringValue(input.path) ??
+    stringValue(input.file_path) ??
+    stringValue(input.command) ??
+    stringValue(input.cmd);
   if (candidate) {
     return truncate(redactSecrets(candidate), 140);
   }
@@ -1583,13 +1661,20 @@ function summarizeToolResult(block) {
 
 function summarizeToolResultContent(content) {
   if (typeof content === "string") {
-    const cleaned = content.replace(/<tool_use_error>|<\/tool_use_error>/g, "").replace(/\s+/g, " ").trim();
+    const cleaned = content
+      .replace(/<tool_use_error>|<\/tool_use_error>/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     return cleaned ? truncate(redactSecrets(cleaned), 180) : "";
   }
 
   if (Array.isArray(content)) {
     return content
-      .map((item) => isRecord(item) ? summarizeToolResultContent(item.text ?? item.content ?? item.file?.filePath) : summarizeToolResultContent(item))
+      .map((item) =>
+        isRecord(item)
+          ? summarizeToolResultContent(item.text ?? item.content ?? item.file?.filePath)
+          : summarizeToolResultContent(item),
+      )
       .filter(Boolean)
       .join("；")
       .slice(0, 180);
@@ -1674,8 +1759,14 @@ export function normalizeError(error) {
 export function redactSecrets(value) {
   return value
     .replace(/sk-ant-[A-Za-z0-9_-]+/g, "sk-ant-[redacted]")
-    .replace(/((?:api[_-]?key|token|secret|password|claude_api_key)\s*[:=]\s*)([^\s,;]+)/gi, "$1[redacted]")
-    .replace(/("(?:accessToken|refreshToken|authToken|apiKey|api_key|token|secret|password)"\s*:\s*")([^"]+)(")/gi, "$1[redacted]$3")
+    .replace(
+      /((?:api[_-]?key|token|secret|password|claude_api_key)\s*[:=]\s*)([^\s,;]+)/gi,
+      "$1[redacted]",
+    )
+    .replace(
+      /("(?:accessToken|refreshToken|authToken|apiKey|api_key|token|secret|password)"\s*:\s*")([^"]+)(")/gi,
+      "$1[redacted]$3",
+    )
     .replace(/(Authorization\s*:\s*Bearer\s+)([^\s,;]+)/gi, "$1[redacted]");
 }
 
@@ -1689,14 +1780,16 @@ export async function runWorker(rawInput) {
 
   return runClaude(prompt, {
     cwd: input.cwd,
-    conversationContext: typeof input.conversationContext === "string" ? input.conversationContext : undefined,
+    conversationContext:
+      typeof input.conversationContext === "string" ? input.conversationContext : undefined,
     resumeSessionId: typeof input.resumeSessionId === "string" ? input.resumeSessionId : undefined,
     stageRunnerInput: isRecord(input.stageRunnerInput) ? input.stageRunnerInput : undefined,
     appSessionId: typeof input.appSessionId === "string" ? input.appSessionId : undefined,
     runId: typeof input.runId === "string" ? input.runId : undefined,
     auditDir: typeof input.auditDir === "string" ? input.auditDir : undefined,
     skillRoot: typeof input.skillRoot === "string" ? input.skillRoot : undefined,
-    claudeBinaryPath: typeof input.claudeBinaryPath === "string" ? input.claudeBinaryPath : undefined,
+    claudeBinaryPath:
+      typeof input.claudeBinaryPath === "string" ? input.claudeBinaryPath : undefined,
     onEvent: (event) => {
       if (typeof input.runId !== "string" || !input.runId) {
         return;

@@ -30,7 +30,13 @@ impl RemoteConfig {
             .unwrap_or_else(|_| "/home/zhang/tsn-agent-runs".into());
         let inet_path = std::env::var("TSN_AGENT_INET_PATH")
             .unwrap_or_else(|_| "/home/zhang/.local/bin/inet".into());
-        Self { host, user, remote_base_dir, inet_path, timeout: Duration::from_secs(120) }
+        Self {
+            host,
+            user,
+            remote_base_dir,
+            inet_path,
+            timeout: Duration::from_secs(120),
+        }
     }
 }
 
@@ -51,14 +57,21 @@ pub enum RemoteError {
 
 pub trait RemoteRunner {
     /// 把 bundle 发到远端、跑 inet、收退出码与输出、清理。
-    fn run_bundle(&self, bundle: &InetBundle, cfg: &RemoteConfig) -> Result<RemoteRunOutcome, RemoteError>;
+    fn run_bundle(
+        &self,
+        bundle: &InetBundle,
+        cfg: &RemoteConfig,
+    ) -> Result<RemoteRunOutcome, RemoteError>;
 }
 
 // ---- 纯函数（可单测）：目录名 / argv / 脱敏 ----
 
 /// 远端临时目录名只许 `[a-zA-Z0-9_-]`（KTD8：杜绝路径注入 / rm -rf 删错目录）。
 pub fn is_safe_run_dir_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// 生成 run 目录名 `run-<16 hex>`，随机源不用时钟（避免碰撞 + 不可预测）。
@@ -72,9 +85,12 @@ pub fn gen_run_dir_name() -> String {
 
 fn ssh_security_opts() -> Vec<String> {
     vec![
-        "-o".into(), "StrictHostKeyChecking=yes".into(),
-        "-o".into(), "BatchMode=yes".into(),
-        "-o".into(), "ConnectTimeout=10".into(),
+        "-o".into(),
+        "StrictHostKeyChecking=yes".into(),
+        "-o".into(),
+        "BatchMode=yes".into(),
+        "-o".into(),
+        "ConnectTimeout=10".into(),
     ]
 }
 
@@ -150,7 +166,11 @@ fn tail(s: &str, max: usize) -> String {
 pub struct SshRunner;
 
 impl RemoteRunner for SshRunner {
-    fn run_bundle(&self, bundle: &InetBundle, cfg: &RemoteConfig) -> Result<RemoteRunOutcome, RemoteError> {
+    fn run_bundle(
+        &self,
+        bundle: &InetBundle,
+        cfg: &RemoteConfig,
+    ) -> Result<RemoteRunOutcome, RemoteError> {
         let ssh = resolve_remote_bin("ssh", "TSN_AGENT_SSH_PATH");
         let scp = resolve_remote_bin("scp", "TSN_AGENT_SCP_PATH");
 
@@ -184,30 +204,51 @@ impl RemoteRunner for SshRunner {
                 Ok(o) if o.status.success() => Ok(()),
                 Ok(o) => Err(RemoteError::Unreachable(format!(
                     "{what}失败（退出码 {}）：{}",
-                    o.status.code().map(|c| c.to_string()).unwrap_or_else(|| "未知".into()),
+                    o.status
+                        .code()
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| "未知".into()),
                     redact_remote(&String::from_utf8_lossy(&o.stderr), cfg)
                 ))),
-                Err(e) => Err(RemoteError::Unreachable(format!("{what}失败：{}", redact_remote(&e.to_string(), cfg)))),
+                Err(e) => Err(RemoteError::Unreachable(format!(
+                    "{what}失败：{}",
+                    redact_remote(&e.to_string(), cfg)
+                ))),
             }
         };
 
         // 1) 远端建目录。
         let mkdir_cmd = format!("mkdir -p {}", sh_squote(&remote_dir));
-        if let Err(e) = transport(make_cmd(&ssh, build_ssh_argv(cfg, &mkdir_cmd)), "连远端 / 建目录") {
+        if let Err(e) = transport(
+            make_cmd(&ssh, build_ssh_argv(cfg, &mkdir_cmd)),
+            "连远端 / 建目录",
+        ) {
             cleanup_local();
             return Err(e);
         }
         // 2) scp 传内容。
         let local_src = format!("{}/.", local_dir.display());
-        if let Err(e) = transport(make_cmd(&scp, build_scp_argv(cfg, &local_src, &remote_dir)), "传输 bundle") {
-            let _ = run_with_timeout(make_cmd(&ssh, build_ssh_argv(cfg, &remote_cleanup_cmd(&remote_dir))), cfg.timeout);
+        if let Err(e) = transport(
+            make_cmd(&scp, build_scp_argv(cfg, &local_src, &remote_dir)),
+            "传输 bundle",
+        ) {
+            let _ = run_with_timeout(
+                make_cmd(&ssh, build_ssh_argv(cfg, &remote_cleanup_cmd(&remote_dir))),
+                cfg.timeout,
+            );
             cleanup_local();
             return Err(e);
         }
         // 3) 跑 inet。
-        let run_res = run_with_timeout(make_cmd(&ssh, build_ssh_argv(cfg, &remote_run_cmd(cfg, &remote_dir))), cfg.timeout);
+        let run_res = run_with_timeout(
+            make_cmd(&ssh, build_ssh_argv(cfg, &remote_run_cmd(cfg, &remote_dir))),
+            cfg.timeout,
+        );
         // 4) best-effort 清理远端。
-        let _ = run_with_timeout(make_cmd(&ssh, build_ssh_argv(cfg, &remote_cleanup_cmd(&remote_dir))), cfg.timeout);
+        let _ = run_with_timeout(
+            make_cmd(&ssh, build_ssh_argv(cfg, &remote_cleanup_cmd(&remote_dir))),
+            cfg.timeout,
+        );
         cleanup_local();
 
         match run_res {
@@ -225,9 +266,15 @@ impl RemoteRunner for SshRunner {
                         tail(&redacted, 2000)
                     )));
                 }
-                Ok(RemoteRunOutcome { exit_code: code, output_tail: tail(&redacted, 2000) })
+                Ok(RemoteRunOutcome {
+                    exit_code: code,
+                    output_tail: tail(&redacted, 2000),
+                })
             }
-            Err(e) => Err(RemoteError::Unreachable(format!("远端运行 inet 失败：{}", redact_remote(&e.to_string(), cfg)))),
+            Err(e) => Err(RemoteError::Unreachable(format!(
+                "远端运行 inet 失败：{}",
+                redact_remote(&e.to_string(), cfg)
+            ))),
         }
     }
 }
@@ -262,7 +309,9 @@ fn make_cmd(bin: &std::ffi::OsString, args: Vec<String>) -> Command {
 /// stdout/stderr 由两个后台线程**持续排空**（对齐 commands.rs spawn_line_reader 纪律）——
 /// 否则远端输出超过 OS pipe buffer（~64KB）时子进程会阻塞在 write、永不退出、死锁到超时。
 fn run_with_timeout(mut cmd: Command, timeout: Duration) -> io::Result<std::process::Output> {
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -301,7 +350,9 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration) -> io::Result<std::proc
             }
             #[cfg(windows)]
             {
-                let _ = Command::new("taskkill").args(["/F", "/T", "/PID", &pid.to_string()]).output();
+                let _ = Command::new("taskkill")
+                    .args(["/F", "/T", "/PID", &pid.to_string()])
+                    .output();
             }
             let _ = child.wait();
             let _ = out_handle.join();
@@ -313,7 +364,11 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration) -> io::Result<std::proc
     // 进程已退出 → pipe EOF，读线程随即结束。
     let stdout = out_handle.join().unwrap_or_default();
     let stderr = err_handle.join().unwrap_or_default();
-    Ok(std::process::Output { status, stdout, stderr })
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 #[cfg(test)]
@@ -332,7 +387,10 @@ mod tests {
 
     #[test]
     fn ssh_argv_carries_security_opts_and_remote_cmd() {
-        let argv = build_ssh_argv(&cfg(), &remote_run_cmd(&cfg(), "/home/zhang/tsn-agent-runs/run-ab"));
+        let argv = build_ssh_argv(
+            &cfg(),
+            &remote_run_cmd(&cfg(), "/home/zhang/tsn-agent-runs/run-ab"),
+        );
         assert!(argv.iter().any(|a| a == "StrictHostKeyChecking=yes"));
         assert!(argv.iter().any(|a| a == "BatchMode=yes"));
         assert!(argv.iter().any(|a| a == "zhang@100.104.38.106"));
@@ -343,10 +401,17 @@ mod tests {
 
     #[test]
     fn scp_argv_is_structured_with_recursive_and_dest() {
-        let argv = build_scp_argv(&cfg(), "/tmp/tsn-inet-x/.", "/home/zhang/tsn-agent-runs/run-x");
+        let argv = build_scp_argv(
+            &cfg(),
+            "/tmp/tsn-inet-x/.",
+            "/home/zhang/tsn-agent-runs/run-x",
+        );
         assert_eq!(argv[0], "-r");
         assert!(argv.iter().any(|a| a == "StrictHostKeyChecking=yes"));
-        assert!(argv.last().unwrap().ends_with("zhang@100.104.38.106:/home/zhang/tsn-agent-runs/run-x"));
+        assert!(argv
+            .last()
+            .unwrap()
+            .ends_with("zhang@100.104.38.106:/home/zhang/tsn-agent-runs/run-x"));
     }
 
     #[test]

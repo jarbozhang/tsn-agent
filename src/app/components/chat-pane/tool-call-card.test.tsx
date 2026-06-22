@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
 import type { ToolCallRecord } from "../../../agent/tool-call-record";
 import { ToolCallCard } from "./tool-call-card";
 
@@ -73,7 +73,9 @@ describe("ToolCallCard", () => {
 
   it("keeps the expanded state across running→success flip (U5/AE1)", async () => {
     const user = userEvent.setup();
-    const { rerender } = render(<ToolCallCard record={record({ status: "running", result: undefined })} />);
+    const { rerender } = render(
+      <ToolCallCard record={record({ status: "running", result: undefined })} />,
+    );
 
     await user.click(screen.getByRole("button"));
     expect(screen.getByText("执行中…")).toBeInTheDocument();

@@ -23,7 +23,12 @@ describe("useBackfillFailures", () => {
 
   it("fetches failures on mount", async () => {
     invokeMock.mockResolvedValue([
-      { sessionId: "s1", state: "failed_parse", errorCode: "PAYLOAD_NOT_JSON", attemptedAt: "@unix-1" },
+      {
+        sessionId: "s1",
+        state: "failed_parse",
+        errorCode: "PAYLOAD_NOT_JSON",
+        attemptedAt: "@unix-1",
+      },
     ]);
 
     const { result } = renderHook(() => useBackfillFailures());

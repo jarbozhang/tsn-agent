@@ -67,9 +67,17 @@ describe("fetchSidecar", () => {
   it("injects the session id and bearer token and parses a 2xx body", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, '{"ok":true,"summary":{"mutationId":3}}'));
 
-    const result = await fetchSidecar("/db/topology/apply_operations", { operations: [] }, { env: TEST_ENV });
+    const result = await fetchSidecar(
+      "/db/topology/apply_operations",
+      { operations: [] },
+      { env: TEST_ENV },
+    );
 
-    expect(result).toEqual({ ok: true, status: 200, body: { ok: true, summary: { mutationId: 3 } } });
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      body: { ok: true, summary: { mutationId: 3 } },
+    });
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("http://127.0.0.1:4801/db/topology/apply_operations");
     expect(init.headers.Authorization).toBe("Bearer test-token");
@@ -78,7 +86,10 @@ describe("fetchSidecar", () => {
 
   it("maps a structured non-2xx body through code/message/retryable", async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse(422, '{"ok":false,"code":"UNKNOWN_NODE","message":"missing endpoint","retryable":false}'),
+      jsonResponse(
+        422,
+        '{"ok":false,"code":"UNKNOWN_NODE","message":"missing endpoint","retryable":false}',
+      ),
     );
 
     const result = await fetchSidecar("/db/topology/apply_operations", {}, { env: TEST_ENV });
@@ -113,22 +124,33 @@ describe("fetchSidecar", () => {
 
     const result = await fetchSidecar("/db/topology/inspect", {}, { env: TEST_ENV });
 
-    expect(result).toMatchObject({ ok: false, status: 0, code: "SIDECAR_UNREACHABLE", retryable: false });
+    expect(result).toMatchObject({
+      ok: false,
+      status: 0,
+      code: "SIDECAR_UNREACHABLE",
+      retryable: false,
+    });
   });
 
   it("maps an abort to SIDECAR_TIMEOUT (retryable)", async () => {
-    fetchMock.mockImplementationOnce((_url: string, init: { signal: AbortSignal }) =>
-      new Promise((_resolve, reject) => {
-        init.signal.addEventListener("abort", () => {
-          const error = new Error("This operation was aborted");
-          error.name = "AbortError";
-          reject(error);
-        });
-      }),
+    fetchMock.mockImplementationOnce(
+      (_url: string, init: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () => {
+            const error = new Error("This operation was aborted");
+            error.name = "AbortError";
+            reject(error);
+          });
+        }),
     );
 
     const result = await fetchSidecar("/db/topology/inspect", {}, { env: TEST_ENV, abortMs: 5 });
 
-    expect(result).toMatchObject({ ok: false, status: 0, code: "SIDECAR_TIMEOUT", retryable: true });
+    expect(result).toMatchObject({
+      ok: false,
+      status: 0,
+      code: "SIDECAR_TIMEOUT",
+      retryable: true,
+    });
   });
 });

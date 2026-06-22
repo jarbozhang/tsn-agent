@@ -1,9 +1,9 @@
 import {
   BaseEdge,
   EdgeLabelRenderer,
+  type EdgeProps,
   Position,
   useInternalNode,
-  type EdgeProps,
 } from "@xyflow/react";
 import type { TsnEdgeData } from "./topology-flow";
 
@@ -146,7 +146,9 @@ export function floatingEdgeAnchors(source: NodeRect, target: NodeRect): Floatin
 }
 
 /** 两端吸附点之间使用直线路径。 */
-export function straightFloatingEdgePath(anchors: Pick<FloatingAnchors, "sx" | "sy" | "tx" | "ty">): string {
+export function straightFloatingEdgePath(
+  anchors: Pick<FloatingAnchors, "sx" | "sy" | "tx" | "ty">,
+): string {
   return `M ${anchors.sx},${anchors.sy} L ${anchors.tx},${anchors.ty}`;
 }
 
@@ -176,11 +178,25 @@ export function portLabelPoint(
   };
 }
 
-function PortLabel({ x, y, text, selected }: { x: number; y: number; text: string; selected: boolean }) {
+function PortLabel({
+  x,
+  y,
+  text,
+  selected,
+}: {
+  x: number;
+  y: number;
+  text: string;
+  selected: boolean;
+}) {
   return (
     <EdgeLabelRenderer>
       <div
-        className={selected ? "tsn-port-label selected mono nodrag nopan" : "tsn-port-label mono nodrag nopan"}
+        className={
+          selected
+            ? "tsn-port-label selected mono nodrag nopan"
+            : "tsn-port-label mono nodrag nopan"
+        }
         style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}
       >
         {text}

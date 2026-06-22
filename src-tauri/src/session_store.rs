@@ -377,7 +377,9 @@ mod tests {
         let migs = crate::db::migrations();
         assert_eq!(migs[2].version, 3);
         assert_eq!(migs[2].description, "drop_diagnostic_logs_for_file_writer");
-        assert!(crate::db::DROP_DIAGNOSTIC_LOGS_SQL.contains("DROP TABLE IF EXISTS diagnostic_logs"));
+        assert!(
+            crate::db::DROP_DIAGNOSTIC_LOGS_SQL.contains("DROP TABLE IF EXISTS diagnostic_logs")
+        );
     }
 
     #[test]
@@ -439,7 +441,10 @@ mod tests {
         assert_eq!(migs[3].version, 4);
         assert_eq!(migs[3].description, "create_session_backfill_state");
         assert_eq!(migs[4].version, 5);
-        assert_eq!(migs[4].description, "rename_networkcard_node_type_to_end_system");
+        assert_eq!(
+            migs[4].description,
+            "rename_networkcard_node_type_to_end_system"
+        );
     }
 
     /// 在内存库里手工建出旧（imac/sync_type）结构 + sessions，灌入样例数据，
@@ -498,9 +503,12 @@ mod tests {
         assert_eq!(imac_cols, 0, "imac/sync_type 应已删除");
 
         // 节点按 sync_name 可查、名字/坐标保留
-        let (name, x): (Option<String>, f64) =
-            sqlx::query_as("SELECT name, x FROM topology_nodes WHERE session_id='s1' AND sync_name='1'")
-                .fetch_one(&pool).await.unwrap();
+        let (name, x): (Option<String>, f64) = sqlx::query_as(
+            "SELECT name, x FROM topology_nodes WHERE session_id='s1' AND sync_name='1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(name.as_deref(), Some("ES-1"));
         assert_eq!(x, 10.0);
 
@@ -518,9 +526,12 @@ mod tests {
         crate::db::ensure_topology_rekey_to_sync_name(&pool)
             .await
             .expect("rekey noop");
-        let imac_cols: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM pragma_table_info('topology_nodes') WHERE name='imac'")
-                .fetch_one(&pool).await.unwrap();
+        let imac_cols: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('topology_nodes') WHERE name='imac'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(imac_cols, 0);
     }
 
@@ -602,8 +613,14 @@ mod tests {
                 .await
                 .expect("title");
 
-            assert_eq!(node_count, 1, "resave must not cascade-delete topology nodes");
-            assert_eq!(link_count, 1, "resave must not cascade-delete topology links");
+            assert_eq!(
+                node_count, 1,
+                "resave must not cascade-delete topology nodes"
+            );
+            assert_eq!(
+                link_count, 1,
+                "resave must not cascade-delete topology links"
+            );
             assert_eq!(title, "t1-updated");
         });
     }
@@ -664,18 +681,30 @@ mod tests {
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','t','t','{}')")
                 .execute(&pool).await.expect("seed session");
             sqlx::query("INSERT INTO nodes (session_id, node_id) VALUES ('s1', 'n0')")
-                .execute(&pool).await.expect("seed node");
-            sqlx::query("INSERT INTO nodes_oss_cfg (session_id, node_id, cfg_json) VALUES ('s1','n0','{}')")
-                .execute(&pool).await.expect("seed oss_cfg");
+                .execute(&pool)
+                .await
+                .expect("seed node");
+            sqlx::query(
+                "INSERT INTO nodes_oss_cfg (session_id, node_id, cfg_json) VALUES ('s1','n0','{}')",
+            )
+            .execute(&pool)
+            .await
+            .expect("seed oss_cfg");
 
             // 删除 session → 应级联删除 nodes 与 nodes_oss_cfg。
             sqlx::query("DELETE FROM sessions WHERE id = 's1'")
-                .execute(&pool).await.expect("delete session");
+                .execute(&pool)
+                .await
+                .expect("delete session");
 
             let node_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes")
-                .fetch_one(&pool).await.expect("count nodes");
+                .fetch_one(&pool)
+                .await
+                .expect("count nodes");
             let oss_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes_oss_cfg")
-                .fetch_one(&pool).await.expect("count oss_cfg");
+                .fetch_one(&pool)
+                .await
+                .expect("count oss_cfg");
             assert_eq!(node_count, 0);
             assert_eq!(oss_count, 0);
         });

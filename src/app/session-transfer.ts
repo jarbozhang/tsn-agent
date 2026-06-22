@@ -28,6 +28,7 @@ const DB_FILE_FILTERS = [{ name: "TSN Agent 会话", extensions: ["db"] }];
 
 /** 文件名安全化：路径分隔与控制字符替换为 '-'。 */
 function sanitizeFileName(title: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: 文件名安全化需显式剥离 \x00-\x1f 控制字符
   const cleaned = title.replace(/[/\\:*?"<>|\x00-\x1f]/g, "-").trim();
   return cleaned.length > 0 ? cleaned.slice(0, 60) : "session";
 }
@@ -37,7 +38,10 @@ export function defaultExportFileName(title: string, now = new Date()): string {
   return `${sanitizeFileName(title)}-${date}.db`;
 }
 
-export async function exportCurrentSession(sessionId: string, title: string): Promise<ExportOutcome> {
+export async function exportCurrentSession(
+  sessionId: string,
+  title: string,
+): Promise<ExportOutcome> {
   const targetPath = await save({
     title: "导出会话",
     defaultPath: defaultExportFileName(title),

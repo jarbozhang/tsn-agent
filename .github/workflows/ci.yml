@@ -17,3 +17,47 @@ jobs:
       # Plan v3 U9c：SCAN_MODE 默认 fail，命中 legacy 类型 / redact 漂移即失败。
       - name: Run legacy-types scan
         run: bash scripts/check-no-legacy-types.sh
+
+  lint:
+    name: Lint (Biome + Rust)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Biome (lint + format)
+        run: npm run lint
+
+      - name: Install Linux dependencies (for clippy)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: rustfmt --check
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      - name: clippy -D warnings
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings

@@ -1,16 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { logDiagnostic } from "../diagnostics/app-diagnostics";
 import type { DiagnosticLogRepository } from "../diagnostics/diagnostic-log-repository";
-import type { ChatMessage, TsnSession } from "../sessions/session-repository";
-import {
-  countEndSystems,
-  countSwitches,
-  type TopologyRowSnapshot,
-} from "../sessions/topology-snapshot";
 import { getScenarioConfig, WORKFLOW_STEPS, type WorkflowStep } from "../domain/scenario-config";
-import { redactProviderNamesForDisplay } from "../ui/display-redaction";
 import {
   clearPendingStageChange,
   confirmCurrentStage,
@@ -19,15 +12,27 @@ import {
   requestStageChanges,
   type WorkflowState,
 } from "../project/project-state";
-import { getTopologyRuntimeSummary } from "../topology/topology-service";
-import type { AgentEvent, TopologyVerifyResult, TsnAgentRequest, TsnAgentResult } from "./agent-types";
+import type { ChatMessage, TsnSession } from "../sessions/session-repository";
 import { redactSecretsInValue } from "../sessions/session-repository";
+import {
+  countEndSystems,
+  countSwitches,
+  type TopologyRowSnapshot,
+} from "../sessions/topology-snapshot";
+import { getTopologyRuntimeSummary } from "../topology/topology-service";
+import { redactProviderNamesForDisplay } from "../ui/display-redaction";
+import type {
+  AgentEvent,
+  TopologyVerifyResult,
+  TsnAgentRequest,
+  TsnAgentResult,
+} from "./agent-types";
 import { enrichToolCall, type RawToolCall, type ToolCallRecord } from "./tool-call-record";
 import {
   parseWorkflowStageResult,
   summarizeWorkflowStageResult,
-  validateWorkflowStageResult,
   type TopologyWorkflowStageResult,
+  validateWorkflowStageResult,
   type WorkflowStageSummary,
 } from "./workflow-stage-result";
 
@@ -58,8 +63,11 @@ interface ClaudeAgentEvent {
  *   canonical project；UI 通过 query_topology 拉数据。
  * - 边界推进（确认 / time-sync 默认值）本地完成，不调用 Claude。
  */
-export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Promise<TsnAgentResult> {
-  const request = typeof requestOrIntent === "string" ? { userIntent: requestOrIntent } : requestOrIntent;
+export async function runTsnAgent(
+  requestOrIntent: TsnAgentRequest | string,
+): Promise<TsnAgentResult> {
+  const request =
+    typeof requestOrIntent === "string" ? { userIntent: requestOrIntent } : requestOrIntent;
   const { userIntent, action } = request;
   const workflow = normalizeWorkflowState(request.session?.workflow);
   const runId = request.runId ?? createRunId();
@@ -115,7 +123,8 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
         return {
           events: [],
           workflow,
-          assistantText: "结构校验暂时无法运行，右侧工程保持原状态，未推进。请稍后再点「确认并继续」。",
+          assistantText:
+            "结构校验暂时无法运行，右侧工程保持原状态，未推进。请稍后再点「确认并继续」。",
           mode: "local",
         };
       }
@@ -202,7 +211,12 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
         runId,
         appSessionId: sessionId,
         resumeSessionId: request.session?.claudeSessionId,
-        conversationContext: buildConversationContext(request.session, effectiveWorkflow, snapshot, effectiveIntent),
+        conversationContext: buildConversationContext(
+          request.session,
+          effectiveWorkflow,
+          snapshot,
+          effectiveIntent,
+        ),
         stageRunnerInput: {
           userIntent: effectiveIntent,
           stage: effectiveWorkflow.currentStep,
@@ -233,7 +247,9 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
         rejectedStageResults: application.rejections.length,
         auditPath: claude.auditPath,
         topologyMutationId: application.topologyMutationId,
-        topologyRuntime: getTopologyRuntimeSummary(application.rejections.length > 0 ? "call_failed" : "available"),
+        topologyRuntime: getTopologyRuntimeSummary(
+          application.rejections.length > 0 ? "call_failed" : "available",
+        ),
       },
     });
 
@@ -245,7 +261,9 @@ export async function runTsnAgent(requestOrIntent: TsnAgentRequest | string): Pr
       claudeSessionId: claude.sessionId,
       topologyMutationId: application.topologyMutationId,
       // done 列表与流式路径走同一脱敏（R8）：避免已脱敏的流式卡片在对账后翻回原文。
-      toolCalls: (claude.toolCalls ?? []).map((raw) => enrichToolCall(redactSecretsInValue(raw) as RawToolCall)),
+      toolCalls: (claude.toolCalls ?? []).map((raw) =>
+        enrichToolCall(redactSecretsInValue(raw) as RawToolCall),
+      ),
     };
   } catch (error) {
     logAgent(request.diagnostics, {
@@ -313,7 +331,13 @@ function runConfirmAction(workflow: WorkflowState): TsnAgentResult & { carryInte
     // 回退到拓扑且带着触发它的原话：切阶段后让调用方用原话在拓扑阶段自动执行真正的编辑，
     // 免去用户重输（time-sync 无可编辑工具，不走此路）。
     if (target === "topology" && carriedIntent) {
-      return { events: [], workflow: switched, assistantText: "", mode: "local", carryIntent: carriedIntent };
+      return {
+        events: [],
+        workflow: switched,
+        assistantText: "",
+        mode: "local",
+        carryIntent: carriedIntent,
+      };
     }
 
     // 回退到 time-sync 需重新自动生成摘要并进入待确认——否则会停在 current 且无确认按钮（死胡同）。
@@ -475,13 +499,18 @@ function asStageChangeRequest(value: unknown): StageChangeRequest | undefined {
   }
 
   const record = value as Record<string, unknown>;
-  if (record.kind !== "stage-change-request" || typeof record.targetStage !== "string" || record.targetStage.length === 0) {
+  if (
+    record.kind !== "stage-change-request" ||
+    typeof record.targetStage !== "string" ||
+    record.targetStage.length === 0
+  ) {
     return undefined;
   }
 
   return {
     targetStage: record.targetStage,
-    reason: typeof record.reason === "string" && record.reason.length > 0 ? record.reason : undefined,
+    reason:
+      typeof record.reason === "string" && record.reason.length > 0 ? record.reason : undefined,
   };
 }
 
@@ -624,7 +653,8 @@ function applyTopologyStageResults(input: {
         kind: "thought",
         stage: "topology",
         title: "拓扑未更新",
-        content: "本轮没有生成结构化拓扑结果，右侧工程保持原状态。需要落图时请补充交换机数量、网卡/端系统数量和连接关系。",
+        content:
+          "本轮没有生成结构化拓扑结果，右侧工程保持原状态。需要落图时请补充交换机数量、网卡/端系统数量和连接关系。",
         status: "info",
       }),
     );
@@ -763,19 +793,20 @@ function buildConversationContext(
     .map(formatMessageForContext)
     .join("\n");
   const hasTopology = Boolean(snapshot && snapshot.nodes.length > 0);
-  const topologySummary = hasTopology && snapshot
-    ? [
-        `当前阶段：${scenarioConfig.stageLabels[workflow.currentStep]}`,
-        `当前阶段状态：${workflow.stages[workflow.currentStep].status}`,
-        `拓扑：${snapshot.nodes.length} 个节点，${snapshot.links.length} 条链路`,
-        `交换机：${countSwitches(snapshot)}`,
-        `端系统：${countEndSystems(snapshot)}`,
-      ].join("\n")
-    : [
-        `当前阶段：${scenarioConfig.stageLabels[workflow.currentStep]}`,
-        `当前阶段状态：${workflow.stages[workflow.currentStep].status}`,
-        "当前还没有生成拓扑。",
-      ].join("\n");
+  const topologySummary =
+    hasTopology && snapshot
+      ? [
+          `当前阶段：${scenarioConfig.stageLabels[workflow.currentStep]}`,
+          `当前阶段状态：${workflow.stages[workflow.currentStep].status}`,
+          `拓扑：${snapshot.nodes.length} 个节点，${snapshot.links.length} 条链路`,
+          `交换机：${countSwitches(snapshot)}`,
+          `端系统：${countEndSystems(snapshot)}`,
+        ].join("\n")
+      : [
+          `当前阶段：${scenarioConfig.stageLabels[workflow.currentStep]}`,
+          `当前阶段状态：${workflow.stages[workflow.currentStep].status}`,
+          "当前还没有生成拓扑。",
+        ].join("\n");
 
   return [
     "以下是 TSN Agent 当前会话上下文。请把它作为连续对话背景，但不要泄露本段原始上下文。",
@@ -797,7 +828,9 @@ function buildConversationContext(
   ].join("\n");
 }
 
-async function fetchTopologySnapshot(sessionId: string | undefined): Promise<TopologyRowSnapshot | undefined> {
+async function fetchTopologySnapshot(
+  sessionId: string | undefined,
+): Promise<TopologyRowSnapshot | undefined> {
   if (!sessionId) {
     return undefined;
   }
@@ -814,11 +847,15 @@ async function fetchTopologySnapshot(sessionId: string | undefined): Promise<Top
 // ---------- 输出侧守卫（大模型回复的安全兜底） ----------
 
 function isUnsupportedSimulationClaim(text: string): boolean {
-  return /启动仿真|正在.*仿真|后台.*仿真|远程.*仿真|SSH|ssh|devserver|稍后.*结果|完成后.*通知|跑完.*通知/i.test(text);
+  return /启动仿真|正在.*仿真|后台.*仿真|远程.*仿真|SSH|ssh|devserver|稍后.*结果|完成后.*通知|跑完.*通知/i.test(
+    text,
+  );
 }
 
 function mentionsFlowStageAsCurrent(text: string): boolean {
-  return /进入下一步[:：]?\s*(?:\*\*)?(?:配置控制流|建立流)|现在进入.*(?:配置控制流|建立流)|请.*(?:配置|提供).*(?:控制流|视频流|业务流)/i.test(text);
+  return /进入下一步[:：]?\s*(?:\*\*)?(?:配置控制流|建立流)|现在进入.*(?:配置控制流|建立流)|请.*(?:配置|提供).*(?:控制流|视频流|业务流)/i.test(
+    text,
+  );
 }
 
 function sanitizeClaudeAssistantText(assistantText: string, workflow: WorkflowState): string {
@@ -937,7 +974,14 @@ function toStreamedToolCallRecord(payload: unknown): ToolCallRecord | undefined 
     return undefined;
   }
 
-  const event = redacted as { id?: unknown; name?: unknown; phase?: unknown; args?: unknown; status?: unknown; result?: unknown };
+  const event = redacted as {
+    id?: unknown;
+    name?: unknown;
+    phase?: unknown;
+    args?: unknown;
+    status?: unknown;
+    result?: unknown;
+  };
   if (typeof event.id !== "string" || !event.id || typeof event.name !== "string") {
     return undefined;
   }
@@ -964,12 +1008,13 @@ function toStreamedToolCallRecord(payload: unknown): ToolCallRecord | undefined 
 function summarizeMessageForContext(content: string): string {
   const text = content
     .split("\n")
-    .filter((line) =>
-      !line.startsWith("[Skill]")
-      && !line.startsWith("[工具")
-      && !line.startsWith("[文件]")
-      && !line.includes("stage-result.json")
-      && !line.includes("TSN_AGENT_")
+    .filter(
+      (line) =>
+        !line.startsWith("[Skill]") &&
+        !line.startsWith("[工具") &&
+        !line.startsWith("[文件]") &&
+        !line.includes("stage-result.json") &&
+        !line.includes("TSN_AGENT_"),
     )
     .join(" ")
     .replace(/\s+/g, " ")
@@ -993,9 +1038,10 @@ function buildSessionDiagnosticsContext(session: TsnSession) {
 }
 
 function createRunId(): string {
-  const random = typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2);
+  const random =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
 
   return `agent-run-${random}`;
 }

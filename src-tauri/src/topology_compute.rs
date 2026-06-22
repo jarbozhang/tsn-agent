@@ -23,10 +23,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::topology_intermediate::{
-    create_ports, derive_legacy_ip, derive_legacy_mac, derive_mac_address, sort_links_by_numeric_id,
-    sort_nodes_by_numeric_id, IntermediateLink, IntermediateLinkEndpoint, IntermediateLinkMedium,
-    IntermediateNode, IntermediateNodeType, IntermediatePosition, IntermediateTopology,
-    IntermediateTopologyMetadata, INTERMEDIATE_TOPOLOGY_SCHEMA_VERSION,
+    create_ports, derive_legacy_ip, derive_legacy_mac, derive_mac_address,
+    sort_links_by_numeric_id, sort_nodes_by_numeric_id, IntermediateLink, IntermediateLinkEndpoint,
+    IntermediateLinkMedium, IntermediateNode, IntermediateNodeType, IntermediatePosition,
+    IntermediateTopology, IntermediateTopologyMetadata, INTERMEDIATE_TOPOLOGY_SCHEMA_VERSION,
 };
 
 // ============================================================================
@@ -129,7 +129,9 @@ pub fn describe_templates_catalog_filtered(scenario: Option<&str>) -> Value {
     if let Some(scenario) = scenario {
         catalog["scenario"] = json!(scenario);
         if catalog["templateCount"] == json!(0) {
-            catalog["warning"] = json!(format!("未知场景 {scenario}，无匹配模板；省略 scenario 参数可获取全量目录。"));
+            catalog["warning"] = json!(format!(
+                "未知场景 {scenario}，无匹配模板；省略 scenario 参数可获取全量目录。"
+            ));
         }
     }
     catalog
@@ -339,7 +341,8 @@ pub fn initialize_topology(
         );
         // 防御兜底：sidecar initialize 路径不复验生成结果，参数校验之外的结构性
         // 损坏（自环 / 重复 node id / 重复端口）须在落库前被结构校验拦截。
-        let report = validate_intermediate_topology(&serde_json::to_value(&topology).unwrap_or(Value::Null));
+        let report =
+            validate_intermediate_topology(&serde_json::to_value(&topology).unwrap_or(Value::Null));
         if !report.ok {
             return Err(report.errors);
         }
@@ -434,28 +437,37 @@ fn normalize_integer_param(
         None | Some(Value::Null) => {
             return Err(vec![TopologyErrorOut::new(
                 "INVALID_TEMPLATE_PARAM",
-                format!("{} is required and must be an integer in [{}, {}].", path, min, max),
+                format!("{path} is required and must be an integer in [{min}, {max}]."),
                 path,
             )
             .with_details(json!({"minimum": min, "maximum": max, "actual": Value::Null}))
             .requires_clarification()]);
         }
-        Some(v) => v.as_i64().or_else(|| v.as_f64().and_then(|f| {
-            if f.fract() == 0.0 { Some(f as i64) } else { None }
-        })).ok_or_else(|| {
-            vec![TopologyErrorOut::new(
-                "INVALID_TEMPLATE_PARAM",
-                format!("{} must be an integer in [{}, {}].", path, min, max),
-                path,
-            )
-            .with_details(json!({"minimum": min, "maximum": max, "actual": v.to_string()}))
-            .requires_clarification()]
-        })?,
+        Some(v) => v
+            .as_i64()
+            .or_else(|| {
+                v.as_f64().and_then(|f| {
+                    if f.fract() == 0.0 {
+                        Some(f as i64)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .ok_or_else(|| {
+                vec![TopologyErrorOut::new(
+                    "INVALID_TEMPLATE_PARAM",
+                    format!("{path} must be an integer in [{min}, {max}]."),
+                    path,
+                )
+                .with_details(json!({"minimum": min, "maximum": max, "actual": v.to_string()}))
+                .requires_clarification()]
+            })?,
     };
     if n < min || n > max {
         return Err(vec![TopologyErrorOut::new(
             "INVALID_TEMPLATE_PARAM",
-            format!("{} must be an integer in [{}, {}].", path, min, max),
+            format!("{path} must be an integer in [{min}, {max}]."),
             path,
         )
         .with_details(json!({"minimum": min, "maximum": max, "actual": n.to_string()}))
@@ -470,8 +482,7 @@ fn normalize_data_rate(value: Option<&Value>) -> Result<i64, Vec<TopologyErrorOu
             return Err(vec![TopologyErrorOut::new(
                 "INVALID_TEMPLATE_PARAM",
                 format!(
-                    "$.params.dataRateMbps is required and must be one of {:?}.",
-                    SUPPORTED_DATA_RATES
+                    "$.params.dataRateMbps is required and must be one of {SUPPORTED_DATA_RATES:?}."
                 ),
                 "$.params.dataRateMbps",
             )
@@ -481,31 +492,34 @@ fn normalize_data_rate(value: Option<&Value>) -> Result<i64, Vec<TopologyErrorOu
             }))
             .requires_clarification()]);
         }
-        Some(v) => v.as_i64().or_else(|| v.as_f64().and_then(|f| {
-            if f.fract() == 0.0 { Some(f as i64) } else { None }
-        })).ok_or_else(|| {
-            vec![TopologyErrorOut::new(
-                "INVALID_TEMPLATE_PARAM",
-                format!(
-                    "$.params.dataRateMbps must be one of {:?}.",
-                    SUPPORTED_DATA_RATES
-                ),
-                "$.params.dataRateMbps",
-            )
-            .with_details(json!({
-                "allowed": SUPPORTED_DATA_RATES,
-                "actual": v.to_string()
-            }))
-            .requires_clarification()]
-        })?,
+        Some(v) => v
+            .as_i64()
+            .or_else(|| {
+                v.as_f64().and_then(|f| {
+                    if f.fract() == 0.0 {
+                        Some(f as i64)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .ok_or_else(|| {
+                vec![TopologyErrorOut::new(
+                    "INVALID_TEMPLATE_PARAM",
+                    format!("$.params.dataRateMbps must be one of {SUPPORTED_DATA_RATES:?}."),
+                    "$.params.dataRateMbps",
+                )
+                .with_details(json!({
+                    "allowed": SUPPORTED_DATA_RATES,
+                    "actual": v.to_string()
+                }))
+                .requires_clarification()]
+            })?,
     };
     if !SUPPORTED_DATA_RATES.contains(&n) {
         return Err(vec![TopologyErrorOut::new(
             "INVALID_TEMPLATE_PARAM",
-            format!(
-                "$.params.dataRateMbps must be one of {:?}.",
-                SUPPORTED_DATA_RATES
-            ),
+            format!("$.params.dataRateMbps must be one of {SUPPORTED_DATA_RATES:?}."),
             "$.params.dataRateMbps",
         )
         .with_details(json!({
@@ -539,7 +553,10 @@ fn generic_line_column_pitch(end_systems_per_switch: usize) -> f64 {
     LINE_X_PITCH.max(group_width + LINE_ES_GROUP_GAP)
 }
 
-fn layout_generic_line_switch(switch_index: usize, end_systems_per_switch: usize) -> IntermediatePosition {
+fn layout_generic_line_switch(
+    switch_index: usize,
+    end_systems_per_switch: usize,
+) -> IntermediatePosition {
     let column_pitch = generic_line_column_pitch(end_systems_per_switch);
     IntermediatePosition {
         x: LINE_X_BASE + column_pitch * (switch_index as f64 - 1.0),
@@ -574,7 +591,11 @@ fn layout_generic_line_end_system(
 /// 行向交替、折返处上下对齐），<5 单行直线。
 fn layout_line_ends_only(switch_count: usize) -> LineEndsOnlyLayout {
     let folded = switch_count >= LINE_FOLD_THRESHOLD;
-    let row_capacity = if folded { switch_count.div_ceil(2) } else { switch_count };
+    let row_capacity = if folded {
+        switch_count.div_ceil(2)
+    } else {
+        switch_count
+    };
 
     let switch_position = |index: usize| -> IntermediatePosition {
         let row = index / row_capacity;
@@ -585,7 +606,10 @@ fn layout_line_ends_only(switch_count: usize) -> LineEndsOnlyLayout {
             let row0_last_x = LINE_X_BASE + LINE_X_PITCH * (row_capacity as f64 - 1.0);
             row0_last_x - LINE_X_PITCH * col as f64
         };
-        IntermediatePosition { x, y: LINE_ROW_Y + LINE_ROW_PITCH * row as f64 }
+        IntermediatePosition {
+            x,
+            y: LINE_ROW_Y + LINE_ROW_PITCH * row as f64,
+        }
     };
 
     let switch_positions: Vec<IntermediatePosition> =
@@ -593,12 +617,21 @@ fn layout_line_ends_only(switch_count: usize) -> LineEndsOnlyLayout {
     let first_pos = switch_positions[0].clone();
     let last_pos = switch_positions[switch_count - 1].clone();
     let last_row = (switch_count - 1) / row_capacity;
-    let first_end_system = IntermediatePosition { x: first_pos.x - LINE_ES_GAP, y: first_pos.y };
+    let first_end_system = IntermediatePosition {
+        x: first_pos.x - LINE_ES_GAP,
+        y: first_pos.y,
+    };
     // 末行行向：偶数行向右伸，奇数行（反向行）向左伸。
     let last_end_system = if last_row % 2 == 0 {
-        IntermediatePosition { x: last_pos.x + LINE_ES_GAP, y: last_pos.y }
+        IntermediatePosition {
+            x: last_pos.x + LINE_ES_GAP,
+            y: last_pos.y,
+        }
     } else {
-        IntermediatePosition { x: last_pos.x - LINE_ES_GAP, y: last_pos.y }
+        IntermediatePosition {
+            x: last_pos.x - LINE_ES_GAP,
+            y: last_pos.y,
+        }
     };
 
     LineEndsOnlyLayout {
@@ -624,9 +657,9 @@ fn create_generic_line_ends_only_topology(
 
     for switch_index in 1..=switch_count {
         nodes.push(IntermediateNode {
-            id: format!("sw{}", switch_index),
+            id: format!("sw{switch_index}"),
             numeric_id: numeric_node_id,
-            name: format!("SW-{}", switch_index),
+            name: format!("SW-{switch_index}"),
             node_type: IntermediateNodeType::Switch,
             ports: create_ports(2),
             position: layout.switch_positions[switch_index - 1].clone(),
@@ -653,7 +686,7 @@ fn create_generic_line_ends_only_topology(
             ports: create_ports(1),
             position: pos,
             mac_address: Some(derive_mac_address(ordinal as i64 + 1)),
-            ip_address: Some(format!("10.0.{}.1", ip_octet)),
+            ip_address: Some(format!("10.0.{ip_octet}.1")),
         });
         numeric_node_id += 1;
     }
@@ -664,18 +697,25 @@ fn create_generic_line_ends_only_topology(
         let counter = port_cursor.entry(node.to_string()).or_insert(0);
         let value = *counter;
         *counter += 1;
-        format!("P{}", value)
+        format!("P{value}")
     };
 
-    let last_switch = format!("sw{}", switch_count);
+    let last_switch = format!("sw{switch_count}");
     for (es_id, sw_id) in [("es1", "sw1".to_string()), ("es2", last_switch)] {
         let es_port = next_port(es_id);
         let sw_port = next_port(&sw_id);
-        links.push(create_link(numeric_link_id, es_id, &es_port, &sw_id, &sw_port, data_rate));
+        links.push(create_link(
+            numeric_link_id,
+            es_id,
+            &es_port,
+            &sw_id,
+            &sw_port,
+            data_rate,
+        ));
         numeric_link_id += 1;
     }
     for index in 1..switch_count {
-        let upstream = format!("sw{}", index);
+        let upstream = format!("sw{index}");
         let downstream = format!("sw{}", index + 1);
         let up_port = next_port(&upstream);
         let down_port = next_port(&downstream);
@@ -700,7 +740,11 @@ fn create_generic_line_ends_only_topology(
                 "endSystemPlacement": "ends-only",
                 "dataRateMbps": data_rate,
             })),
-            layout: Some(if layout.folded { "line-serpentine".into() } else { "line".into() }),
+            layout: Some(if layout.folded {
+                "line-serpentine".into()
+            } else {
+                "line".into()
+            }),
             source: Some("template".into()),
         },
         nodes,
@@ -722,12 +766,12 @@ fn create_generic_distributed_topology(
     let mut numeric_link_id: i64 = 0;
 
     for switch_index in 1..=switch_count {
-        let switch_id = format!("sw{}", switch_index);
+        let switch_id = format!("sw{switch_index}");
         switch_ids.push(switch_id.clone());
         nodes.push(IntermediateNode {
             id: switch_id,
             numeric_id: numeric_node_id,
-            name: format!("SW-{}", switch_index),
+            name: format!("SW-{switch_index}"),
             node_type: IntermediateNodeType::Switch,
             ports: create_ports(end_systems_per_switch + 2),
             position: layout_generic_line_switch(switch_index, end_systems_per_switch),
@@ -738,15 +782,15 @@ fn create_generic_distributed_topology(
     }
 
     for switch_index in 1..=switch_count {
-        let switch_id = format!("sw{}", switch_index);
+        let switch_id = format!("sw{switch_index}");
         for host_index in 1..=end_systems_per_switch {
-            let host_id = format!("es{}-{}", switch_index, host_index);
+            let host_id = format!("es{switch_index}-{host_index}");
             let host_ordinal = ((switch_index - 1) * end_systems_per_switch + host_index) as i64;
 
             nodes.push(IntermediateNode {
                 id: host_id.clone(),
                 numeric_id: numeric_node_id,
-                name: format!("ES-{}-{}", switch_index, host_index),
+                name: format!("ES-{switch_index}-{host_index}"),
                 node_type: IntermediateNodeType::EndSystem,
                 ports: create_ports(1),
                 position: layout_generic_line_end_system(
@@ -755,7 +799,7 @@ fn create_generic_distributed_topology(
                     end_systems_per_switch,
                 ),
                 mac_address: Some(derive_mac_address(host_ordinal)),
-                ip_address: Some(format!("10.0.{}.{}", switch_index, host_index)),
+                ip_address: Some(format!("10.0.{switch_index}.{host_index}")),
             });
             numeric_node_id += 1;
 
@@ -776,7 +820,7 @@ fn create_generic_distributed_topology(
         links.push(create_link(
             numeric_link_id,
             &switch_ids[index],
-            &format!("P{}", switch_interconnect_port_offset),
+            &format!("P{switch_interconnect_port_offset}"),
             &switch_ids[index + 1],
             &format!("P{}", switch_interconnect_port_offset + 1),
             data_rate,
@@ -788,7 +832,7 @@ fn create_generic_distributed_topology(
         links.push(create_link(
             numeric_link_id,
             &switch_ids[switch_ids.len() - 1],
-            &format!("P{}", switch_interconnect_port_offset),
+            &format!("P{switch_interconnect_port_offset}"),
             &switch_ids[0],
             &format!("P{}", switch_interconnect_port_offset + 1),
             data_rate,
@@ -804,7 +848,11 @@ fn create_generic_distributed_topology(
                 "endSystemsPerSwitch": end_systems_per_switch,
                 "dataRateMbps": data_rate,
             })),
-            layout: Some(if template_id == "generic-ring" { "ring".into() } else { "line".into() }),
+            layout: Some(if template_id == "generic-ring" {
+                "ring".into()
+            } else {
+                "line".into()
+            }),
             source: Some("template".into()),
         },
         nodes,
@@ -822,7 +870,7 @@ fn create_link(
     data_rate_mbps: i64,
 ) -> IntermediateLink {
     IntermediateLink {
-        id: format!("link-{}", numeric_id),
+        id: format!("link-{numeric_id}"),
         numeric_id,
         source: IntermediateLinkEndpoint {
             node_id: source_node_id.into(),
@@ -948,7 +996,7 @@ fn parse_dual_plane_params(params: &Value) -> Result<DualPlaneParams, Vec<Topolo
     serde_json::from_value::<DualPlaneParams>(params.clone()).map_err(|error| {
         vec![dp_err(
             "INVALID_TEMPLATE_PARAM",
-            format!("dual-plane-redundant params are not well-formed: {}", error),
+            format!("dual-plane-redundant params are not well-formed: {error}"),
             "$.params",
         )]
     })
@@ -975,7 +1023,7 @@ fn validate_dual_plane_params(params: &DualPlaneParams) -> Vec<TopologyErrorOut>
                 )),
                 other => errors.push(dp_err(
                     "INVALID_TEMPLATE_PARAM",
-                    format!("$.params.backbone.mode must be \"line\" (got {:?}).", other),
+                    format!("$.params.backbone.mode must be \"line\" (got {other:?})."),
                     "$.params.backbone.mode",
                 )),
             }
@@ -1005,7 +1053,7 @@ fn validate_dual_plane_params(params: &DualPlaneParams) -> Vec<TopologyErrorOut>
             )),
             other => errors.push(dp_err(
                 "INVALID_TEMPLATE_PARAM",
-                format!("$.params.crossPlaneLinks.mode must be \"none\" (got {:?}).", other),
+                format!("$.params.crossPlaneLinks.mode must be \"none\" (got {other:?})."),
                 "$.params.crossPlaneLinks.mode",
             )),
         },
@@ -1020,15 +1068,19 @@ fn validate_dual_plane_params(params: &DualPlaneParams) -> Vec<TopologyErrorOut>
     }
     let mut switch_plane: HashMap<String, String> = HashMap::new();
     for (i, sw) in params.switches.iter().enumerate() {
-        let path = format!("$.params.switches[{}]", i);
+        let path = format!("$.params.switches[{i}]");
         if sw.id.is_empty() {
-            errors.push(dp_err("INVALID_TEMPLATE_PARAM", "switch id is required.", &format!("{}.id", path)));
+            errors.push(dp_err(
+                "INVALID_TEMPLATE_PARAM",
+                "switch id is required.",
+                &format!("{path}.id"),
+            ));
         }
         if sw.plane != "A" && sw.plane != "B" {
             errors.push(dp_err(
                 "INVALID_TEMPLATE_PARAM",
                 format!("switch plane must be \"A\" or \"B\" (got {:?}).", sw.plane),
-                &format!("{}.plane", path),
+                &format!("{path}.plane"),
             ));
         }
         if !sw.id.is_empty() {
@@ -1036,7 +1088,7 @@ fn validate_dual_plane_params(params: &DualPlaneParams) -> Vec<TopologyErrorOut>
                 errors.push(dp_err(
                     "INVALID_TEMPLATE_PARAM",
                     format!("duplicate switch id {:?}.", sw.id),
-                    &format!("{}.id", path),
+                    &format!("{path}.id"),
                 ));
             } else {
                 switch_plane.insert(sw.id.clone(), sw.plane.clone());
@@ -1054,25 +1106,41 @@ fn validate_dual_plane_params(params: &DualPlaneParams) -> Vec<TopologyErrorOut>
     let mut group_ids: HashSet<String> = HashSet::new();
     let mut group_referenced_switches: HashSet<String> = HashSet::new();
     for (i, g) in params.switch_groups.iter().enumerate() {
-        let path = format!("$.params.switchGroups[{}]", i);
+        let path = format!("$.params.switchGroups[{i}]");
         if g.id.is_empty() {
-            errors.push(dp_err("INVALID_TEMPLATE_PARAM", "switchGroup id is required.", &format!("{}.id", path)));
+            errors.push(dp_err(
+                "INVALID_TEMPLATE_PARAM",
+                "switchGroup id is required.",
+                &format!("{path}.id"),
+            ));
         } else if !group_ids.insert(g.id.clone()) {
             errors.push(dp_err(
                 "INVALID_TEMPLATE_PARAM",
                 format!("duplicate switchGroup id {:?}.", g.id),
-                &format!("{}.id", path),
+                &format!("{path}.id"),
             ));
         }
-        validate_group_switch(&g.plane_switches.a, "A", &switch_plane, &mut errors, &format!("{}.planeSwitches.A", path));
-        validate_group_switch(&g.plane_switches.b, "B", &switch_plane, &mut errors, &format!("{}.planeSwitches.B", path));
+        validate_group_switch(
+            &g.plane_switches.a,
+            "A",
+            &switch_plane,
+            &mut errors,
+            &format!("{path}.planeSwitches.A"),
+        );
+        validate_group_switch(
+            &g.plane_switches.b,
+            "B",
+            &switch_plane,
+            &mut errors,
+            &format!("{path}.planeSwitches.B"),
+        );
         // 同一 switch 不得被多个 group 引用（否则平面内骨干链会出现 sw->sw 自环）。
         for sid in [&g.plane_switches.a, &g.plane_switches.b] {
             if !sid.is_empty() && !group_referenced_switches.insert(sid.clone()) {
                 errors.push(dp_err(
                     "INVALID_TEMPLATE_PARAM",
-                    format!("switch {:?} is referenced by more than one switchGroup.", sid),
-                    &format!("{}.planeSwitches", path),
+                    format!("switch {sid:?} is referenced by more than one switchGroup."),
+                    &format!("{path}.planeSwitches"),
                 ));
             }
         }
@@ -1082,7 +1150,7 @@ fn validate_dual_plane_params(params: &DualPlaneParams) -> Vec<TopologyErrorOut>
             errors.push(dp_err(
                 "INVALID_TEMPLATE_PARAM",
                 format!("switch references unknown groupId {:?}.", sw.group_id),
-                &format!("$.params.switches[{}].groupId", i),
+                &format!("$.params.switches[{i}].groupId"),
             ));
         }
     }
@@ -1096,22 +1164,26 @@ fn validate_dual_plane_params(params: &DualPlaneParams) -> Vec<TopologyErrorOut>
     }
     let mut es_ids: HashSet<String> = HashSet::new();
     for (i, es) in params.end_systems.iter().enumerate() {
-        let path = format!("$.params.endSystems[{}]", i);
+        let path = format!("$.params.endSystems[{i}]");
         if es.id.is_empty() {
-            errors.push(dp_err("INVALID_TEMPLATE_PARAM", "endSystem id is required.", &format!("{}.id", path)));
+            errors.push(dp_err(
+                "INVALID_TEMPLATE_PARAM",
+                "endSystem id is required.",
+                &format!("{path}.id"),
+            ));
         } else {
             if !es_ids.insert(es.id.clone()) {
                 errors.push(dp_err(
                     "INVALID_TEMPLATE_PARAM",
                     format!("duplicate endSystem id {:?}.", es.id),
-                    &format!("{}.id", path),
+                    &format!("{path}.id"),
                 ));
             }
             if switch_plane.contains_key(&es.id) {
                 errors.push(dp_err(
                     "INVALID_TEMPLATE_PARAM",
                     format!("endSystem id {:?} collides with a switch id.", es.id),
-                    &format!("{}.id", path),
+                    &format!("{path}.id"),
                 ));
             }
         }
@@ -1119,25 +1191,40 @@ fn validate_dual_plane_params(params: &DualPlaneParams) -> Vec<TopologyErrorOut>
             errors.push(dp_err(
                 "INVALID_TEMPLATE_PARAM",
                 format!("endSystem references unknown groupId {:?}.", es.group_id),
-                &format!("{}.groupId", path),
+                &format!("{path}.groupId"),
             ));
         }
         let primary = &es.attachment.primary;
         let backup = &es.attachment.backup;
-        validate_attach_switch(&primary.switch_id, &primary.plane, &switch_plane, &mut errors, &format!("{}.attachment.primary", path));
-        validate_attach_switch(&backup.switch_id, &backup.plane, &switch_plane, &mut errors, &format!("{}.attachment.backup", path));
+        validate_attach_switch(
+            &primary.switch_id,
+            &primary.plane,
+            &switch_plane,
+            &mut errors,
+            &format!("{path}.attachment.primary"),
+        );
+        validate_attach_switch(
+            &backup.switch_id,
+            &backup.plane,
+            &switch_plane,
+            &mut errors,
+            &format!("{path}.attachment.backup"),
+        );
         if !primary.plane.is_empty() && primary.plane == backup.plane {
             errors.push(dp_err(
                 "INVALID_TEMPLATE_PARAM",
-                format!("endSystem primary/backup must be on different planes (both {:?}).", primary.plane),
-                &format!("{}.attachment", path),
+                format!(
+                    "endSystem primary/backup must be on different planes (both {:?}).",
+                    primary.plane
+                ),
+                &format!("{path}.attachment"),
             ));
         }
         if !primary.switch_id.is_empty() && primary.switch_id == backup.switch_id {
             errors.push(dp_err(
                 "INVALID_TEMPLATE_PARAM",
                 "endSystem primary/backup must attach to different switches.",
-                &format!("{}.attachment", path),
+                &format!("{path}.attachment"),
             ));
         }
     }
@@ -1151,8 +1238,11 @@ fn validate_dual_plane_params(params: &DualPlaneParams) -> Vec<TopologyErrorOut>
                 if declared < need {
                     errors.push(dp_err(
                         "INVALID_TEMPLATE_PARAM",
-                        format!("switch {:?} portCount {} < required {}.", sw.id, declared, need),
-                        &format!("$.params.switches[{}].portCount", i),
+                        format!(
+                            "switch {:?} portCount {} < required {}.",
+                            sw.id, declared, need
+                        ),
+                        &format!("$.params.switches[{i}].portCount"),
                     ));
                 }
             }
@@ -1170,14 +1260,18 @@ fn validate_group_switch(
     path: &str,
 ) {
     if switch_id.is_empty() {
-        errors.push(dp_err("INVALID_TEMPLATE_PARAM", format!("switchGroup must reference a plane-{} switch.", plane), path));
+        errors.push(dp_err(
+            "INVALID_TEMPLATE_PARAM",
+            format!("switchGroup must reference a plane-{plane} switch."),
+            path,
+        ));
         return;
     }
     match switch_plane.get(switch_id) {
-        None => errors.push(dp_err("INVALID_TEMPLATE_PARAM", format!("switchGroup references unknown switch {:?}.", switch_id), path)),
+        None => errors.push(dp_err("INVALID_TEMPLATE_PARAM", format!("switchGroup references unknown switch {switch_id:?}."), path)),
         Some(actual) if actual != plane => errors.push(dp_err(
             "INVALID_TEMPLATE_PARAM",
-            format!("switchGroup plane-{} must reference a plane-{} switch, but {:?} is plane-{}.", plane, plane, switch_id, actual),
+            format!("switchGroup plane-{plane} must reference a plane-{plane} switch, but {switch_id:?} is plane-{actual}."),
             path,
         )),
         Some(_) => {}
@@ -1192,15 +1286,19 @@ fn validate_attach_switch(
     path: &str,
 ) {
     if switch_id.is_empty() {
-        errors.push(dp_err("INVALID_TEMPLATE_PARAM", "endSystem attachment must reference a switch.", &format!("{}.switchId", path)));
+        errors.push(dp_err(
+            "INVALID_TEMPLATE_PARAM",
+            "endSystem attachment must reference a switch.",
+            &format!("{path}.switchId"),
+        ));
         return;
     }
     match switch_plane.get(switch_id) {
-        None => errors.push(dp_err("INVALID_TEMPLATE_PARAM", format!("endSystem attachment references unknown switch {:?}.", switch_id), &format!("{}.switchId", path))),
+        None => errors.push(dp_err("INVALID_TEMPLATE_PARAM", format!("endSystem attachment references unknown switch {switch_id:?}."), &format!("{path}.switchId"))),
         Some(actual) if !declared_plane.is_empty() && actual != declared_plane => errors.push(dp_err(
             "INVALID_TEMPLATE_PARAM",
-            format!("attachment plane {:?} does not match switch {:?} plane {:?}.", declared_plane, switch_id, actual),
-            &format!("{}.plane", path),
+            format!("attachment plane {declared_plane:?} does not match switch {switch_id:?} plane {actual:?}."),
+            &format!("{path}.plane"),
         )),
         Some(_) => {}
     }
@@ -1210,8 +1308,12 @@ fn validate_attach_switch(
 fn compute_switch_port_demand(params: &DualPlaneParams) -> HashMap<String, usize> {
     let mut demand: HashMap<String, usize> = HashMap::new();
     for es in &params.end_systems {
-        *demand.entry(es.attachment.primary.switch_id.clone()).or_default() += 1;
-        *demand.entry(es.attachment.backup.switch_id.clone()).or_default() += 1;
+        *demand
+            .entry(es.attachment.primary.switch_id.clone())
+            .or_default() += 1;
+        *demand
+            .entry(es.attachment.backup.switch_id.clone())
+            .or_default() += 1;
     }
     for plane in ["A", "B"] {
         let chain = plane_switch_chain(params, plane);
@@ -1229,7 +1331,13 @@ fn plane_switch_chain(params: &DualPlaneParams, plane: &str) -> Vec<String> {
     params
         .switch_groups
         .iter()
-        .map(|g| if plane == "A" { g.plane_switches.a.clone() } else { g.plane_switches.b.clone() })
+        .map(|g| {
+            if plane == "A" {
+                g.plane_switches.a.clone()
+            } else {
+                g.plane_switches.b.clone()
+            }
+        })
         .filter(|id| known.contains(id.as_str()))
         .collect()
 }
@@ -1260,7 +1368,7 @@ fn layout_dual_plane_redundant(
 ) -> HashMap<String, IntermediatePosition> {
     let group_count = params.switch_groups.len();
     let single_hop = group_count <= 1;
-    let left_group_count = (group_count + 1) / 2; // 前半挂左，奇数中位组归左。
+    let left_group_count = group_count.div_ceil(2); // 前半挂左，奇数中位组归左。
 
     // 列归属以 group 的 planeSwitches 引用为准（switch 自带 groupId 可能指向
     // 未引用它的 group——按 groupId 取列会与该 group 的真实交换机重叠）。
@@ -1280,21 +1388,32 @@ fn layout_dual_plane_redundant(
     let total_cols = group_count + extra_col.len();
     let single_hop_sw_center =
         DP_BASE_X + (DP_GROUP_PITCH / 2.0) * (ordered_switches.len().saturating_sub(1)) as f64;
-    let right_edge_x = DP_BASE_X + DP_GROUP_PITCH * (total_cols.saturating_sub(1)) as f64 + DP_SIDE_GAP;
+    let right_edge_x =
+        DP_BASE_X + DP_GROUP_PITCH * (total_cols.saturating_sub(1)) as f64 + DP_SIDE_GAP;
     let left_edge_x = DP_BASE_X - DP_SIDE_GAP;
 
     let mut positions: HashMap<String, IntermediatePosition> = HashMap::new();
     for (sw_seq, sw) in ordered_switches.iter().enumerate() {
         let position = if single_hop {
             // 规范图一：SW 同行居中、按节点序横排。
-            IntermediatePosition { x: DP_BASE_X + DP_GROUP_PITCH * sw_seq as f64, y: DP_SW_ROW_Y }
+            IntermediatePosition {
+                x: DP_BASE_X + DP_GROUP_PITCH * sw_seq as f64,
+                y: DP_SW_ROW_Y,
+            }
         } else {
             let col = match col_by_switch.get(&sw.id) {
                 Some(c) => *c,
                 None => group_count + extra_col[&sw.id],
             };
-            let y = if sw.plane == "B" { DP_PLANE_B_Y } else { DP_PLANE_A_Y };
-            IntermediatePosition { x: DP_BASE_X + DP_GROUP_PITCH * col as f64, y }
+            let y = if sw.plane == "B" {
+                DP_PLANE_B_Y
+            } else {
+                DP_PLANE_A_Y
+            };
+            IntermediatePosition {
+                x: DP_BASE_X + DP_GROUP_PITCH * col as f64,
+                y,
+            }
         };
         positions.insert(sw.id.clone(), position);
     }
@@ -1321,16 +1440,25 @@ fn layout_dual_plane_redundant(
         let position = if !group_index.contains_key(&es.group_id) {
             let x = DP_BASE_X + DP_ES_PITCH * overflow_cursor as f64;
             overflow_cursor += 1;
-            IntermediatePosition { x, y: DP_OVERFLOW_Y }
+            IntermediatePosition {
+                x,
+                y: DP_OVERFLOW_Y,
+            }
         } else if single_hop {
             // 规范图一：组内声明序前 ceil(n/2) 上行、其余下行，行内对 SW 居中。
             let n = *group_es_count.get(&es.group_id).unwrap_or(&1);
-            let n_up = (n + 1) / 2;
-            let (row_y, idx, row_len) =
-                if wi < n_up { (DP_ES_TOP_Y, wi, n_up) } else { (DP_ES_BOTTOM_Y, wi - n_up, n - n_up) };
+            let n_up = n.div_ceil(2);
+            let (row_y, idx, row_len) = if wi < n_up {
+                (DP_ES_TOP_Y, wi, n_up)
+            } else {
+                (DP_ES_BOTTOM_Y, wi - n_up, n - n_up)
+            };
             let row_start =
                 single_hop_sw_center - (DP_ES_PITCH / 2.0) * (row_len.saturating_sub(1)) as f64;
-            IntermediatePosition { x: row_start + DP_ES_PITCH * idx as f64, y: row_y }
+            IntermediatePosition {
+                x: row_start + DP_ES_PITCH * idx as f64,
+                y: row_y,
+            }
         } else {
             // 规范图 4-5：优先对齐 primary 平面行；该行被占则让位到另一行
             // （同 x 纵向成列），两行占满后沿列背离走廊延伸。
@@ -1368,17 +1496,23 @@ fn layout_dual_plane_redundant(
     positions
 }
 
-
 /// 确定性生成（R2/R5）。节点序 = switches（按 group、A 先 B）→ end systems（按
 /// group、声明序）；链路序 = 接入（每 ES 先 primary 后 backup)→ 平面内 backbone。
 /// 端口 first-free（每节点游标）。布局按组数分支：单跳三明治（SW 同行居中、ES
 /// 上下两行夹住）；多组双平面行（B 上 A 下、ES 按 group 前半左/后半右挂外端，
 /// y 对齐 primary 平面行，同 lane 沿外端堆叠）。全部整数算术，节点序不动。
-fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64) -> IntermediateTopology {
+fn create_dual_plane_redundant_topology(
+    params: &DualPlaneParams,
+    data_rate: i64,
+) -> IntermediateTopology {
     let switch_by_id: HashMap<String, &DualPlaneSwitch> =
         params.switches.iter().map(|s| (s.id.clone(), s)).collect();
-    let group_index: HashMap<String, usize> =
-        params.switch_groups.iter().enumerate().map(|(i, g)| (g.id.clone(), i)).collect();
+    let group_index: HashMap<String, usize> = params
+        .switch_groups
+        .iter()
+        .enumerate()
+        .map(|(i, g)| (g.id.clone(), i))
+        .collect();
 
     // 节点序：switches 按 group 顺序、A 先 B；末尾补未被 group 引用的 switch（声明序）。
     let mut ordered_switches: Vec<&DualPlaneSwitch> = Vec::new();
@@ -1481,7 +1615,10 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
         nodes.push(IntermediateNode {
             id: sw.id.clone(),
             numeric_id: numeric_node_id,
-            name: sw.name.clone().unwrap_or_else(|| format!("SW-{}", sw_ordinal)),
+            name: sw
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("SW-{sw_ordinal}")),
             node_type: IntermediateNodeType::Switch,
             ports: create_ports(port_count_for(&sw.id)),
             position: positions[&sw.id].clone(),
@@ -1504,7 +1641,10 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
         nodes.push(IntermediateNode {
             id: es.id.clone(),
             numeric_id: numeric_node_id,
-            name: es.name.clone().unwrap_or_else(|| format!("ES-{}", es_ordinal)),
+            name: es
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("ES-{es_ordinal}")),
             node_type: IntermediateNodeType::EndSystem,
             ports: create_ports(port_count_for(&es.id)),
             position: positions[&es.id].clone(),
@@ -1521,7 +1661,7 @@ fn create_dual_plane_redundant_topology(params: &DualPlaneParams, data_rate: i64
         let counter = cursor.entry(node.to_string()).or_insert(0);
         let value = *counter;
         *counter += 1;
-        format!("P{}", value)
+        format!("P{value}")
     };
     let mut links: Vec<IntermediateLink> = Vec::new();
     for (numeric_link_id, spec) in link_pairs.iter().enumerate() {
@@ -1603,11 +1743,14 @@ pub fn validate_intermediate_topology(candidate: &Value) -> ValidationReport {
         }
     };
 
-    let schema_version = obj.get("schemaVersion").and_then(Value::as_str).unwrap_or("");
+    let schema_version = obj
+        .get("schemaVersion")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     if schema_version != INTERMEDIATE_TOPOLOGY_SCHEMA_VERSION {
         errors.push(TopologyErrorOut::new(
             "UNSUPPORTED_SCHEMA_VERSION",
-            format!("Unsupported topology schemaVersion: {}", schema_version),
+            format!("Unsupported topology schemaVersion: {schema_version}"),
             "$.schemaVersion",
         ));
     }
@@ -1620,8 +1763,16 @@ pub fn validate_intermediate_topology(candidate: &Value) -> ValidationReport {
         ));
     }
 
-    let nodes = obj.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
-    let links = obj.get("links").and_then(Value::as_array).cloned().unwrap_or_default();
+    let nodes = obj
+        .get("nodes")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let links = obj
+        .get("links")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
 
     if obj.get("nodes").and_then(Value::as_array).is_none() {
         errors.push(TopologyErrorOut::new(
@@ -1703,7 +1854,7 @@ fn limit_error(limit: &str, path: &str, actual: usize) -> TopologyErrorOut {
     };
     TopologyErrorOut::new(
         "LIMIT_EXCEEDED",
-        format!("{} exceeded: {} > {}", limit, actual, maximum),
+        format!("{limit} exceeded: {actual} > {maximum}"),
         path,
     )
     .with_details(json!({ "limit": limit, "actual": actual, "maximum": maximum }))
@@ -1718,15 +1869,15 @@ fn validate_node_value(
     port_ids_by_node: &mut HashMap<String, HashSet<String>>,
     node_types_by_id: &mut HashMap<String, String>,
 ) {
-    let path = format!("$.nodes[{}]", index);
+    let path = format!("$.nodes[{index}]");
     let id_value = node.get("id").and_then(Value::as_str).map(str::to_string);
     match &id_value {
         Some(id) if !id.trim().is_empty() => {
             if node_ids.contains(id) {
                 errors.push(TopologyErrorOut::new(
                     "DUPLICATE_NODE_ID",
-                    format!("Duplicate node id: {}", id),
-                    &format!("{}.id", path),
+                    format!("Duplicate node id: {id}"),
+                    &format!("{path}.id"),
                 ));
             } else {
                 node_ids.insert(id.clone());
@@ -1741,7 +1892,7 @@ fn validate_node_value(
         _ => errors.push(TopologyErrorOut::new(
             "MISSING_NODE_ID",
             "Node id must be a non-empty string.",
-            &format!("{}.id", path),
+            &format!("{path}.id"),
         )),
     }
 
@@ -1750,8 +1901,8 @@ fn validate_node_value(
             if node_numeric_ids.contains(&n) {
                 errors.push(TopologyErrorOut::new(
                     "DUPLICATE_NODE_NUMERIC_ID",
-                    format!("Duplicate node numericId: {}", n),
-                    &format!("{}.numericId", path),
+                    format!("Duplicate node numericId: {n}"),
+                    &format!("{path}.numericId"),
                 ));
             } else {
                 node_numeric_ids.insert(n);
@@ -1760,7 +1911,7 @@ fn validate_node_value(
         _ => errors.push(TopologyErrorOut::new(
             "INVALID_NODE_NUMERIC_ID",
             "Node numericId must be a non-negative integer.",
-            &format!("{}.numericId", path),
+            &format!("{path}.numericId"),
         )),
     }
 
@@ -1769,7 +1920,7 @@ fn validate_node_value(
         _ => errors.push(TopologyErrorOut::new(
             "INVALID_NODE_NAME",
             "Node name must be a non-empty string.",
-            &format!("{}.name", path),
+            &format!("{path}.name"),
         )),
     }
 
@@ -1779,7 +1930,7 @@ fn validate_node_value(
         other => errors.push(TopologyErrorOut::new(
             "UNSUPPORTED_NODE_TYPE",
             format!("Unsupported node type: {}", other.unwrap_or("")),
-            &format!("{}.type", path),
+            &format!("{path}.type"),
         )),
     }
 
@@ -1789,13 +1940,13 @@ fn validate_node_value(
             if p.len() > MAX_PORTS_PER_NODE {
                 errors.push(limit_error(
                     "maxPortsPerNode",
-                    &format!("{}.ports", path),
+                    &format!("{path}.ports"),
                     p.len(),
                 ));
             }
             let mut port_ids: HashSet<String> = HashSet::new();
             for (pi, port) in p.iter().enumerate() {
-                let pp = format!("{}.ports[{}]", path, pi);
+                let pp = format!("{path}.ports[{pi}]");
                 match port.get("id").and_then(Value::as_str) {
                     Some(s) if !s.trim().is_empty() => {
                         if port_ids.contains(s) {
@@ -1806,7 +1957,7 @@ fn validate_node_value(
                                     id_value.as_deref().unwrap_or(""),
                                     s
                                 ),
-                                &format!("{}.id", pp),
+                                &format!("{pp}.id"),
                             ));
                         } else {
                             port_ids.insert(s.to_string());
@@ -1815,7 +1966,7 @@ fn validate_node_value(
                     _ => errors.push(TopologyErrorOut::new(
                         "MISSING_PORT_ID",
                         "Port id must be a non-empty string.",
-                        &format!("{}.id", pp),
+                        &format!("{pp}.id"),
                     )),
                 }
                 match port.get("index").and_then(Value::as_i64) {
@@ -1823,7 +1974,7 @@ fn validate_node_value(
                     _ => errors.push(TopologyErrorOut::new(
                         "INVALID_PORT_INDEX",
                         "Port index must be a non-negative integer.",
-                        &format!("{}.index", pp),
+                        &format!("{pp}.index"),
                     )),
                 }
             }
@@ -1834,7 +1985,7 @@ fn validate_node_value(
         _ => errors.push(TopologyErrorOut::new(
             "MISSING_NODE_PORTS",
             "Node ports must be a non-empty array.",
-            &format!("{}.ports", path),
+            &format!("{path}.ports"),
         )),
     }
 
@@ -1850,7 +2001,7 @@ fn validate_node_value(
         errors.push(TopologyErrorOut::new(
             "INVALID_NODE_POSITION",
             "Node position must contain numeric x and y.",
-            &format!("{}.position", path),
+            &format!("{path}.position"),
         ));
     }
 }
@@ -1866,7 +2017,7 @@ fn validate_link_values(
     let mut used_ports: HashMap<String, String> = HashMap::new();
 
     for (index, link) in links.iter().enumerate() {
-        let path = format!("$.links[{}]", index);
+        let path = format!("$.links[{index}]");
 
         let id_str = link.get("id").and_then(Value::as_str).map(str::to_string);
         match &id_str {
@@ -1874,8 +2025,8 @@ fn validate_link_values(
                 if link_ids.contains(s) {
                     errors.push(TopologyErrorOut::new(
                         "DUPLICATE_LINK_ID",
-                        format!("Duplicate link id: {}", s),
-                        &format!("{}.id", path),
+                        format!("Duplicate link id: {s}"),
+                        &format!("{path}.id"),
                     ));
                 } else {
                     link_ids.insert(s.clone());
@@ -1884,7 +2035,7 @@ fn validate_link_values(
             _ => errors.push(TopologyErrorOut::new(
                 "MISSING_LINK_ID",
                 "Link id must be a non-empty string.",
-                &format!("{}.id", path),
+                &format!("{path}.id"),
             )),
         }
 
@@ -1893,8 +2044,8 @@ fn validate_link_values(
                 if link_numeric_ids.contains(&n) {
                     errors.push(TopologyErrorOut::new(
                         "DUPLICATE_LINK_NUMERIC_ID",
-                        format!("Duplicate link numericId: {}", n),
-                        &format!("{}.numericId", path),
+                        format!("Duplicate link numericId: {n}"),
+                        &format!("{path}.numericId"),
                     ));
                 } else {
                     link_numeric_ids.insert(n);
@@ -1903,7 +2054,7 @@ fn validate_link_values(
             _ => errors.push(TopologyErrorOut::new(
                 "INVALID_LINK_NUMERIC_ID",
                 "Link numericId must be a non-negative integer.",
-                &format!("{}.numericId", path),
+                &format!("{path}.numericId"),
             )),
         }
 
@@ -1912,7 +2063,7 @@ fn validate_link_values(
             other => errors.push(TopologyErrorOut::new(
                 "UNSUPPORTED_LINK_MEDIUM",
                 format!("Unsupported link medium: {}", other.unwrap_or("")),
-                &format!("{}.medium", path),
+                &format!("{path}.medium"),
             )),
         }
 
@@ -1921,13 +2072,13 @@ fn validate_link_values(
             _ => errors.push(TopologyErrorOut::new(
                 "INVALID_LINK_RATE",
                 "Link dataRateMbps must be a positive integer.",
-                &format!("{}.dataRateMbps", path),
+                &format!("{path}.dataRateMbps"),
             )),
         }
 
         validate_endpoint(
             link.get("source"),
-            &format!("{}.source", path),
+            &format!("{path}.source"),
             errors,
             node_ids,
             port_ids_by_node,
@@ -1936,7 +2087,7 @@ fn validate_link_values(
         );
         validate_endpoint(
             link.get("target"),
-            &format!("{}.target", path),
+            &format!("{path}.target"),
             errors,
             node_ids,
             port_ids_by_node,
@@ -1956,7 +2107,10 @@ fn validate_link_values(
             if a == b {
                 errors.push(TopologyErrorOut::new(
                     "SELF_LINK",
-                    format!("Link {} cannot connect a node to itself.", id_str.as_deref().unwrap_or("")),
+                    format!(
+                        "Link {} cannot connect a node to itself.",
+                        id_str.as_deref().unwrap_or("")
+                    ),
                     &path,
                 ));
             }
@@ -1988,11 +2142,8 @@ fn validate_endpoint(
         _ => {
             errors.push(TopologyErrorOut::new(
                 "UNKNOWN_ENDPOINT_NODE",
-                format!(
-                    "Endpoint node does not exist: {}",
-                    node_id.unwrap_or("")
-                ),
-                &format!("{}.nodeId", path),
+                format!("Endpoint node does not exist: {}", node_id.unwrap_or("")),
+                &format!("{path}.nodeId"),
             ));
             return;
         }
@@ -2002,15 +2153,12 @@ fn validate_endpoint(
     let known_ports = port_ids_by_node.get(node_id);
     match (port_id, known_ports) {
         (Some(p), Some(ports)) if ports.contains(p) => {
-            let port_key = format!("{}:{}", node_id, p);
+            let port_key = format!("{node_id}:{p}");
             let current_link = link_id.unwrap_or("").to_string();
             if let Some(prev) = used_ports.get(&port_key) {
                 errors.push(TopologyErrorOut::new(
                     "PORT_ALREADY_USED",
-                    format!(
-                        "Port {} is used by both {} and {}.",
-                        port_key, prev, current_link
-                    ),
+                    format!("Port {port_key} is used by both {prev} and {current_link}."),
                     path,
                 ));
             } else {
@@ -2024,7 +2172,7 @@ fn validate_endpoint(
                 node_id,
                 port_id.unwrap_or("")
             ),
-            &format!("{}.portId", path),
+            &format!("{path}.portId"),
         )),
     }
 }
@@ -2118,11 +2266,11 @@ pub fn build_topology_artifacts(
     if !report.ok {
         return Err(report.errors);
     }
-    let topology: IntermediateTopology = serde_json::from_value(topology_value.clone())
-        .map_err(|e| {
+    let topology: IntermediateTopology =
+        serde_json::from_value(topology_value.clone()).map_err(|e| {
             vec![TopologyErrorOut::new(
                 "INVALID_INTERMEDIATE",
-                format!("Failed to deserialize IntermediateTopology: {}", e),
+                format!("Failed to deserialize IntermediateTopology: {e}"),
                 "$",
             )]
         })?;
@@ -2145,7 +2293,11 @@ pub fn build_topology_artifacts(
         + artifact_byte_length(&mac_table);
 
     if total_bytes > MAX_ARTIFACT_BYTES {
-        return Err(vec![limit_error("maxArtifactBytes", "$.artifacts", total_bytes)]);
+        return Err(vec![limit_error(
+            "maxArtifactBytes",
+            "$.artifacts",
+            total_bytes,
+        )]);
     }
 
     let topology_nodes_count = topology_json
@@ -2245,7 +2397,7 @@ fn node_by_id<'a>(
         .nodes
         .iter()
         .find(|n| n.id == node_id)
-        .ok_or_else(|| format!("Node {} does not exist.", node_id))
+        .ok_or_else(|| format!("Node {node_id} does not exist."))
 }
 
 fn build_legacy_topology_json(topology: &IntermediateTopology) -> Value {
@@ -2271,8 +2423,10 @@ fn build_legacy_topology_json(topology: &IntermediateTopology) -> Value {
     let links_out: Vec<Value> = sorted_links
         .iter()
         .map(|link| {
-            let source_node = node_by_id(topology, &link.source.node_id).unwrap_or_else(|_| &topology.nodes[0]);
-            let target_node = node_by_id(topology, &link.target.node_id).unwrap_or_else(|_| &topology.nodes[0]);
+            let source_node =
+                node_by_id(topology, &link.source.node_id).unwrap_or_else(|_| &topology.nodes[0]);
+            let target_node =
+                node_by_id(topology, &link.target.node_id).unwrap_or_else(|_| &topology.nodes[0]);
             let source_port = legacy_port_number(source_node, &link.source.port_id).unwrap_or(0);
             let target_port = legacy_port_number(target_node, &link.target.port_id).unwrap_or(0);
             json!({
@@ -2503,14 +2657,20 @@ fn build_adjacency(topology: &IntermediateTopology) -> HashMap<String, Vec<Adjac
         let s_port = legacy_port_number(source, &link.source.port_id).unwrap_or(0);
         let t_port = legacy_port_number(target, &link.target.port_id).unwrap_or(0);
 
-        adjacency.entry(link.source.node_id.clone()).or_default().push(AdjacencyEdge {
-            node_id: link.target.node_id.clone(),
-            out_port: s_port,
-        });
-        adjacency.entry(link.target.node_id.clone()).or_default().push(AdjacencyEdge {
-            node_id: link.source.node_id.clone(),
-            out_port: t_port,
-        });
+        adjacency
+            .entry(link.source.node_id.clone())
+            .or_default()
+            .push(AdjacencyEdge {
+                node_id: link.target.node_id.clone(),
+                out_port: s_port,
+            });
+        adjacency
+            .entry(link.target.node_id.clone())
+            .or_default()
+            .push(AdjacencyEdge {
+                node_id: link.source.node_id.clone(),
+                out_port: t_port,
+            });
     }
 
     for edges in adjacency.values_mut() {
@@ -2585,11 +2745,7 @@ pub fn describe_topology_artifacts(artifacts_value: &Value) -> Value {
                 .get("byteLength")
                 .and_then(Value::as_u64)
                 .map(|n| n as usize)
-                .unwrap_or_else(|| {
-                    art.get("data")
-                        .map(artifact_byte_length)
-                        .unwrap_or(0)
-                });
+                .unwrap_or_else(|| art.get("data").map(artifact_byte_length).unwrap_or(0));
         }
     }
     let node_count = topo
@@ -2632,34 +2788,28 @@ pub struct ValidateArtifactsReport {
 
 pub fn validate_topology_artifacts(artifacts_value: &Value) -> ValidateArtifactsReport {
     let mut errors: Vec<TopologyErrorOut> = Vec::new();
-    let topology_data = artifacts_value
-        .get("topology.json")
-        .and_then(|v| {
-            // 兼容包装形式 {data: ...} 和裸值
-            if v.is_object() && v.get("data").is_some() {
-                v.get("data").cloned()
-            } else {
-                Some(v.clone())
-            }
-        });
-    let topo_feature = artifacts_value
-        .get("topo_feature.json")
-        .and_then(|v| {
-            if v.is_object() && v.get("data").is_some() {
-                v.get("data").cloned()
-            } else {
-                Some(v.clone())
-            }
-        });
-    let data_server = artifacts_value
-        .get("data-server.json")
-        .and_then(|v| {
-            if v.is_object() && v.get("data").is_some() {
-                v.get("data").cloned()
-            } else {
-                Some(v.clone())
-            }
-        });
+    let topology_data = artifacts_value.get("topology.json").and_then(|v| {
+        // 兼容包装形式 {data: ...} 和裸值
+        if v.is_object() && v.get("data").is_some() {
+            v.get("data").cloned()
+        } else {
+            Some(v.clone())
+        }
+    });
+    let topo_feature = artifacts_value.get("topo_feature.json").and_then(|v| {
+        if v.is_object() && v.get("data").is_some() {
+            v.get("data").cloned()
+        } else {
+            Some(v.clone())
+        }
+    });
+    let data_server = artifacts_value.get("data-server.json").and_then(|v| {
+        if v.is_object() && v.get("data").is_some() {
+            v.get("data").cloned()
+        } else {
+            Some(v.clone())
+        }
+    });
     let mac_table = artifacts_value
         .get("mac-forwarding-table.json")
         .and_then(|v| {
@@ -2726,7 +2876,11 @@ pub fn validate_topology_artifacts(artifacts_value: &Value) -> ValidateArtifacts
 
     // Cross-artifact: topo_feature edges reference unknown node
     if let (Some(topology), Some(features_value)) = (&topology_data, &topo_feature) {
-        if let Some(nodes_arr) = topology.get("node").and_then(|n| n.get("nodes")).and_then(Value::as_array) {
+        if let Some(nodes_arr) = topology
+            .get("node")
+            .and_then(|n| n.get("nodes"))
+            .and_then(Value::as_array)
+        {
             let node_ids: HashSet<i64> = nodes_arr
                 .iter()
                 .filter_map(|n| {
@@ -2745,7 +2899,7 @@ pub fn validate_topology_artifacts(artifacts_value: &Value) -> ValidateArtifacts
                         errors.push(TopologyErrorOut::new(
                             "ARTIFACT_REFERENCE_ERROR",
                             "topo_feature edge references an unknown node.",
-                            &format!("$.artifacts['topo_feature.json'][{}]", index),
+                            &format!("$.artifacts['topo_feature.json'][{index}]"),
                         ));
                     }
                 }
@@ -2779,10 +2933,7 @@ pub fn validate_topology_artifacts(artifacts_value: &Value) -> ValidateArtifacts
                     errors.push(TopologyErrorOut::new(
                         "ARTIFACT_REFERENCE_ERROR",
                         "mac-forwarding-table entry references an unknown node.",
-                        &format!(
-                            "$.artifacts['mac-forwarding-table.json'].entries[{}]",
-                            index
-                        ),
+                        &format!("$.artifacts['mac-forwarding-table.json'].entries[{index}]"),
                     ));
                 }
             }
@@ -2873,7 +3024,7 @@ mod tests {
         assert!(connects("es1", "sw1"));
         assert!(connects("es2", "sw5"));
         for i in 1..5 {
-            assert!(connects(&format!("sw{}", i), &format!("sw{}", i + 1)));
+            assert!(connects(&format!("sw{i}"), &format!("sw{}", i + 1)));
         }
         assert!(!connects("sw5", "sw1"), "线性不闭环");
 
@@ -2898,8 +3049,16 @@ mod tests {
 
         // 确定性 + 无坐标重叠。
         let (topo2, _) = initialize_topology(&ends_only_intent(5, 1)).unwrap();
-        let coords: Vec<_> = topo.nodes.iter().map(|n| (n.position.x, n.position.y)).collect();
-        let coords2: Vec<_> = topo2.nodes.iter().map(|n| (n.position.x, n.position.y)).collect();
+        let coords: Vec<_> = topo
+            .nodes
+            .iter()
+            .map(|n| (n.position.x, n.position.y))
+            .collect();
+        let coords2: Vec<_> = topo2
+            .nodes
+            .iter()
+            .map(|n| (n.position.x, n.position.y))
+            .collect();
         assert_eq!(coords, coords2, "同参两次坐标全等");
         for (i, a) in coords.iter().enumerate() {
             for b in coords.iter().skip(i + 1) {
@@ -2910,7 +3069,11 @@ mod tests {
         // 落库前结构校验兜底。
         let report =
             validate_intermediate_topology(&serde_json::to_value(&topo).unwrap_or(Value::Null));
-        assert!(report.ok, "validate_intermediate must pass: {:?}", report.errors);
+        assert!(
+            report.ok,
+            "validate_intermediate must pass: {:?}",
+            report.errors
+        );
     }
 
     #[test]
@@ -2963,7 +3126,11 @@ mod tests {
                 }
             }
 
-            let coords: Vec<_> = topo.nodes.iter().map(|n| (n.position.x, n.position.y)).collect();
+            let coords: Vec<_> = topo
+                .nodes
+                .iter()
+                .map(|n| (n.position.x, n.position.y))
+                .collect();
             for (i, a) in coords.iter().enumerate() {
                 for b in coords.iter().skip(i + 1) {
                     assert_ne!(a, b, "N={switch_count}: 任意两节点不得同坐标");
@@ -2971,7 +3138,11 @@ mod tests {
             }
 
             // IP 唯一性（N=1 时 es1/es2 同挂 sw1，octet 必须仍不同）。
-            let ips: Vec<_> = topo.nodes.iter().filter_map(|n| n.ip_address.clone()).collect();
+            let ips: Vec<_> = topo
+                .nodes
+                .iter()
+                .filter_map(|n| n.ip_address.clone())
+                .collect();
             let unique: std::collections::BTreeSet<_> = ips.iter().collect();
             assert_eq!(ips.len(), unique.len(), "N={switch_count}: IP 不得重复");
 
@@ -2985,13 +3156,17 @@ mod tests {
     fn ends_only_rejects_invalid_parameter_combinations() {
         // endSystemsPerSwitch 必须为 1（不做语义重载）。
         let errors = initialize_topology(&ends_only_intent(5, 2)).unwrap_err();
-        assert!(errors.iter().any(|e| e.path == "$.params.endSystemsPerSwitch"));
+        assert!(errors
+            .iter()
+            .any(|e| e.path == "$.params.endSystemsPerSwitch"));
 
         // ends-only 仅 generic-line 支持。
         let mut ring = ends_only_intent(5, 1);
         ring.template_id = "generic-ring".into();
         let errors = initialize_topology(&ring).unwrap_err();
-        assert!(errors.iter().any(|e| e.path == "$.params.endSystemPlacement"));
+        assert!(errors
+            .iter()
+            .any(|e| e.path == "$.params.endSystemPlacement"));
 
         // 非法枚举值。
         let intent = InitializeIntent {
@@ -3002,7 +3177,9 @@ mod tests {
             }),
         };
         let errors = initialize_topology(&intent).unwrap_err();
-        assert!(errors.iter().any(|e| e.path == "$.params.endSystemPlacement"));
+        assert!(errors
+            .iter()
+            .any(|e| e.path == "$.params.endSystemPlacement"));
 
         // 显式 per-switch 与缺省等价（向后兼容，ring 也接受）。
         let mut ring_default = ends_only_intent(4, 2);
@@ -3017,11 +3194,18 @@ mod tests {
         let full = describe_templates_catalog_filtered(None);
         for descriptor in full["templates"].as_array().unwrap() {
             let scenarios = descriptor["scenarios"].as_array().unwrap();
-            assert!(!scenarios.is_empty(), "{} 必须声明场景归属", descriptor["id"]);
+            assert!(
+                !scenarios.is_empty(),
+                "{} 必须声明场景归属",
+                descriptor["id"]
+            );
         }
 
         let aero = describe_templates_catalog_filtered(Some("aerospace-onboard"));
-        assert_eq!(aero["templateCount"], 3, "宇航场景含全部三模板（ring 双场景归属）");
+        assert_eq!(
+            aero["templateCount"], 3,
+            "宇航场景含全部三模板（ring 双场景归属）"
+        );
         // 匹配场景与全量均不得携带 warning（否则 agent 每次过滤都收到误导警告）。
         assert!(aero.get("warning").is_none());
         assert!(full.get("warning").is_none());
@@ -3136,9 +3320,9 @@ mod tests {
         assert_eq!(topo.links.len(), 12);
         assert_eq!(summary.node_count, 8);
         for i in 1..=6 {
-            let es = format!("es{}", i);
-            assert!(dp_link_connects(&topo, &es, "sw1"), "{} not homed to sw1", es);
-            assert!(dp_link_connects(&topo, &es, "sw2"), "{} not homed to sw2", es);
+            let es = format!("es{i}");
+            assert!(dp_link_connects(&topo, &es, "sw1"), "{es} not homed to sw1");
+            assert!(dp_link_connects(&topo, &es, "sw2"), "{es} not homed to sw2");
         }
     }
 
@@ -3167,13 +3351,11 @@ mod tests {
         let names: Vec<&str> = topo.nodes.iter().map(|n| n.name.as_str()).collect();
         assert!(
             names.contains(&"SW-1") && names.contains(&"SW-2"),
-            "switch 应为 SW-1/SW-2，实得 {:?}",
-            names
+            "switch 应为 SW-1/SW-2，实得 {names:?}"
         );
         assert!(
             names.contains(&"ES-1") && names.contains(&"ES-6"),
-            "端系统应为 ES-1..ES-6，实得 {:?}",
-            names
+            "端系统应为 ES-1..ES-6，实得 {names:?}"
         );
     }
 
@@ -3187,19 +3369,27 @@ mod tests {
         .unwrap();
         assert_eq!(topo.switch_count(), 4);
         assert_eq!(topo.end_system_count(), 4);
-        assert!(dp_link_connects(&topo, "sw1", "sw3"), "plane A backbone sw1-sw3 missing");
-        assert!(dp_link_connects(&topo, "sw2", "sw4"), "plane B backbone sw2-sw4 missing");
+        assert!(
+            dp_link_connects(&topo, "sw1", "sw3"),
+            "plane A backbone sw1-sw3 missing"
+        );
+        assert!(
+            dp_link_connects(&topo, "sw2", "sw4"),
+            "plane B backbone sw2-sw4 missing"
+        );
         // 跨 group 路径：e1 在 g1(sw1)、e3 在 g2(sw3)、sw1-sw3 骨干已在 → 平面 A 连通。
         assert!(dp_link_connects(&topo, "e1", "sw1"));
         assert!(dp_link_connects(&topo, "e3", "sw3"));
         // crossPlaneLinks=none：A/B 平面不直连。
-        assert!(!dp_link_connects(&topo, "sw1", "sw2"), "unexpected cross-plane link");
+        assert!(
+            !dp_link_connects(&topo, "sw1", "sw2"),
+            "unexpected cross-plane link"
+        );
         // U12：4 switch 命名 SW-1..SW-4（two-hop 也走 SW-/ES- 派生）。
         let names: Vec<&str> = topo.nodes.iter().map(|n| n.name.as_str()).collect();
         assert!(
             names.contains(&"SW-3") && names.contains(&"SW-4"),
-            "two-hop 应有 SW-3/SW-4，实得 {:?}",
-            names
+            "two-hop 应有 SW-3/SW-4，实得 {names:?}"
         );
     }
 
@@ -3216,7 +3406,7 @@ mod tests {
             topo.links
                 .iter()
                 .find(|l| l.source.node_id == a && l.target.node_id == b)
-                .unwrap_or_else(|| panic!("link {}->{} missing", a, b))
+                .unwrap_or_else(|| panic!("link {a}->{b} missing"))
         };
         let e1_primary = link_to("e1", "sw1");
         assert_eq!(e1_primary.plane.as_deref(), Some("A"));
@@ -3229,7 +3419,10 @@ mod tests {
         assert_eq!(backbone_a.role.as_deref(), Some("backbone"));
 
         let line = build_minimal_generic_line();
-        assert!(line.links.iter().all(|l| l.plane.is_none() && l.role.is_none()));
+        assert!(line
+            .links
+            .iter()
+            .all(|l| l.plane.is_none() && l.role.is_none()));
     }
 
     #[test]
@@ -3248,7 +3441,11 @@ mod tests {
     }
 
     fn dp_pos(topo: &IntermediateTopology, id: &str) -> (f64, f64) {
-        let n = topo.nodes.iter().find(|n| n.id == id).unwrap_or_else(|| panic!("{} missing", id));
+        let n = topo
+            .nodes
+            .iter()
+            .find(|n| n.id == id)
+            .unwrap_or_else(|| panic!("{id} missing"));
         (n.position.x, n.position.y)
     }
 
@@ -3266,7 +3463,10 @@ mod tests {
         assert_eq!((dense_es.x, dense_es.y), (800.0, 70.0));
 
         let ends = layout_line_ends_only(5);
-        assert!(ends.folded, "5-hop spec layout folds into a serpentine line");
+        assert!(
+            ends.folded,
+            "5-hop spec layout folds into a serpentine line"
+        );
         assert_eq!(
             (ends.switch_positions[0].x, ends.switch_positions[0].y),
             (80.0, 220.0)
@@ -3275,8 +3475,14 @@ mod tests {
             (ends.switch_positions[4].x, ends.switch_positions[4].y),
             (380.0, 420.0)
         );
-        assert_eq!((ends.first_end_system.x, ends.first_end_system.y), (-140.0, 220.0));
-        assert_eq!((ends.last_end_system.x, ends.last_end_system.y), (160.0, 420.0));
+        assert_eq!(
+            (ends.first_end_system.x, ends.first_end_system.y),
+            (-140.0, 220.0)
+        );
+        assert_eq!(
+            (ends.last_end_system.x, ends.last_end_system.y),
+            (160.0, 420.0)
+        );
     }
 
     #[test]
@@ -3336,32 +3542,53 @@ mod tests {
         let top_y = dp_pos(&topo, "es1").1;
         let bottom_y = dp_pos(&topo, "es4").1;
         for i in 1..=3 {
-            assert_eq!(dp_pos(&topo, &format!("es{}", i)).1, top_y, "es{} not on top row", i);
+            assert_eq!(
+                dp_pos(&topo, &format!("es{i}")).1,
+                top_y,
+                "es{i} not on top row"
+            );
         }
         for i in 4..=6 {
-            assert_eq!(dp_pos(&topo, &format!("es{}", i)).1, bottom_y, "es{} not on bottom row", i);
+            assert_eq!(
+                dp_pos(&topo, &format!("es{i}")).1,
+                bottom_y,
+                "es{i} not on bottom row"
+            );
         }
-        assert!(top_y < sw1y && sw1y < bottom_y, "ES rows must sandwich the SW row");
+        assert!(
+            top_y < sw1y && sw1y < bottom_y,
+            "ES rows must sandwich the SW row"
+        );
         // 行内相邻间距 ≥ ES_PITCH（R3 反重叠）。
         assert!((dp_pos(&topo, "es1").0 - dp_pos(&topo, "es2").0).abs() >= 180.0);
         assert!((dp_pos(&topo, "es4").0 - dp_pos(&topo, "es5").0).abs() >= 180.0);
         // ES 行对 SW 行居中（R1）：上行均值 x = SW 均值 x。
         let sw_mean = (sw1x + sw2x) / 2.0;
-        let top_mean = (1..=3).map(|i| dp_pos(&topo, &format!("es{}", i)).0).sum::<f64>() / 3.0;
-        assert!((top_mean - sw_mean).abs() <= 1.0, "top row not centered: {} vs {}", top_mean, sw_mean);
+        let top_mean = (1..=3)
+            .map(|i| dp_pos(&topo, &format!("es{i}")).0)
+            .sum::<f64>()
+            / 3.0;
+        assert!(
+            (top_mean - sw_mean).abs() <= 1.0,
+            "top row not centered: {top_mean} vs {sw_mean}"
+        );
     }
 
     #[test]
     fn dual_plane_layout_helper_projects_single_and_multi_hop_positions() {
         let single_params = parse_dual_plane_params(&dual_plane_single_hop_params()).unwrap();
-        let single_switch_by_id: HashMap<String, &DualPlaneSwitch> =
-            single_params.switches.iter().map(|s| (s.id.clone(), s)).collect();
-        let single_group_index: HashMap<String, usize> =
-            single_params.switch_groups.iter().enumerate().map(|(i, g)| (g.id.clone(), i)).collect();
-        let single_switches = vec![
-            single_switch_by_id["sw1"],
-            single_switch_by_id["sw2"],
-        ];
+        let single_switch_by_id: HashMap<String, &DualPlaneSwitch> = single_params
+            .switches
+            .iter()
+            .map(|s| (s.id.clone(), s))
+            .collect();
+        let single_group_index: HashMap<String, usize> = single_params
+            .switch_groups
+            .iter()
+            .enumerate()
+            .map(|(i, g)| (g.id.clone(), i))
+            .collect();
+        let single_switches = vec![single_switch_by_id["sw1"], single_switch_by_id["sw2"]];
         let single_es: Vec<&DualPlaneEndSystem> = single_params.end_systems.iter().collect();
         let single = layout_dual_plane_redundant(
             &single_params,
@@ -3376,10 +3603,17 @@ mod tests {
         assert_eq!(single["es4"].y, 540.0);
 
         let multi_params = parse_dual_plane_params(&dual_plane_two_hop_params()).unwrap();
-        let multi_switch_by_id: HashMap<String, &DualPlaneSwitch> =
-            multi_params.switches.iter().map(|s| (s.id.clone(), s)).collect();
-        let multi_group_index: HashMap<String, usize> =
-            multi_params.switch_groups.iter().enumerate().map(|(i, g)| (g.id.clone(), i)).collect();
+        let multi_switch_by_id: HashMap<String, &DualPlaneSwitch> = multi_params
+            .switches
+            .iter()
+            .map(|s| (s.id.clone(), s))
+            .collect();
+        let multi_group_index: HashMap<String, usize> = multi_params
+            .switch_groups
+            .iter()
+            .enumerate()
+            .map(|(i, g)| (g.id.clone(), i))
+            .collect();
         let multi_switches = vec![
             multi_switch_by_id["sw1"],
             multi_switch_by_id["sw2"],
@@ -3396,10 +3630,22 @@ mod tests {
         );
         assert_eq!(multi["sw2"].y, 160.0, "plane B lane is above");
         assert_eq!(multi["sw1"].y, 360.0, "plane A lane is below");
-        assert_eq!(multi["sw1"].x, multi["sw2"].x, "group g1 switches stack vertically");
-        assert_eq!(multi["sw3"].x, multi["sw4"].x, "group g2 switches stack vertically");
-        assert!(multi["e1"].x < multi["sw1"].x, "g1 ES is placed on left edge");
-        assert!(multi["e3"].x > multi["sw3"].x, "g2 ES is placed on right edge");
+        assert_eq!(
+            multi["sw1"].x, multi["sw2"].x,
+            "group g1 switches stack vertically"
+        );
+        assert_eq!(
+            multi["sw3"].x, multi["sw4"].x,
+            "group g2 switches stack vertically"
+        );
+        assert!(
+            multi["e1"].x < multi["sw1"].x,
+            "g1 ES is placed on left edge"
+        );
+        assert!(
+            multi["e3"].x > multi["sw3"].x,
+            "g2 ES is placed on right edge"
+        );
     }
 
     #[test]
@@ -3423,17 +3669,33 @@ mod tests {
         assert!(sw1x < sw3x, "groups spread along x by declaration order");
         // 规范图 4-5：首台对齐 primary 平面行；同主接的第二台让位到另一平面行。
         for id in ["e1", "e3"] {
-            assert_eq!(dp_pos(&topo, id).1, sw1y, "{} must align to primary plane row", id);
+            assert_eq!(
+                dp_pos(&topo, id).1,
+                sw1y,
+                "{id} must align to primary plane row"
+            );
         }
         for id in ["e2", "e4"] {
-            assert_eq!(dp_pos(&topo, id).1, sw2y, "{} must take the free plane-B row", id);
+            assert_eq!(
+                dp_pos(&topo, id).1,
+                sw2y,
+                "{id} must take the free plane-B row"
+            );
         }
         // g1 在左外端、g2 在右外端。
         assert!(dp_pos(&topo, "e1").0 < sw1x && dp_pos(&topo, "e2").0 < sw1x);
         assert!(dp_pos(&topo, "e3").0 > sw3x && dp_pos(&topo, "e4").0 > sw3x);
         // 规范图 4-5：组内两台 ES 纵向成列（同 x）。
-        assert_eq!(dp_pos(&topo, "e1").0, dp_pos(&topo, "e2").0, "left ES column");
-        assert_eq!(dp_pos(&topo, "e3").0, dp_pos(&topo, "e4").0, "right ES column");
+        assert_eq!(
+            dp_pos(&topo, "e1").0,
+            dp_pos(&topo, "e2").0,
+            "left ES column"
+        );
+        assert_eq!(
+            dp_pos(&topo, "e3").0,
+            dp_pos(&topo, "e4").0,
+            "right ES column"
+        );
     }
 
     fn dual_plane_three_group_params() -> serde_json::Value {
@@ -3477,9 +3739,7 @@ mod tests {
         let d = (q.0 - p.0, q.1 - p.1);
         let mut t_min: f64 = 0.0;
         let mut t_max: f64 = 1.0;
-        for (start, delta, lo, hi) in
-            [(p.0, d.0, min_x, max_x), (p.1, d.1, min_y, max_y)]
-        {
+        for (start, delta, lo, hi) in [(p.0, d.0, min_x, max_x), (p.1, d.1, min_y, max_y)] {
             if delta.abs() < f64::EPSILON {
                 if start < lo || start > hi {
                     return false;
@@ -3505,16 +3765,58 @@ mod tests {
         // 几何断言依赖该 helper 正确性：正反例独立验证（不靠布局集成测试间接覆盖）。
         let center = (100.0, 100.0);
         // 穿过矩形中心的对角线段 → true
-        assert!(seg_intersects_rect((0.0, 0.0), (200.0, 200.0), center, 50.0, 25.0, 0.0));
+        assert!(seg_intersects_rect(
+            (0.0, 0.0),
+            (200.0, 200.0),
+            center,
+            50.0,
+            25.0,
+            0.0
+        ));
         // 完全在矩形上方掠过的水平线段 → false
-        assert!(!seg_intersects_rect((0.0, 10.0), (200.0, 10.0), center, 50.0, 25.0, 0.0));
+        assert!(!seg_intersects_rect(
+            (0.0, 10.0),
+            (200.0, 10.0),
+            center,
+            50.0,
+            25.0,
+            0.0
+        ));
         // 水平线段（delta_y≈0）y 在 slab 内且 x 覆盖矩形 → true
-        assert!(seg_intersects_rect((0.0, 100.0), (200.0, 100.0), center, 50.0, 25.0, 0.0));
+        assert!(seg_intersects_rect(
+            (0.0, 100.0),
+            (200.0, 100.0),
+            center,
+            50.0,
+            25.0,
+            0.0
+        ));
         // 垂直线段 x 在矩形外 → false；margin 膨胀后进入 → true
-        assert!(!seg_intersects_rect((160.0, 0.0), (160.0, 200.0), center, 50.0, 25.0, 0.0));
-        assert!(seg_intersects_rect((160.0, 0.0), (160.0, 200.0), center, 50.0, 25.0, 12.0));
+        assert!(!seg_intersects_rect(
+            (160.0, 0.0),
+            (160.0, 200.0),
+            center,
+            50.0,
+            25.0,
+            0.0
+        ));
+        assert!(seg_intersects_rect(
+            (160.0, 0.0),
+            (160.0, 200.0),
+            center,
+            50.0,
+            25.0,
+            12.0
+        ));
         // 端点恰落在矩形边缘（切边）→ true（t_min <= t_max 边界）
-        assert!(seg_intersects_rect((150.0, 100.0), (300.0, 100.0), center, 50.0, 25.0, 0.0));
+        assert!(seg_intersects_rect(
+            (150.0, 100.0),
+            (300.0, 100.0),
+            center,
+            50.0,
+            25.0,
+            0.0
+        ));
     }
 
     #[test]
@@ -3534,11 +3836,7 @@ mod tests {
         for (label, target) in [("primary", sw1), ("backup", sw2)] {
             assert!(
                 !seg_intersects_rect(outer, target, inner, 63.0, 28.0, 8.0),
-                "outer ES {} edge ({:?}->{:?}) crosses inner ES box at {:?}",
-                label,
-                outer,
-                target,
-                inner
+                "outer ES {label} edge ({outer:?}->{target:?}) crosses inner ES box at {inner:?}"
             );
         }
     }
@@ -3563,13 +3861,18 @@ mod tests {
         let e2 = dp_pos(&topo, "e2");
         let e5 = dp_pos(&topo, "e5");
         assert_eq!(e5.0, e1.0, "ring1 stays in the column (same x)");
-        assert!(e5.1 > e1.1, "ring1 A-row ES extends away from the corridor (below A row)");
-        for (label, target) in [("primary", dp_pos(&topo, "sw1")), ("backup", dp_pos(&topo, "sw2"))] {
+        assert!(
+            e5.1 > e1.1,
+            "ring1 A-row ES extends away from the corridor (below A row)"
+        );
+        for (label, target) in [
+            ("primary", dp_pos(&topo, "sw1")),
+            ("backup", dp_pos(&topo, "sw2")),
+        ] {
             for (inner_label, inner) in [("e1", e1), ("e2", e2)] {
                 assert!(
                     !seg_intersects_rect(e5, target, inner, 63.0, 28.0, 8.0),
-                    "ring1 ES {} edge ({:?}->{:?}) crosses {} box at {:?}",
-                    label, e5, target, inner_label, inner
+                    "ring1 ES {label} edge ({e5:?}->{target:?}) crosses {inner_label} box at {inner:?}"
                 );
             }
         }
@@ -3583,10 +3886,19 @@ mod tests {
             params: dual_plane_three_group_params(),
         })
         .unwrap();
-        let min_sw_x = ["sw1", "sw3", "sw5"].iter().map(|id| dp_pos(&topo, id).0).fold(f64::MAX, f64::min);
-        let max_sw_x = ["sw1", "sw3", "sw5"].iter().map(|id| dp_pos(&topo, id).0).fold(f64::MIN, f64::max);
+        let min_sw_x = ["sw1", "sw3", "sw5"]
+            .iter()
+            .map(|id| dp_pos(&topo, id).0)
+            .fold(f64::MAX, f64::min);
+        let max_sw_x = ["sw1", "sw3", "sw5"]
+            .iter()
+            .map(|id| dp_pos(&topo, id).0)
+            .fold(f64::MIN, f64::max);
         assert!(dp_pos(&topo, "e1").0 < min_sw_x, "g1 ES on left edge");
-        assert!(dp_pos(&topo, "e2").0 < min_sw_x, "g2 (middle group) ES on left edge");
+        assert!(
+            dp_pos(&topo, "e2").0 < min_sw_x,
+            "g2 (middle group) ES on left edge"
+        );
         assert!(dp_pos(&topo, "e3").0 > max_sw_x, "g3 ES on right edge");
         // e2 primary 在 B 平面 → y 对齐 B 行。
         assert_eq!(dp_pos(&topo, "e2").1, dp_pos(&topo, "sw4").1);
@@ -3604,9 +3916,17 @@ mod tests {
         })
         .unwrap();
         let sw_y = dp_pos(&topo, "sw1").1;
-        let above = (1..=5).filter(|i| dp_pos(&topo, &format!("es{}", i)).1 < sw_y).count();
-        let below = (1..=5).filter(|i| dp_pos(&topo, &format!("es{}", i)).1 > sw_y).count();
-        assert_eq!((above, below), (3, 2), "5 ES split as ceil: 3 top / 2 bottom");
+        let above = (1..=5)
+            .filter(|i| dp_pos(&topo, &format!("es{i}")).1 < sw_y)
+            .count();
+        let below = (1..=5)
+            .filter(|i| dp_pos(&topo, &format!("es{i}")).1 > sw_y)
+            .count();
+        assert_eq!(
+            (above, below),
+            (3, 2),
+            "5 ES split as ceil: 3 top / 2 bottom"
+        );
 
         let mut single = dual_plane_single_hop_params();
         let one = single["endSystems"].as_array().unwrap()[..1].to_vec();
@@ -3616,7 +3936,10 @@ mod tests {
             params: single,
         })
         .unwrap();
-        assert!(dp_pos(&topo_one, "es1").1 < dp_pos(&topo_one, "sw1").1, "n=1 stays on top row");
+        assert!(
+            dp_pos(&topo_one, "es1").1 < dp_pos(&topo_one, "sw1").1,
+            "n=1 stays on top row"
+        );
     }
 
     #[test]
@@ -3672,7 +3995,9 @@ mod tests {
             params: unknown,
         })
         .unwrap_err();
-        assert!(err.iter().any(|e| e.path.contains("primary") && e.message.contains("unknown")));
+        assert!(err
+            .iter()
+            .any(|e| e.path.contains("primary") && e.message.contains("unknown")));
 
         let mut single_plane = dual_plane_single_hop_params();
         single_plane["switchGroups"][0]["planeSwitches"]["B"] = json!("sw1");
@@ -3734,12 +4059,21 @@ mod tests {
             p["switchGroups"][1]["planeSwitches"]["A"] = json!("sw1");
             p
         };
-        for params in [dup_switch, dup_es, es_switch_collision, dup_group, switch_reuse] {
+        for params in [
+            dup_switch,
+            dup_es,
+            es_switch_collision,
+            dup_group,
+            switch_reuse,
+        ] {
             let result = initialize_topology(&InitializeIntent {
                 template_id: "dual-plane-redundant".into(),
                 params,
             });
-            assert!(result.is_err(), "structurally-invalid dual-plane input must be rejected");
+            assert!(
+                result.is_err(),
+                "structurally-invalid dual-plane input must be rejected"
+            );
         }
     }
 
@@ -3747,7 +4081,10 @@ mod tests {
     fn dual_plane_rejects_absent_within_plane_and_unknown_mode_and_missing_data_rate() {
         // withinPlane 缺省（对齐 zod literal(true)）。
         let mut absent_wp = dual_plane_single_hop_params();
-        absent_wp["backbone"].as_object_mut().unwrap().remove("withinPlane");
+        absent_wp["backbone"]
+            .as_object_mut()
+            .unwrap()
+            .remove("withinPlane");
         let err = initialize_topology(&InitializeIntent {
             template_id: "dual-plane-redundant".into(),
             params: absent_wp,
@@ -3789,7 +4126,10 @@ mod tests {
             .expect("dual-plane descriptor present");
         let params = dp["params"].as_array().unwrap();
         let backbone = params.iter().find(|p| p["name"] == "backbone").unwrap();
-        let cross = params.iter().find(|p| p["name"] == "crossPlaneLinks").unwrap();
+        let cross = params
+            .iter()
+            .find(|p| p["name"] == "crossPlaneLinks")
+            .unwrap();
         assert_eq!(backbone["itemShape"]["mode"], json!("line"));
         assert_eq!(cross["itemShape"]["mode"], json!("none"));
     }
@@ -3809,7 +4149,11 @@ mod tests {
             .unwrap();
             let value = serde_json::to_value(&topo).unwrap();
             let report = validate_intermediate_topology(&value);
-            assert!(report.ok, "dual-plane output failed validate: {:?}", report.errors);
+            assert!(
+                report.ok,
+                "dual-plane output failed validate: {:?}",
+                report.errors
+            );
         }
     }
 
@@ -3863,7 +4207,7 @@ mod tests {
         .unwrap();
         let sw9 = dp_pos(&topo, "sw9");
         for id in ["sw1", "sw2", "sw3", "sw4"] {
-            assert_ne!(sw9, dp_pos(&topo, id), "sw9 overlaps {}", id);
+            assert_ne!(sw9, dp_pos(&topo, id), "sw9 overlaps {id}");
         }
     }
 
@@ -3942,14 +4286,17 @@ mod tests {
                 .unwrap()
                 .iter()
                 .find(|t| t["id"] == template_id)
-                .unwrap_or_else(|| panic!("template {} should exist", template_id));
+                .unwrap_or_else(|| panic!("template {template_id} should exist"));
             let params = template["params"].as_array().unwrap();
 
             let switch_count = params
                 .iter()
                 .find(|p| p["name"] == "switchCount")
                 .expect("switchCount param");
-            assert!(switch_count.get("default").is_none(), "switchCount must not carry default");
+            assert!(
+                switch_count.get("default").is_none(),
+                "switchCount must not carry default"
+            );
             assert_eq!(switch_count["type"], "integer");
             assert_eq!(switch_count["minimum"], json!(SWITCH_COUNT_MIN));
             assert_eq!(switch_count["maximum"], json!(SWITCH_COUNT_MAX));
@@ -3958,7 +4305,10 @@ mod tests {
                 .iter()
                 .find(|p| p["name"] == "endSystemsPerSwitch")
                 .expect("endSystemsPerSwitch param");
-            assert!(end_systems.get("default").is_none(), "endSystemsPerSwitch must not carry default");
+            assert!(
+                end_systems.get("default").is_none(),
+                "endSystemsPerSwitch must not carry default"
+            );
             assert_eq!(end_systems["type"], "integer");
             assert_eq!(end_systems["minimum"], json!(END_SYSTEMS_PER_SWITCH_MIN));
             assert_eq!(end_systems["maximum"], json!(END_SYSTEMS_PER_SWITCH_MAX));
@@ -3967,7 +4317,10 @@ mod tests {
                 .iter()
                 .find(|p| p["name"] == "dataRateMbps")
                 .expect("dataRateMbps param");
-            assert!(data_rate.get("default").is_none(), "dataRateMbps must not carry default");
+            assert!(
+                data_rate.get("default").is_none(),
+                "dataRateMbps must not carry default"
+            );
             assert_eq!(data_rate["type"], "enum");
             assert_eq!(data_rate["values"], json!(SUPPORTED_DATA_RATES));
         }
@@ -3978,17 +4331,16 @@ mod tests {
         // MCP 层 zod（topology-tools.ts）有意双写上下限以早失败；这里守 drift：
         // 改 Rust 常量却忘改 zod（或反之）会 red。
         let zod_src = include_str!("../../src-node/mcp/topology-tools.ts");
-        let switch_clause = format!(".min({}).max({})", SWITCH_COUNT_MIN, SWITCH_COUNT_MAX);
+        let switch_clause = format!(".min({SWITCH_COUNT_MIN}).max({SWITCH_COUNT_MAX})");
         let end_systems_clause =
-            format!(".min({}).max({})", END_SYSTEMS_PER_SWITCH_MIN, END_SYSTEMS_PER_SWITCH_MAX);
+            format!(".min({END_SYSTEMS_PER_SWITCH_MIN}).max({END_SYSTEMS_PER_SWITCH_MAX})");
         assert!(
-            zod_src.contains(&format!("switchCount: z.number().int(){}", switch_clause)),
+            zod_src.contains(&format!("switchCount: z.number().int(){switch_clause}")),
             "zod switchCount bounds drifted from Rust SWITCH_COUNT_MIN/MAX ({switch_clause})"
         );
         assert!(
             zod_src.contains(&format!(
-                "endSystemsPerSwitch: z.number().int(){}",
-                end_systems_clause
+                "endSystemsPerSwitch: z.number().int(){end_systems_clause}"
             )),
             "zod endSystemsPerSwitch bounds drifted from Rust END_SYSTEMS_PER_SWITCH_MIN/MAX ({end_systems_clause})"
         );
@@ -4066,7 +4418,7 @@ mod tests {
         let raw = serde_json::to_value(&topology).unwrap();
         let result = build_topology_artifacts(&raw).expect("build OK");
         assert_eq!(result.summary.artifact_count, 4);
-        assert_eq!(result.summary.contains_html, false);
+        assert!(!result.summary.contains_html);
         // Topology has 2 switches + 2 endSystems = 4 nodes
         assert_eq!(result.summary.topology_node_count, 4);
         // 2 host-switch + 1 interconnect
@@ -4119,7 +4471,10 @@ mod tests {
         });
         let report = validate_topology_artifacts(&bad);
         assert!(!report.ok);
-        assert!(report.errors.iter().any(|e| e.path.contains("topo_feature")));
+        assert!(report
+            .errors
+            .iter()
+            .any(|e| e.path.contains("topo_feature")));
         assert!(report.errors.iter().any(|e| e.path.contains("data-server")));
         assert!(report
             .errors

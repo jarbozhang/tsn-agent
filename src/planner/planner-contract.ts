@@ -122,7 +122,10 @@ export interface PlannerQueryStatusResponseData {
 }
 
 export interface PlannerResultResponseData {
-  state: Extract<PlannerTaskState, "succeeded" | "running" | "failed" | "cancel_requested" | "not_found">;
+  state: Extract<
+    PlannerTaskState,
+    "succeeded" | "running" | "failed" | "cancel_requested" | "not_found"
+  >;
   plan_id?: string;
   source_outputs?: PlannerSourceOutputs;
   output_fingerprints?: PlannerOutputFingerprints;
@@ -239,7 +242,9 @@ export function normalizePlannerRunState(value?: Partial<PlannerRunState> | null
 }
 
 export function isTerminalPlannerState(state: PlannerTaskState): boolean {
-  return ["succeeded", "failed", "cancelled", "no_running_plan", "not_found", "stale"].includes(state);
+  return ["succeeded", "failed", "cancelled", "no_running_plan", "not_found", "stale"].includes(
+    state,
+  );
 }
 
 export function summarizePlannerRequest(request: PlannerStartRequest): PlannerRequestSummary {
@@ -254,11 +259,18 @@ export function summarizePlannerRequest(request: PlannerStartRequest): PlannerRe
   };
 }
 
-export function summarizePlannerResult(sourceOutputs?: PlannerSourceOutputs, fingerprints?: PlannerOutputFingerprints): PlannerResultSummary {
+export function summarizePlannerResult(
+  sourceOutputs?: PlannerSourceOutputs,
+  fingerprints?: PlannerOutputFingerprints,
+): PlannerResultSummary {
   const solutionJson = sourceOutputs?.solution_json;
   const solutionEntries = Array.isArray(solutionJson) ? solutionJson : [];
   const gclEntryCount = solutionEntries.reduce((count, entry) => {
-    if (!entry || typeof entry !== "object" || !Array.isArray((entry as { gcl_entries?: unknown }).gcl_entries)) {
+    if (
+      !entry ||
+      typeof entry !== "object" ||
+      !Array.isArray((entry as { gcl_entries?: unknown }).gcl_entries)
+    ) {
       return count;
     }
 
@@ -299,7 +311,9 @@ function normalizeResultSummary(value?: PlannerResultSummary): PlannerResultSumm
     linkCount: finiteNonNegativeNumber(value.linkCount),
     gclEntryCount: finiteNonNegativeNumber(value.gclEntryCount),
     fingerprintFiles: Array.isArray(value.fingerprintFiles)
-      ? value.fingerprintFiles.filter((fileName): fileName is string => typeof fileName === "string")
+      ? value.fingerprintFiles.filter(
+          (fileName): fileName is string => typeof fileName === "string",
+        )
       : [],
   };
 }
@@ -318,13 +332,16 @@ function normalizeResultSnapshot(value?: PlannerResultSnapshot): PlannerResultSn
     traceId: nonEmptyString(value.traceId),
     timestamp: nonEmptyString(value.timestamp),
     receivedAt: nonEmptyString(value.receivedAt) ?? new Date().toISOString(),
-    summary: normalizeResultSummary(value.summary) ?? summarizePlannerResult(value.sourceOutputs, value.outputFingerprints),
+    summary:
+      normalizeResultSummary(value.summary) ??
+      summarizePlannerResult(value.sourceOutputs, value.outputFingerprints),
   };
 }
 
 function isPlannerTaskState(value: unknown): value is PlannerTaskState {
-  return typeof value === "string"
-    && [
+  return (
+    typeof value === "string" &&
+    [
       "idle",
       "running",
       "succeeded",
@@ -336,7 +353,8 @@ function isPlannerTaskState(value: unknown): value is PlannerTaskState {
       "not_found",
       "stale",
       "unknown",
-    ].includes(value);
+    ].includes(value)
+  );
 }
 
 function nonEmptyString(value: unknown): string | undefined {

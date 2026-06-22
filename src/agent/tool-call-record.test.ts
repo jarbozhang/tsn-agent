@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  TOOL_RESULT_STORAGE_LIMIT,
   buildToolSummary,
   enrichToolCall,
+  type RawToolCall,
+  TOOL_RESULT_STORAGE_LIMIT,
   toFriendlyToolName,
   truncateResultForStorage,
-  type RawToolCall,
 } from "./tool-call-record";
 
 function rawToolCall(overrides: Partial<RawToolCall> = {}): RawToolCall {
@@ -21,7 +21,9 @@ function rawToolCall(overrides: Partial<RawToolCall> = {}): RawToolCall {
 
 describe("toFriendlyToolName", () => {
   it("去掉 mcp 前缀并把工具段首个下划线换成点", () => {
-    expect(toFriendlyToolName("mcp__tsn_topology__topology_initialize")).toBe("topology.initialize");
+    expect(toFriendlyToolName("mcp__tsn_topology__topology_initialize")).toBe(
+      "topology.initialize",
+    );
   });
 
   it("只替换工具段的第一个下划线", () => {

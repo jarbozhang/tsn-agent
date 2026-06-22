@@ -1,16 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { ToolCallRecord } from "../../agent/tool-call-record";
+import { logDiagnostic, sessionSummary } from "../../diagnostics/app-diagnostics";
+import {
+  createDiagnosticLogRepository,
+  type DiagnosticLogRepository,
+} from "../../diagnostics/diagnostic-log-repository";
 import {
   createEmptySession,
   createSessionRepository,
   type SessionRepository,
   type TsnSession,
 } from "../../sessions/session-repository";
-import {
-  createDiagnosticLogRepository,
-  type DiagnosticLogRepository,
-} from "../../diagnostics/diagnostic-log-repository";
-import { logDiagnostic, sessionSummary } from "../../diagnostics/app-diagnostics";
-import type { ToolCallRecord } from "../../agent/tool-call-record";
 
 export interface UseSessionRepositoryOptions {
   repository?: SessionRepository;
@@ -44,7 +52,11 @@ export interface UseSessionRepositoryReturn {
    * Plan 2026-06-10-001 U4：流式工具卡片纯内存更新（不写库）——run 期间按 id
    * upsert 后整组替换该 assistant 消息的 toolCalls；done 对账由既有落库路径覆盖。
    */
-  updateAssistantToolCalls: (sessionId: string, messageId: string, toolCalls: ToolCallRecord[]) => void;
+  updateAssistantToolCalls: (
+    sessionId: string,
+    messageId: string,
+    toolCalls: ToolCallRecord[],
+  ) => void;
   reloadSessionsList: () => Promise<void>;
   handleNewSession: () => Promise<TsnSession>;
   handleSelectSession: (session: TsnSession) => Promise<void>;

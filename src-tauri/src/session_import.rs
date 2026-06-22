@@ -81,12 +81,10 @@ pub async fn import_session(
             return Err(format!("源路径是符号链接，拒绝导入：{}", source.display()));
         }
     }
-    let metadata = std::fs::metadata(&source)
-        .map_err(|e| format!("无法读取源文件元数据：{e}"))?;
+    let metadata = std::fs::metadata(&source).map_err(|e| format!("无法读取源文件元数据：{e}"))?;
     if metadata.len() > MAX_IMPORT_FILE_BYTES {
         return Err(format!(
-            "源文件超过 {} 字节上限，禁止导入",
-            MAX_IMPORT_FILE_BYTES
+            "源文件超过 {MAX_IMPORT_FILE_BYTES} 字节上限，禁止导入"
         ));
     }
     if !metadata.is_file() {
@@ -126,12 +124,15 @@ async fn perform_import_inner(
     src_pool: &SqlitePool,
     override_session_id: Option<&str>,
 ) -> Result<ImportSessionResponse, String> {
-
     // 防御：trusted_schema=OFF + cell_size_check=ON + integrity_check。
     sqlx::query("PRAGMA trusted_schema = OFF")
-        .execute(src_pool).await.map_err(|e| format!("PRAGMA trusted_schema 失败：{e}"))?;
+        .execute(src_pool)
+        .await
+        .map_err(|e| format!("PRAGMA trusted_schema 失败：{e}"))?;
     sqlx::query("PRAGMA cell_size_check = ON")
-        .execute(src_pool).await.map_err(|e| format!("PRAGMA cell_size_check 失败：{e}"))?;
+        .execute(src_pool)
+        .await
+        .map_err(|e| format!("PRAGMA cell_size_check 失败：{e}"))?;
     let integrity: String = sqlx::query_scalar("PRAGMA integrity_check")
         .fetch_one(src_pool)
         .await
@@ -147,8 +148,7 @@ async fn perform_import_inner(
         .map_err(|e| format!("读取 application_id 失败：{e}"))?;
     if app_id != 0x5453_4E01 {
         return Err(format!(
-            "源 db application_id 不匹配（期望 0x54534E01，实际 {:#010x}）",
-            app_id
+            "源 db application_id 不匹配（期望 0x54534E01，实际 {app_id:#010x}）"
         ));
     }
 
@@ -182,7 +182,10 @@ async fn perform_import_inner(
         ));
     }
     let project_name: Option<String> = row.get("project_name");
-    if project_name.as_ref().is_some_and(|p| p.len() > MAX_NAME_TEXT_BYTES) {
+    if project_name
+        .as_ref()
+        .is_some_and(|p| p.len() > MAX_NAME_TEXT_BYTES)
+    {
         return Err(format!(
             "sessions.project_name 超过上限 {MAX_NAME_TEXT_BYTES} 字节，拒绝导入"
         ));
@@ -296,7 +299,11 @@ async fn perform_import_inner(
     // 首列 session_id 改写为 target；其余列经字段级校验后动态 bind。
     // 行数已由 main 事务前的 COUNT 预检约束。
     for (table, cols) in crate::db::SESSION_SCOPED_TABLES {
-        let select_sql = format!("SELECT {} FROM {} WHERE session_id = ?", cols.join(", "), table);
+        let select_sql = format!(
+            "SELECT {} FROM {} WHERE session_id = ?",
+            cols.join(", "),
+            table
+        );
         let rows = sqlx::query(&select_sql)
             .bind(&src_session_id)
             .fetch_all(src_pool)
@@ -351,9 +358,7 @@ async fn perform_import_inner(
     .await
     .map_err(|e| format!("写入 backfill 状态失败：{e}"))?;
 
-    tx.commit()
-        .await
-        .map_err(|e| format!("commit 失败：{e}"))?;
+    tx.commit().await.map_err(|e| format!("commit 失败：{e}"))?;
 
     Ok(ImportSessionResponse {
         session_id: target_session_id,
@@ -365,7 +370,11 @@ async fn perform_import_inner(
 /// （非 object 的 styles_json 是 trivially crafted 的毒数据，UI/agent 端无消费语义）。
 /// 未点名的 TEXT 列（sync_name/name/node_id/node_name/operation_name 等会流向
 /// UI label 与 agent inspect）统一吃 4KB 兜底上限 —— 不再有无限大的口子。
-fn validate_text_field(table: &str, col: &str, row: &sqlx::sqlite::SqliteRow) -> Result<(), String> {
+fn validate_text_field(
+    table: &str,
+    col: &str,
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<(), String> {
     let limit = match col {
         "styles_json" => MAX_SMALL_TEXT_BYTES,
         "ref_json" | "cfg_json" | "spec_json" | "entry_json" => MAX_JSON_TEXT_BYTES,
@@ -427,9 +436,13 @@ mod tests {
             .foreign_keys(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
-            .connect_with(opts).await.unwrap();
+            .connect_with(opts)
+            .await
+            .unwrap();
         sqlx::query(&crate::db::safety_net_schema_sql())
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
         (dir, pool)
     }
 
@@ -442,9 +455,13 @@ mod tests {
             .foreign_keys(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
-            .connect_with(opts).await.unwrap();
+            .connect_with(opts)
+            .await
+            .unwrap();
         sqlx::query(&crate::db::safety_net_schema_sql())
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
         pool
     }
 
@@ -475,17 +492,24 @@ mod tests {
             let (dir, main_pool) = seed_main_pool().await;
             let export_path = produce_export_db(dir.path(), "{}").await;
 
-            let resp = perform_import(&main_pool, &export_path, Some("new")).await.unwrap();
+            let resp = perform_import(&main_pool, &export_path, Some("new"))
+                .await
+                .unwrap();
             assert_eq!(resp.session_id, "new");
             assert_eq!(resp.rows_inserted.topology_nodes, 2);
             assert_eq!(resp.rows_inserted.topology_links, 1);
 
             // 验证 main pool 有新 session 行
             let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE id='new'")
-                .fetch_one(&main_pool).await.unwrap();
+                .fetch_one(&main_pool)
+                .await
+                .unwrap();
             assert_eq!(count, 1);
-            let node_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='new'")
-                .fetch_one(&main_pool).await.unwrap();
+            let node_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='new'")
+                    .fetch_one(&main_pool)
+                    .await
+                    .unwrap();
             assert_eq!(node_count, 2);
         });
     }
@@ -499,13 +523,14 @@ mod tests {
             let export_path =
                 produce_export_db(dir.path(), r#"{"id":"orig","title":"源会话"}"#).await;
 
-            perform_import(&main_pool, &export_path, Some("new")).await.unwrap();
+            perform_import(&main_pool, &export_path, Some("new"))
+                .await
+                .unwrap();
 
-            let payload: String =
-                sqlx::query_scalar("SELECT payload FROM sessions WHERE id='new'")
-                    .fetch_one(&main_pool)
-                    .await
-                    .unwrap();
+            let payload: String = sqlx::query_scalar("SELECT payload FROM sessions WHERE id='new'")
+                .fetch_one(&main_pool)
+                .await
+                .unwrap();
             let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
             assert_eq!(value["id"], "new", "payload 内嵌 id 必须与行 PK 一致");
             assert_eq!(value["title"], "源会话", "其余字段保持源值");
@@ -520,13 +545,21 @@ mod tests {
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('clash', 't', 'now', 'now', '{}')")
                 .execute(&main_pool).await.unwrap();
 
-            let err = perform_import(&main_pool, &export_path, Some("clash")).await.unwrap_err();
+            let err = perform_import(&main_pool, &export_path, Some("clash"))
+                .await
+                .unwrap_err();
             assert!(err.contains("已存在"));
 
             // 还应保留之前唯一的 sessions 行（无被部分 INSERT 污染）
-            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions").fetch_one(&main_pool).await.unwrap();
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
+                .fetch_one(&main_pool)
+                .await
+                .unwrap();
             assert_eq!(count, 1);
-            let nodes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes").fetch_one(&main_pool).await.unwrap();
+            let nodes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes")
+                .fetch_one(&main_pool)
+                .await
+                .unwrap();
             assert_eq!(nodes, 0);
         });
     }
@@ -544,15 +577,24 @@ mod tests {
             sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) VALUES ('orig', '0', 1.7, 2.3, 0)")
                 .execute(&src_pool).await.unwrap();
             let export_path = dir.path().join("export.db");
-            crate::session_export::perform_single_session_export(&src_pool, "orig", export_path.to_str().unwrap())
-                .await.unwrap();
+            crate::session_export::perform_single_session_export(
+                &src_pool,
+                "orig",
+                export_path.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
 
-            perform_import(&main_pool, &export_path, Some("rt")).await.unwrap();
+            perform_import(&main_pool, &export_path, Some("rt"))
+                .await
+                .unwrap();
 
             let (x, y): (f64, f64) = sqlx::query_as(
                 "SELECT x, y FROM topology_nodes WHERE session_id='rt' AND sync_name='0'",
             )
-            .fetch_one(&main_pool).await.unwrap();
+            .fetch_one(&main_pool)
+            .await
+            .unwrap();
             assert_eq!(x, 1.7, "x 坐标 round-trip 必须无损");
             assert_eq!(y, 2.3, "y 坐标 round-trip 必须无损");
         });
@@ -564,29 +606,47 @@ mod tests {
             let (dir, main_pool) = seed_main_pool().await;
             let export_path = produce_export_db(dir.path(), "{}").await;
 
-            perform_import(&main_pool, &export_path, Some("imported")).await.unwrap();
+            perform_import(&main_pool, &export_path, Some("imported"))
+                .await
+                .unwrap();
 
             // R6：导入即带终态 state 行。
             let state: String = sqlx::query_scalar(
                 "SELECT state FROM session_backfill_state WHERE session_id='imported'",
             )
-            .fetch_one(&main_pool).await.unwrap();
+            .fetch_one(&main_pool)
+            .await
+            .unwrap();
             assert_eq!(state, "completed_walker");
 
             // 模拟下次 app 启动：mark_pending（INSERT OR IGNORE，有行不动）+ walker。
-            crate::topology_backfill::mark_pending_for_all_sessions(&main_pool).await.unwrap();
+            crate::topology_backfill::mark_pending_for_all_sessions(&main_pool)
+                .await
+                .unwrap();
             let state_after_mark: String = sqlx::query_scalar(
                 "SELECT state FROM session_backfill_state WHERE session_id='imported'",
             )
-            .fetch_one(&main_pool).await.unwrap();
-            assert_eq!(state_after_mark, "completed_walker", "导入会话不得被重标 pending");
+            .fetch_one(&main_pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                state_after_mark, "completed_walker",
+                "导入会话不得被重标 pending"
+            );
 
-            crate::topology_backfill::run_walker_for_pending_sessions(&main_pool).await.unwrap();
+            crate::topology_backfill::run_walker_for_pending_sessions(&main_pool)
+                .await
+                .unwrap();
             let node_count: i64 = sqlx::query_scalar(
                 "SELECT COUNT(*) FROM topology_nodes WHERE session_id='imported'",
             )
-            .fetch_one(&main_pool).await.unwrap();
-            assert_eq!(node_count, 2, "导入的 P0 行必须在启动 walker 全跑后原样保留");
+            .fetch_one(&main_pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                node_count, 2,
+                "导入的 P0 行必须在启动 walker 全跑后原样保留"
+            );
         });
     }
 
@@ -602,27 +662,41 @@ mod tests {
                 .create_if_missing(true);
             let evil_pool = SqlitePoolOptions::new()
                 .max_connections(1)
-                .connect_with(opts).await.unwrap();
+                .connect_with(opts)
+                .await
+                .unwrap();
             sqlx::query(&crate::db::safety_net_schema_sql())
-                .execute(&evil_pool).await.unwrap();
+                .execute(&evil_pool)
+                .await
+                .unwrap();
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', 't', 'now', 'now', '{}')")
                 .execute(&evil_pool).await.unwrap();
-            sqlx::query("PRAGMA foreign_keys = OFF").execute(&evil_pool).await.unwrap();
+            sqlx::query("PRAGMA foreign_keys = OFF")
+                .execute(&evil_pool)
+                .await
+                .unwrap();
             sqlx::query("INSERT INTO nodes_oss_cfg (session_id, node_id, cfg_json) VALUES ('orig', 'ghost', '{}')")
                 .execute(&evil_pool).await.unwrap();
             evil_pool.close().await;
 
-            let err = perform_import(&main_pool, &export_path, Some("broken")).await.unwrap_err();
+            let err = perform_import(&main_pool, &export_path, Some("broken"))
+                .await
+                .unwrap_err();
             assert!(err.contains("nodes_oss_cfg"), "err={err}");
 
             // 整体回滚：sessions 行与 backfill state 行都不存在（同事务联动）。
-            let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE id='broken'")
-                .fetch_one(&main_pool).await.unwrap();
+            let sessions: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE id='broken'")
+                    .fetch_one(&main_pool)
+                    .await
+                    .unwrap();
             assert_eq!(sessions, 0);
             let states: i64 = sqlx::query_scalar(
                 "SELECT COUNT(*) FROM session_backfill_state WHERE session_id='broken'",
             )
-            .fetch_one(&main_pool).await.unwrap();
+            .fetch_one(&main_pool)
+            .await
+            .unwrap();
             assert_eq!(states, 0);
         });
     }
@@ -645,13 +719,22 @@ mod tests {
             );
             sqlx::query(&sql).execute(&src_pool).await.unwrap();
             let export_path = dir.path().join("export.db");
-            crate::session_export::perform_single_session_export(&src_pool, "orig", export_path.to_str().unwrap())
-                .await.unwrap();
+            crate::session_export::perform_single_session_export(
+                &src_pool,
+                "orig",
+                export_path.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
 
-            let err = perform_import(&main_pool, &export_path, Some("big")).await.unwrap_err();
+            let err = perform_import(&main_pool, &export_path, Some("big"))
+                .await
+                .unwrap_err();
             assert!(err.contains("超过上限"), "err={err}");
             let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE id='big'")
-                .fetch_one(&main_pool).await.unwrap();
+                .fetch_one(&main_pool)
+                .await
+                .unwrap();
             assert_eq!(count, 0);
         });
     }
@@ -671,18 +754,36 @@ mod tests {
             sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) VALUES ('orig', 0, '0', '1', ?)")
                 .bind(&bomb).execute(&src_pool).await.unwrap();
             let bomb_path = dir.path().join("bomb.db");
-            crate::session_export::perform_single_session_export(&src_pool, "orig", bomb_path.to_str().unwrap())
-                .await.unwrap();
-            let err = perform_import(&main_pool, &bomb_path, Some("bomb")).await.unwrap_err();
+            crate::session_export::perform_single_session_export(
+                &src_pool,
+                "orig",
+                bomb_path.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
+            let err = perform_import(&main_pool, &bomb_path, Some("bomb"))
+                .await
+                .unwrap_err();
             assert!(err.contains("超过上限"), "err={err}");
 
             // 场景 2：styles_json 是 JSON 数组（非 object）。
-            sqlx::query("UPDATE topology_links SET styles_json = '[1,2,3]' WHERE session_id='orig'")
-                .execute(&src_pool).await.unwrap();
+            sqlx::query(
+                "UPDATE topology_links SET styles_json = '[1,2,3]' WHERE session_id='orig'",
+            )
+            .execute(&src_pool)
+            .await
+            .unwrap();
             let arr_path = dir.path().join("arr.db");
-            crate::session_export::perform_single_session_export(&src_pool, "orig", arr_path.to_str().unwrap())
-                .await.unwrap();
-            let err = perform_import(&main_pool, &arr_path, Some("arr")).await.unwrap_err();
+            crate::session_export::perform_single_session_export(
+                &src_pool,
+                "orig",
+                arr_path.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
+            let err = perform_import(&main_pool, &arr_path, Some("arr"))
+                .await
+                .unwrap_err();
             assert!(err.contains("JSON object"), "err={err}");
         });
     }
@@ -695,55 +796,99 @@ mod tests {
             let src_pool = source_pool(dir.path()).await;
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', 't', 'now', 'now', '{}')")
                 .execute(&src_pool).await.unwrap();
-            sqlx::query("INSERT INTO nodes (session_id, node_id, mac_address) VALUES ('orig', 'n0', ?)")
-                .bind("a".repeat(65))
-                .execute(&src_pool).await.unwrap();
+            sqlx::query(
+                "INSERT INTO nodes (session_id, node_id, mac_address) VALUES ('orig', 'n0', ?)",
+            )
+            .bind("a".repeat(65))
+            .execute(&src_pool)
+            .await
+            .unwrap();
             let export_path = dir.path().join("export.db");
-            crate::session_export::perform_single_session_export(&src_pool, "orig", export_path.to_str().unwrap())
-                .await.unwrap();
-            let err = perform_import(&main_pool, &export_path, Some("mac")).await.unwrap_err();
+            crate::session_export::perform_single_session_export(
+                &src_pool,
+                "orig",
+                export_path.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
+            let err = perform_import(&main_pool, &export_path, Some("mac"))
+                .await
+                .unwrap_err();
             assert!(err.contains("mac_address"), "err={err}");
 
             // 合法 JSON object payload 保留源字段，但内嵌 id 改写为行 PK（换 id
             // 重试场景下二者必须一致，见 import_rewrites_embedded_payload_id 测试）。
             let keep_path = dir.path().join("keep.db");
             let opts = sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&keep_path).create_if_missing(true);
-            let keep_pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
-            sqlx::query(&crate::db::safety_net_schema_sql()).execute(&keep_pool).await.unwrap();
+                .filename(&keep_path)
+                .create_if_missing(true);
+            let keep_pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(opts)
+                .await
+                .unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql())
+                .execute(&keep_pool)
+                .await
+                .unwrap();
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', 't', 'now', 'now', ?)")
                 .bind(r#"{"messages":[{"role":"user"}]}"#)
                 .execute(&keep_pool).await.unwrap();
             keep_pool.close().await;
-            perform_import(&main_pool, &keep_path, Some("clean")).await.unwrap();
-            let payload: String = sqlx::query_scalar("SELECT payload FROM sessions WHERE id='clean'")
-                .fetch_one(&main_pool).await.unwrap();
+            perform_import(&main_pool, &keep_path, Some("clean"))
+                .await
+                .unwrap();
+            let payload: String =
+                sqlx::query_scalar("SELECT payload FROM sessions WHERE id='clean'")
+                    .fetch_one(&main_pool)
+                    .await
+                    .unwrap();
             assert_eq!(payload, r#"{"id":"clean","messages":[{"role":"user"}]}"#);
 
             // 非法 JSON payload 被拒（前端 JSON.parse 有 catch 兜底，导入端显式拒绝更可读）。
             let bad_path = dir.path().join("bad.db");
             let opts = sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&bad_path).create_if_missing(true);
-            let bad_pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
-            sqlx::query(&crate::db::safety_net_schema_sql()).execute(&bad_pool).await.unwrap();
+                .filename(&bad_path)
+                .create_if_missing(true);
+            let bad_pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(opts)
+                .await
+                .unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql())
+                .execute(&bad_pool)
+                .await
+                .unwrap();
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', 't', 'now', 'now', ?)")
                 .bind("not-json")
                 .execute(&bad_pool).await.unwrap();
             bad_pool.close().await;
-            let err = perform_import(&main_pool, &bad_path, Some("badjson")).await.unwrap_err();
+            let err = perform_import(&main_pool, &bad_path, Some("badjson"))
+                .await
+                .unwrap_err();
             assert!(err.contains("JSON object"), "err={err}");
 
             // title 超 256B → 拒。
             let long_title_path = dir.path().join("title.db");
             let opts = sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&long_title_path).create_if_missing(true);
-            let t_pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
-            sqlx::query(&crate::db::safety_net_schema_sql()).execute(&t_pool).await.unwrap();
+                .filename(&long_title_path)
+                .create_if_missing(true);
+            let t_pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(opts)
+                .await
+                .unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql())
+                .execute(&t_pool)
+                .await
+                .unwrap();
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', ?, 'now', 'now', '{}')")
                 .bind("t".repeat(300))
                 .execute(&t_pool).await.unwrap();
             t_pool.close().await;
-            let err = perform_import(&main_pool, &long_title_path, Some("longtitle")).await.unwrap_err();
+            let err = perform_import(&main_pool, &long_title_path, Some("longtitle"))
+                .await
+                .unwrap_err();
             assert!(err.contains("title"), "err={err}");
         });
     }
@@ -769,49 +914,85 @@ mod tests {
             );
             sqlx::query(&sql).execute(&src_pool).await.unwrap();
             let links_path = dir.path().join("links.db");
-            crate::session_export::perform_single_session_export(&src_pool, "orig", links_path.to_str().unwrap())
-                .await.unwrap();
-            let err = perform_import(&main_pool, &links_path, Some("links")).await.unwrap_err();
+            crate::session_export::perform_single_session_export(
+                &src_pool,
+                "orig",
+                links_path.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
+            let err = perform_import(&main_pool, &links_path, Some("links"))
+                .await
+                .unwrap_err();
             assert!(err.contains("链路数"), "err={err}");
 
             // project_name > 256B → 拒(手工切片)。
             let pn_path = dir.path().join("pn.db");
             let opts = sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&pn_path).create_if_missing(true);
-            let pn_pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
-            sqlx::query(&crate::db::safety_net_schema_sql()).execute(&pn_pool).await.unwrap();
+                .filename(&pn_path)
+                .create_if_missing(true);
+            let pn_pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(opts)
+                .await
+                .unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql())
+                .execute(&pn_pool)
+                .await
+                .unwrap();
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, project_name, payload) VALUES ('orig', 't', 'now', 'now', ?, '{}')")
                 .bind("p".repeat(300))
                 .execute(&pn_pool).await.unwrap();
             pn_pool.close().await;
-            let err = perform_import(&main_pool, &pn_path, Some("pn")).await.unwrap_err();
+            let err = perform_import(&main_pool, &pn_path, Some("pn"))
+                .await
+                .unwrap_err();
             assert!(err.contains("project_name"), "err={err}");
 
             // 总行数 > MAX_TOTAL_SCOPED_ROWS → 拒(子表塞行;手工切片绕过 FK）。
             let rows_path = dir.path().join("rows.db");
             let opts = sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&rows_path).create_if_missing(true);
-            let rows_pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
-            sqlx::query(&crate::db::safety_net_schema_sql()).execute(&rows_pool).await.unwrap();
+                .filename(&rows_path)
+                .create_if_missing(true);
+            let rows_pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(opts)
+                .await
+                .unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql())
+                .execute(&rows_pool)
+                .await
+                .unwrap();
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', 't', 'now', 'now', '{}')")
                 .execute(&rows_pool).await.unwrap();
-            sqlx::query("PRAGMA foreign_keys = OFF").execute(&rows_pool).await.unwrap();
+            sqlx::query("PRAGMA foreign_keys = OFF")
+                .execute(&rows_pool)
+                .await
+                .unwrap();
             // nodes 表（PK 含 node_id）灌入超过总上限的行数。
             let mut batch = Vec::with_capacity(2000);
             for i in 0..=MAX_TOTAL_SCOPED_ROWS {
                 batch.push(format!("('orig', 'n{i}')"));
                 if batch.len() == 2000 {
-                    let sql = format!("INSERT INTO nodes (session_id, node_id) VALUES {}", batch.join(", "));
+                    let sql = format!(
+                        "INSERT INTO nodes (session_id, node_id) VALUES {}",
+                        batch.join(", ")
+                    );
                     sqlx::query(&sql).execute(&rows_pool).await.unwrap();
                     batch.clear();
                 }
             }
             if !batch.is_empty() {
-                let sql = format!("INSERT INTO nodes (session_id, node_id) VALUES {}", batch.join(", "));
+                let sql = format!(
+                    "INSERT INTO nodes (session_id, node_id) VALUES {}",
+                    batch.join(", ")
+                );
                 sqlx::query(&sql).execute(&rows_pool).await.unwrap();
             }
             rows_pool.close().await;
-            let err = perform_import(&main_pool, &rows_path, Some("rows")).await.unwrap_err();
+            let err = perform_import(&main_pool, &rows_path, Some("rows"))
+                .await
+                .unwrap_err();
             assert!(err.contains("总行数"), "err={err}");
         });
     }
@@ -833,10 +1014,17 @@ mod tests {
             );
             sqlx::query(&sql).execute(&src_pool).await.unwrap();
             let export_path = dir.path().join("export.db");
-            crate::session_export::perform_single_session_export(&src_pool, "orig", export_path.to_str().unwrap())
-                .await.unwrap();
+            crate::session_export::perform_single_session_export(
+                &src_pool,
+                "orig",
+                export_path.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
 
-            let resp = perform_import(&main_pool, &export_path, Some("edge")).await.unwrap();
+            let resp = perform_import(&main_pool, &export_path, Some("edge"))
+                .await
+                .unwrap();
             assert_eq!(resp.rows_inserted.topology_nodes, MAX_NODES as u64);
         });
     }
@@ -848,15 +1036,24 @@ mod tests {
             // 创建一个普通 sqlite（application_id 默认 0）
             let bad_path = dir.path().join("bad.db");
             let opts = sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&bad_path).create_if_missing(true);
-            let bad_pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
+                .filename(&bad_path)
+                .create_if_missing(true);
+            let bad_pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(opts)
+                .await
+                .unwrap();
             sqlx::query("CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, created_at TEXT, updated_at TEXT, payload TEXT)")
                 .execute(&bad_pool).await.unwrap();
             sqlx::query("INSERT INTO sessions VALUES ('x', 't', 'now', 'now', '{}')")
-                .execute(&bad_pool).await.unwrap();
+                .execute(&bad_pool)
+                .await
+                .unwrap();
             drop(bad_pool);
 
-            let err = perform_import(&main_pool, &bad_path, None).await.unwrap_err();
+            let err = perform_import(&main_pool, &bad_path, None)
+                .await
+                .unwrap_err();
             assert!(err.contains("application_id"));
         });
     }
@@ -866,7 +1063,9 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let (dir, main_pool) = seed_main_pool().await;
             let missing = dir.path().join("ghost.db");
-            let err = perform_import(&main_pool, &missing, None).await.unwrap_err();
+            let err = perform_import(&main_pool, &missing, None)
+                .await
+                .unwrap_err();
             assert!(err.contains("无法打开"));
         });
     }

@@ -3,8 +3,8 @@ import {
   BrowserSessionRepository,
   createEmptySession,
   redactSessionForStorage,
-  SqliteSessionRepository,
   type SessionDatabase,
+  SqliteSessionRepository,
   type TsnSession,
 } from "./session-repository";
 
@@ -25,7 +25,10 @@ class MemoryDatabase implements SessionDatabase {
   }
 
   async getCurrent(): Promise<StoredSession | undefined> {
-    return (this.currentSessionId ? this.rows.get(this.currentSessionId) : undefined) ?? this.sortedRows()[0];
+    return (
+      (this.currentSessionId ? this.rows.get(this.currentSessionId) : undefined) ??
+      this.sortedRows()[0]
+    );
   }
 
   async save(session: StoredSession): Promise<void> {
@@ -101,11 +104,17 @@ describe("BrowserSessionRepository", () => {
     const repository = new BrowserSessionRepository(window.localStorage);
     const session = createEmptySession();
     // 模拟升级前 payload：附带已删除的 project/bundle 字段。
-    const legacyPayload = [{
-      ...session,
-      project: { schemaVersion: "tsn-agent.canonical.v0", topology: { nodes: [], links: [] }, flows: [] },
-      bundle: { artifacts: [] },
-    }];
+    const legacyPayload = [
+      {
+        ...session,
+        project: {
+          schemaVersion: "tsn-agent.canonical.v0",
+          topology: { nodes: [], links: [] },
+          flows: [],
+        },
+        bundle: { artifacts: [] },
+      },
+    ];
     window.localStorage.setItem("tsn-agent.sessions.v0", JSON.stringify(legacyPayload));
 
     const restored = (await repository.list())[0];
@@ -144,7 +153,8 @@ describe("redactSessionForStorage", () => {
           id: "message-sensitive",
           role: "assistant",
           createdAt: "2026-05-20T00:00:00.000Z",
-          content: 'api_key=sk-ant-secret token: abc123 "refreshToken":"oauth-secret" Authorization: Bearer bearer-secret',
+          content:
+            'api_key=sk-ant-secret token: abc123 "refreshToken":"oauth-secret" Authorization: Bearer bearer-secret',
         },
       ],
       agentEvents: [
@@ -242,8 +252,23 @@ describe("redactSessionForStorage", () => {
           createdAt: "2026-06-10T00:00:00.000Z",
           content: "进行中。",
           toolCalls: [
-            { id: "toolu-running", name: "Bash", friendlyName: "Bash", status: "running", summary: "ls", args: { command: "ls" } },
-            { id: "toolu-done", name: "Bash", friendlyName: "Bash", status: "success", summary: "ls", args: { command: "ls" }, result: "ok" },
+            {
+              id: "toolu-running",
+              name: "Bash",
+              friendlyName: "Bash",
+              status: "running",
+              summary: "ls",
+              args: { command: "ls" },
+            },
+            {
+              id: "toolu-done",
+              name: "Bash",
+              friendlyName: "Bash",
+              status: "success",
+              summary: "ls",
+              args: { command: "ls" },
+              result: "ok",
+            },
           ],
         },
       ],
@@ -406,15 +431,29 @@ describe("SqliteSessionRepository", () => {
     await repository.save({ ...createEmptySession(), id: "session-empty" });
     await repository.save({ ...createEmptySession(), id: "session-topo", topologyMutationId: 3 });
 
-    expect(database.rows.get("session-empty")).toMatchObject({ hasProject: false, bundleFileCount: 0 });
-    expect(database.rows.get("session-topo")).toMatchObject({ hasProject: true, bundleFileCount: 0 });
+    expect(database.rows.get("session-empty")).toMatchObject({
+      hasProject: false,
+      bundleFileCount: 0,
+    });
+    expect(database.rows.get("session-topo")).toMatchObject({
+      hasProject: true,
+      bundleFileCount: 0,
+    });
   });
 
   it("tracks the selected current session independently from recency", async () => {
     const database = new MemoryDatabase();
     const repository = new SqliteSessionRepository(Promise.resolve(database));
-    const older = { ...createEmptySession(), id: "session-old", updatedAt: "2026-05-20T00:00:00.000Z" };
-    const newer = { ...createEmptySession(), id: "session-new", updatedAt: "2026-05-20T00:01:00.000Z" };
+    const older = {
+      ...createEmptySession(),
+      id: "session-old",
+      updatedAt: "2026-05-20T00:00:00.000Z",
+    };
+    const newer = {
+      ...createEmptySession(),
+      id: "session-new",
+      updatedAt: "2026-05-20T00:01:00.000Z",
+    };
 
     await repository.save(older);
     await repository.save(newer);
@@ -426,7 +465,11 @@ describe("SqliteSessionRepository", () => {
   it("falls back to the newest session when current id is stale", async () => {
     const database = new MemoryDatabase();
     const repository = new SqliteSessionRepository(Promise.resolve(database));
-    const session = { ...createEmptySession(), id: "session-new", updatedAt: "2026-05-20T00:01:00.000Z" };
+    const session = {
+      ...createEmptySession(),
+      id: "session-new",
+      updatedAt: "2026-05-20T00:01:00.000Z",
+    };
 
     await repository.save(session);
     await repository.setCurrent("missing-session");
@@ -437,8 +480,16 @@ describe("SqliteSessionRepository", () => {
   it("moves current session on remove and clears it when the store is empty", async () => {
     const database = new MemoryDatabase();
     const repository = new SqliteSessionRepository(Promise.resolve(database));
-    const first = { ...createEmptySession(), id: "session-first", updatedAt: "2026-05-20T00:00:00.000Z" };
-    const second = { ...createEmptySession(), id: "session-second", updatedAt: "2026-05-20T00:01:00.000Z" };
+    const first = {
+      ...createEmptySession(),
+      id: "session-first",
+      updatedAt: "2026-05-20T00:00:00.000Z",
+    };
+    const second = {
+      ...createEmptySession(),
+      id: "session-second",
+      updatedAt: "2026-05-20T00:01:00.000Z",
+    };
 
     await repository.save(first);
     await repository.save(second);

@@ -1,13 +1,13 @@
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { useSessionRepository } from "./use-session-repository";
+import { BrowserDiagnosticLogRepository } from "../../diagnostics/diagnostic-log-repository";
 import {
   BrowserSessionRepository,
   createEmptySession,
   type SessionRepository,
   type TsnSession,
 } from "../../sessions/session-repository";
-import { BrowserDiagnosticLogRepository } from "../../diagnostics/diagnostic-log-repository";
+import { useSessionRepository } from "./use-session-repository";
 
 function createMemoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -185,7 +185,11 @@ describe("useSessionRepository", () => {
   });
 
   it("handleSelectSession switches the current session", async () => {
-    const targetSession: TsnSession = { ...createEmptySession(), id: "target", title: "target session" };
+    const targetSession: TsnSession = {
+      ...createEmptySession(),
+      id: "target",
+      title: "target session",
+    };
     await repository.save(targetSession);
 
     const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
@@ -251,7 +255,11 @@ describe("useSessionRepository", () => {
     const initialContent = session.messages[0].content;
 
     act(() => {
-      result.current.updateAssistantMessage("wrong-session", session.messages[0].id, "should not apply");
+      result.current.updateAssistantMessage(
+        "wrong-session",
+        session.messages[0].id,
+        "should not apply",
+      );
     });
 
     expect(result.current.currentSession.messages[0].content).toBe(initialContent);

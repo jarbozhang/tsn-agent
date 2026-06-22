@@ -1,27 +1,27 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { createTopologyWorkflowStageResult } from "../src/agent/topology-workflow-stage-result";
 import {
-  buildPrompt,
   buildAllowedToolsForStage,
-  TOPOLOGY_MCP_ALLOWED_TOOLS,
-  REQUEST_STAGE_CHANGE_TOOL_NAME,
-  requestStageChangeTool,
-  extractTopologyWorkflowStageResults,
-  extractStageChangeRequests,
+  buildPrompt,
   extractOperationTraceEvents,
-  extractToolCallEvents,
+  extractStageChangeRequests,
   extractStreamEventText,
+  extractToolCallEvents,
+  extractTopologyWorkflowStageResults,
+  isCliEntryPoint,
   normalizeError,
   parseAssistantText,
+  REQUEST_STAGE_CHANGE_TOOL_NAME,
   redactSecrets,
+  requestStageChangeTool,
   runClaude,
-  isCliEntryPoint,
+  TOPOLOGY_MCP_ALLOWED_TOOLS,
 } from "./claude-agent-worker.mjs";
-import { pathToFileURL } from "node:url";
 import { TOPOLOGY_MCP_ALLOWED_TOOLS as REGISTRY_TOPOLOGY_MCP_ALLOWED_TOOLS } from "./mcp/topology-tools";
-import { createTopologyWorkflowStageResult } from "../src/agent/topology-workflow-stage-result";
 
 function topologyStageResultFixture(mutationId = 7) {
   return createTopologyWorkflowStageResult(
@@ -107,7 +107,10 @@ describe("claude-agent-worker", () => {
       });
       expect(input.options.mcpServers.tsn_topology.args[0]).toContain("tsn-topology-server.mjs");
       // tsn_workflow（切阶段，in-process SDK server）始终注册。
-      expect(input.options.mcpServers.tsn_workflow).toMatchObject({ type: "sdk", name: "tsn_workflow" });
+      expect(input.options.mcpServers.tsn_workflow).toMatchObject({
+        type: "sdk",
+        name: "tsn_workflow",
+      });
       // AskUserQuestion 双层禁用（plan 2026-06-05-001 U5）：dontAsk 下必拒，硬禁省 turn。
       expect(input.options.disallowedTools).toEqual(["AskUserQuestion"]);
       expect(input.options.maxTurns).toBe(20);
@@ -391,7 +394,10 @@ describe("claude-agent-worker", () => {
     });
     expect(audit.timeline).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: "skill_reference_fallback", requestedScenario: "industrial" }),
+        expect.objectContaining({
+          type: "skill_reference_fallback",
+          requestedScenario: "industrial",
+        }),
       ]),
     );
 
@@ -405,13 +411,19 @@ describe("claude-agent-worker", () => {
         auditDir,
         appSessionId: "scenario-audit",
         runId: "run-scenario-audit-2",
-        stageRunnerInput: { userIntent: "x", stage: "topology", scenarioConfigId: "aerospace-onboard" },
+        stageRunnerInput: {
+          userIntent: "x",
+          stage: "topology",
+          scenarioConfigId: "aerospace-onboard",
+        },
       },
       query,
     );
     const audit2 = JSON.parse(await readFile(result2.auditPath, "utf8"));
     expect(audit2.scenarioReference).toMatchObject({ resolvedScenario: null, fallback: false });
-    const unavailable = audit2.timeline.find((event) => event.type === "skill_reference_unavailable");
+    const unavailable = audit2.timeline.find(
+      (event) => event.type === "skill_reference_unavailable",
+    );
     expect(unavailable).toBeDefined();
     expect(unavailable.errors.length).toBeGreaterThan(0);
   });
@@ -427,9 +439,7 @@ describe("claude-agent-worker", () => {
       {
         type: "assistant",
         message: {
-          content: [
-            { type: "text", text: `这是我手写的拓扑：${topologyJson}` },
-          ],
+          content: [{ type: "text", text: `这是我手写的拓扑：${topologyJson}` }],
         },
       },
       new Map(),
@@ -442,31 +452,41 @@ describe("claude-agent-worker", () => {
   it("Plan v3 Phase B-β: extracts the trusted mutation only from mutationId-shaped sidecar results", async () => {
     const { _extractTrustedTopologyMutationForTest } = await import("./claude-agent-worker.mjs");
     // 新 sidecar 形态
-    expect(_extractTrustedTopologyMutationForTest({
-      ok: true,
-      summary: { sessionId: "s1", mutationId: 7, applied: [{}, {}], dryRun: false },
-    })).toEqual({ sessionId: "s1", mutationId: 7, appliedCount: 2 });
+    expect(
+      _extractTrustedTopologyMutationForTest({
+        ok: true,
+        summary: { sessionId: "s1", mutationId: 7, applied: [{}, {}], dryRun: false },
+      }),
+    ).toEqual({ sessionId: "s1", mutationId: 7, appliedCount: 2 });
     // 缺 mutationId → 拒绝
-    expect(_extractTrustedTopologyMutationForTest({
-      ok: true,
-      summary: { sessionId: "s1" },
-    })).toBeUndefined();
+    expect(
+      _extractTrustedTopologyMutationForTest({
+        ok: true,
+        summary: { sessionId: "s1" },
+      }),
+    ).toBeUndefined();
     // ok=false → 拒绝
-    expect(_extractTrustedTopologyMutationForTest({
-      ok: false,
-      summary: { sessionId: "s1", mutationId: 1 },
-    })).toBeUndefined();
+    expect(
+      _extractTrustedTopologyMutationForTest({
+        ok: false,
+        summary: { sessionId: "s1", mutationId: 1 },
+      }),
+    ).toBeUndefined();
     // dryRun（mutationId 缺省）→ 拒绝
-    expect(_extractTrustedTopologyMutationForTest({
-      ok: true,
-      summary: { sessionId: "s1", mutationId: null, dryRun: true },
-    })).toBeUndefined();
+    expect(
+      _extractTrustedTopologyMutationForTest({
+        ok: true,
+        summary: { sessionId: "s1", mutationId: null, dryRun: true },
+      }),
+    ).toBeUndefined();
     // legacy responseMode:full 不再合成阶段结果
-    expect(_extractTrustedTopologyMutationForTest({
-      ok: true,
-      metadata: { responseMode: "full", summaryOnly: false },
-      full: { topology: { nodes: [], links: [] } },
-    })).toBeUndefined();
+    expect(
+      _extractTrustedTopologyMutationForTest({
+        ok: true,
+        metadata: { responseMode: "full", summaryOnly: false },
+        full: { topology: { nodes: [], links: [] } },
+      }),
+    ).toBeUndefined();
   });
 
   it("extracts topology workflow stage results from mutationId MCP tool_result blocks", () => {
@@ -478,23 +498,27 @@ describe("claude-agent-worker", () => {
       summary: { sessionId: "session-1", dryRun: false, applied: [{}, {}, {}], mutationId: 5 },
     };
 
-    const extracted = extractTopologyWorkflowStageResults({
-      type: "user",
-      message: {
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: "toolu-apply",
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(toolResult),
-              },
-            ],
-          },
-        ],
+    const extracted = extractTopologyWorkflowStageResults(
+      {
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu-apply",
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(toolResult),
+                },
+              ],
+            },
+          ],
+        },
       },
-    }, toolUseNamesById, { stage: "topology" });
+      toolUseNamesById,
+      { stage: "topology" },
+    );
 
     expect(extracted).toHaveLength(1);
     expect(extracted[0].result).toMatchObject({
@@ -516,7 +540,10 @@ describe("claude-agent-worker", () => {
   });
 
   it("U1: request_stage_change tool returns the structured stage-change proposal", async () => {
-    const result = await requestStageChangeTool.handler({ targetStage: "topology", reason: "用户要加两个设备" }, {});
+    const result = await requestStageChangeTool.handler(
+      { targetStage: "topology", reason: "用户要加两个设备" },
+      {},
+    );
     const payload = JSON.parse(result.content[0].text);
     expect(payload).toEqual({
       ok: true,
@@ -542,20 +569,26 @@ describe("claude-agent-worker", () => {
 
   it("U2: extracts a stage-change proposal in a non-topology stage (no stage gate)", () => {
     const toolUseNamesById = new Map([["toolu-switch", REQUEST_STAGE_CHANGE_TOOL_NAME]]);
-    const toolResult = { ok: true, stageChangeRequest: { targetStage: "topology", reason: "加两个设备" } };
+    const toolResult = {
+      ok: true,
+      stageChangeRequest: { targetStage: "topology", reason: "加两个设备" },
+    };
 
-    const extracted = extractStageChangeRequests({
-      type: "user",
-      message: {
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: "toolu-switch",
-            content: [{ type: "text", text: JSON.stringify(toolResult) }],
-          },
-        ],
+    const extracted = extractStageChangeRequests(
+      {
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu-switch",
+              content: [{ type: "text", text: JSON.stringify(toolResult) }],
+            },
+          ],
+        },
       },
-    }, toolUseNamesById);
+      toolUseNamesById,
+    );
 
     expect(extracted).toHaveLength(1);
     expect(extracted[0].result).toEqual({
@@ -566,27 +599,41 @@ describe("claude-agent-worker", () => {
   });
 
   it("U2: does not produce a proposal when the model only writes text without calling the tool", () => {
-    const extracted = extractStageChangeRequests({
-      type: "assistant",
-      message: { content: [{ type: "text", text: "我帮你切到拓扑阶段" }] },
-    }, new Map());
+    const extracted = extractStageChangeRequests(
+      {
+        type: "assistant",
+        message: { content: [{ type: "text", text: "我帮你切到拓扑阶段" }] },
+      },
+      new Map(),
+    );
     expect(extracted).toEqual([]);
   });
 
   it("U2: ignores tool_result blocks from other tools", () => {
     const toolUseNamesById = new Map([["toolu-read", "Read"]]);
-    const extracted = extractStageChangeRequests({
-      type: "user",
-      message: {
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: "toolu-read",
-            content: [{ type: "text", text: JSON.stringify({ ok: true, stageChangeRequest: { targetStage: "topology" } }) }],
-          },
-        ],
+    const extracted = extractStageChangeRequests(
+      {
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu-read",
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    ok: true,
+                    stageChangeRequest: { targetStage: "topology" },
+                  }),
+                },
+              ],
+            },
+          ],
+        },
       },
-    }, toolUseNamesById);
+      toolUseNamesById,
+    );
     expect(extracted).toEqual([]);
   });
 
@@ -599,7 +646,11 @@ describe("claude-agent-worker", () => {
       yield { type: "result", session_id: "session-stage", result: "拓扑已生成" };
     };
 
-    const result = await runClaude("我需要4个交换机，每个交换机连接5个端系统", { onEvent: (event) => events.push(event) }, query);
+    const result = await runClaude(
+      "我需要4个交换机，每个交换机连接5个端系统",
+      { onEvent: (event) => events.push(event) },
+      query,
+    );
 
     expect(result.stageResults).toHaveLength(1);
     expect(result.stageResults[0]).toMatchObject({
@@ -617,8 +668,15 @@ describe("claude-agent-worker", () => {
       expect(input.options.allowedTools).not.toContain("mcp__tsn_topology__topology_initialize");
       // 拓扑 server fail-closed 省略；切阶段 in-process server 与其无关，始终注册。
       expect(input.options.mcpServers.tsn_topology).toBeUndefined();
-      expect(input.options.mcpServers.tsn_workflow).toMatchObject({ type: "sdk", name: "tsn_workflow" });
-      yield { type: "result", session_id: "session-no-mcp-host", result: "拓扑工具暂不可用，已回退本地 runner 路径" };
+      expect(input.options.mcpServers.tsn_workflow).toMatchObject({
+        type: "sdk",
+        name: "tsn_workflow",
+      });
+      yield {
+        type: "result",
+        session_id: "session-no-mcp-host",
+        result: "拓扑工具暂不可用，已回退本地 runner 路径",
+      };
     };
 
     const result = await runClaude(
@@ -639,7 +697,9 @@ describe("claude-agent-worker", () => {
     const query = async function* (input) {
       callCount += 1;
       expect(input.prompt).toContain("stage-runner-input.json");
-      expect(input.options.env.TSN_AGENT_STAGE_RUNNER_INPUT_PATH).toContain("stage-runner-input.json");
+      expect(input.options.env.TSN_AGENT_STAGE_RUNNER_INPUT_PATH).toContain(
+        "stage-runner-input.json",
+      );
       yield { type: "system", session_id: "session-no-topology-result" };
       yield { type: "result", session_id: "session-no-topology-result", result: "拓扑已生成" };
     };
@@ -722,7 +782,7 @@ describe("claude-agent-worker", () => {
               id: "toolu-1",
               name: "Bash",
               input: {
-                command: "ls \"$TSN_AGENT_SKILL_OUTPUT_DIR\"",
+                command: 'ls "$TSN_AGENT_SKILL_OUTPUT_DIR"',
               },
             },
           ],
@@ -744,7 +804,11 @@ describe("claude-agent-worker", () => {
       yield { type: "result", session_id: "session-tool-trace", result: "已更新流量规划" };
     };
 
-    const result = await runClaude("加三条视频流", { onEvent: (event) => events.push(event) }, query);
+    const result = await runClaude(
+      "加三条视频流",
+      { onEvent: (event) => events.push(event) },
+      query,
+    );
 
     const streamed = events.map((event) => event.text ?? "").join("");
     // KTD5：trace 文本不再进 chunk 流，也不再 prepend 进 assistantText。
@@ -769,7 +833,12 @@ describe("claude-agent-worker", () => {
         session_id: "session-multi-tool",
         message: {
           content: [
-            { type: "tool_use", id: "toolu-a", name: "Read", input: { file_path: "src/app/App.tsx" } },
+            {
+              type: "tool_use",
+              id: "toolu-a",
+              name: "Read",
+              input: { file_path: "src/app/App.tsx" },
+            },
             { type: "tool_use", id: "toolu-b", name: "Bash", input: { command: "false" } },
           ],
         },
@@ -806,7 +875,12 @@ describe("claude-agent-worker", () => {
         type: "assistant",
         message: {
           content: [
-            { type: "tool_use", id: "toolu-1", name: "mcp__tsn_topology__topology_initialize", input: { template: "line" } },
+            {
+              type: "tool_use",
+              id: "toolu-1",
+              name: "mcp__tsn_topology__topology_initialize",
+              input: { template: "line" },
+            },
           ],
         },
       },
@@ -820,7 +894,9 @@ describe("claude-agent-worker", () => {
             {
               type: "tool_result",
               tool_use_id: "toolu-1",
-              content: [{ type: "text", text: JSON.stringify({ ok: true, summary: { mutationId: 3 } }) }],
+              content: [
+                { type: "text", text: JSON.stringify({ ok: true, summary: { mutationId: 3 } }) },
+              ],
             },
           ],
         },
@@ -829,7 +905,12 @@ describe("claude-agent-worker", () => {
     );
 
     expect(useEntries).toEqual([
-      { phase: "use", id: "toolu-1", name: "mcp__tsn_topology__topology_initialize", args: { template: "line" } },
+      {
+        phase: "use",
+        id: "toolu-1",
+        name: "mcp__tsn_topology__topology_initialize",
+        args: { template: "line" },
+      },
     ]);
     expect(resultEntries[0]).toMatchObject({
       phase: "result",
@@ -847,18 +928,29 @@ describe("claude-agent-worker", () => {
         type: "assistant",
         session_id: "s-stream-cards",
         message: {
-          content: [{ type: "tool_use", id: "toolu-1", name: "mcp__tsn_topology__topology_describe_templates", input: {} }],
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu-1",
+              name: "mcp__tsn_topology__topology_describe_templates",
+              input: {},
+            },
+          ],
         },
       };
       yield {
         type: "user",
         session_id: "s-stream-cards",
-        message: { content: [{ type: "tool_result", tool_use_id: "toolu-1", content: "templates" }] },
+        message: {
+          content: [{ type: "tool_result", tool_use_id: "toolu-1", content: "templates" }],
+        },
       };
       yield {
         type: "assistant",
         session_id: "s-stream-cards",
-        message: { content: [{ type: "tool_use", id: "toolu-2", name: "Bash", input: { command: "ls" } }] },
+        message: {
+          content: [{ type: "tool_use", id: "toolu-2", name: "Bash", input: { command: "ls" } }],
+        },
       };
       yield {
         type: "user",
@@ -878,7 +970,10 @@ describe("claude-agent-worker", () => {
       ["result", "toolu-2"],
     ]);
     // 零参工具（input:{}）也要发 start，args 为合法空对象。
-    expect(toolEvents[0].toolCall).toMatchObject({ name: "mcp__tsn_topology__topology_describe_templates", args: {} });
+    expect(toolEvents[0].toolCall).toMatchObject({
+      name: "mcp__tsn_topology__topology_describe_templates",
+      args: {},
+    });
     expect(toolEvents[1].toolCall).toMatchObject({ status: "success", result: "templates" });
     expect(toolEvents[2].toolCall).toMatchObject({ name: "Bash", args: { command: "ls" } });
     // done.toolCalls 仍为五字段完整列表（无 phase）。
@@ -898,18 +993,28 @@ describe("claude-agent-worker", () => {
       yield {
         type: "assistant",
         session_id: "s-stream-guard",
-        message: { content: [{ type: "tool_use", id: "toolu-1", name: "Bash", input: { command: "ls" } }] },
+        message: {
+          content: [{ type: "tool_use", id: "toolu-1", name: "Bash", input: { command: "ls" } }],
+        },
       };
       yield {
         type: "assistant",
         session_id: "s-stream-guard",
-        message: { content: [{ type: "tool_use", id: "toolu-1", name: "Bash", input: { command: "ls" } }] },
+        message: {
+          content: [{ type: "tool_use", id: "toolu-1", name: "Bash", input: { command: "ls" } }],
+        },
       };
       yield {
         type: "user",
         session_id: "s-stream-guard",
         message: {
-          content: [{ type: "tool_result", tool_use_id: "toolu-1", content: "<tool_use_error>Exit code 1</tool_use_error>" }],
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu-1",
+              content: "<tool_use_error>Exit code 1</tool_use_error>",
+            },
+          ],
         },
       };
       yield { type: "result", session_id: "s-stream-guard", result: "完成" };
@@ -920,13 +1025,21 @@ describe("claude-agent-worker", () => {
     const toolEvents = events.filter((event) => event.event === "tool_call");
     expect(toolEvents).toHaveLength(2);
     // stream_event 的空参早期信号不触发 start；start 携带完整 args 且不重发。
-    expect(toolEvents[0].toolCall).toMatchObject({ phase: "start", id: "toolu-1", args: { command: "ls" } });
-    expect(toolEvents[1].toolCall).toMatchObject({ phase: "result", id: "toolu-1", status: "error" });
+    expect(toolEvents[0].toolCall).toMatchObject({
+      phase: "start",
+      id: "toolu-1",
+      args: { command: "ls" },
+    });
+    expect(toolEvents[1].toolCall).toMatchObject({
+      phase: "result",
+      id: "toolu-1",
+      status: "error",
+    });
   });
 
   it("writes a per-session audit log with prompt, result, and tool traces", async () => {
     const auditDir = await mkdtemp(join(tmpdir(), "tsn-agent-audit-test-"));
-    const query = async function* (input) {
+    const query = async function* (_input) {
       yield { type: "system", session_id: "sdk-session-audit" };
       yield {
         type: "assistant",
@@ -1029,8 +1142,12 @@ describe("claude-agent-worker", () => {
       ...TOPOLOGY_MCP_ALLOWED_TOOLS,
     ]);
     expect(audit.sdkOptions.skills).toEqual(["tsn-topology", "tsn-flow-planning"]);
-    expect(audit.toolCalls.map((call) => call.text).join("\n")).toContain("[工具] mcp__tsn_topology__topology_describe_templates");
-    expect(audit.toolCalls.map((call) => call.text).join("\n")).toContain("[工具结果] mcp__tsn_topology__topology_describe_templates 已返回");
+    expect(audit.toolCalls.map((call) => call.text).join("\n")).toContain(
+      "[工具] mcp__tsn_topology__topology_describe_templates",
+    );
+    expect(audit.toolCalls.map((call) => call.text).join("\n")).toContain(
+      "[工具结果] mcp__tsn_topology__topology_describe_templates 已返回",
+    );
     expect(audit.result.assistantText).toContain("拓扑已生成");
     expect(audit.sdkSessionId).toBe("sdk-session-audit");
     expect(JSON.parse(latestRaw).runId).toBe("agent-run-audit");
@@ -1045,19 +1162,21 @@ describe("claude-agent-worker", () => {
     };
     const stageRunner = vi.fn();
 
-    await expect(runClaude(
-      "我需要4个交换机，每个交换机连接5个端系统",
-      {
-        maxTurns: 3,
-        stageRunnerInput: {
-          userIntent: "我需要4个交换机，每个交换机连接5个端系统",
-          stage: "topology",
-          scenarioConfigId: "generic-tsn",
+    await expect(
+      runClaude(
+        "我需要4个交换机，每个交换机连接5个端系统",
+        {
+          maxTurns: 3,
+          stageRunnerInput: {
+            userIntent: "我需要4个交换机，每个交换机连接5个端系统",
+            stage: "topology",
+            scenarioConfigId: "generic-tsn",
+          },
+          stageRunner,
         },
-        stageRunner,
-      },
-      query,
-    )).rejects.toThrow("Reached maximum number of turns");
+        query,
+      ),
+    ).rejects.toThrow("Reached maximum number of turns");
     expect(stageRunner).not.toHaveBeenCalled();
   });
 
@@ -1068,18 +1187,20 @@ describe("claude-agent-worker", () => {
     };
     const stageRunner = vi.fn();
 
-    await expect(runClaude(
-      "再加3条视频流吧",
-      {
-        stageRunnerInput: {
-          userIntent: "再加3条视频流吧",
-          stage: "flow-template",
-          scenarioConfigId: "generic-tsn",
+    await expect(
+      runClaude(
+        "再加3条视频流吧",
+        {
+          stageRunnerInput: {
+            userIntent: "再加3条视频流吧",
+            stage: "flow-template",
+            scenarioConfigId: "generic-tsn",
+          },
+          stageRunner,
         },
-        stageRunner,
-      },
-      query,
-    )).rejects.toThrow("Reached maximum number of turns");
+        query,
+      ),
+    ).rejects.toThrow("Reached maximum number of turns");
     expect(stageRunner).not.toHaveBeenCalled();
   });
 
@@ -1103,7 +1224,11 @@ describe("claude-agent-worker", () => {
     };
 
     await expect(
-      runClaude("继续", { resumeSessionId: "session-old", conversationContext: "上一轮已生成拓扑" }, query),
+      runClaude(
+        "继续",
+        { resumeSessionId: "session-old", conversationContext: "上一轮已生成拓扑" },
+        query,
+      ),
     ).resolves.toMatchObject({
       assistantText: "继续配置时钟同步",
       sessionId: "session-old",
@@ -1141,7 +1266,11 @@ describe("claude-agent-worker", () => {
 
   it("falls back to JSON string result text", async () => {
     const query = async function* () {
-      yield { type: "result", session_id: "session-2", result: '{"assistantText":"JSON 字符串回复"}' };
+      yield {
+        type: "result",
+        session_id: "session-2",
+        result: '{"assistantText":"JSON 字符串回复"}',
+      };
     };
 
     await expect(runClaude("需求", undefined, query)).resolves.toEqual({
@@ -1266,8 +1395,18 @@ describe("claude-agent-worker", () => {
       message: {
         content: [
           { type: "tool_use", id: "read-1", name: "Read", input: { file_path: "src/app/App.tsx" } },
-          { type: "tool_use", id: "write-1", name: "Write", input: { file_path: "/tmp/stage-result.json" } },
-          { type: "tool_use", id: "edit-1", name: "Edit", input: { file_path: "src/agent/fake-agent.ts" } },
+          {
+            type: "tool_use",
+            id: "write-1",
+            name: "Write",
+            input: { file_path: "/tmp/stage-result.json" },
+          },
+          {
+            type: "tool_use",
+            id: "edit-1",
+            name: "Edit",
+            input: { file_path: "src/agent/fake-agent.ts" },
+          },
         ],
       },
     });
@@ -1281,49 +1420,67 @@ describe("claude-agent-worker", () => {
 
   it("keeps later detailed tool-use events when an earlier stream event had empty input", () => {
     const toolUseNamesById = new Map();
-    const emptyTrace = extractOperationTraceEvents({
-      type: "stream_event",
-      event: {
-        content_block: {
-          type: "tool_use",
-          id: "read-1",
-          name: "Read",
-          input: {},
+    const emptyTrace = extractOperationTraceEvents(
+      {
+        type: "stream_event",
+        event: {
+          content_block: {
+            type: "tool_use",
+            id: "read-1",
+            name: "Read",
+            input: {},
+          },
         },
       },
-    }, toolUseNamesById);
-    const detailedTrace = extractOperationTraceEvents({
-      type: "assistant",
-      message: {
-        content: [
-          { type: "tool_use", id: "read-1", name: "Read", input: { file_path: "/tmp/skill-output/topology.json" } },
-        ],
+      toolUseNamesById,
+    );
+    const detailedTrace = extractOperationTraceEvents(
+      {
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "read-1",
+              name: "Read",
+              input: { file_path: "/tmp/skill-output/topology.json" },
+            },
+          ],
+        },
       },
-    }, toolUseNamesById);
+      toolUseNamesById,
+    );
 
     expect(emptyTrace.map((trace) => trace.text)).toEqual([]);
     expect(detailedTrace.map((trace) => trace.text)).toEqual(["[文件] 读取 topology.json"]);
   });
 
   it("summarizes successful and failed tool results", () => {
-    const toolUseNamesById = new Map([["bash-1", "Bash"], ["write-1", "Write"]]);
-    const traces = extractOperationTraceEvents({
-      type: "user",
-      message: {
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: "bash-1",
-            content: "Intermediate JSON written.",
-          },
-          {
-            type: "tool_result",
-            tool_use_id: "write-1",
-            content: "<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>",
-          },
-        ],
+    const toolUseNamesById = new Map([
+      ["bash-1", "Bash"],
+      ["write-1", "Write"],
+    ]);
+    const traces = extractOperationTraceEvents(
+      {
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "bash-1",
+              content: "Intermediate JSON written.",
+            },
+            {
+              type: "tool_result",
+              tool_use_id: "write-1",
+              content:
+                "<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>",
+            },
+          ],
+        },
       },
-    }, toolUseNamesById);
+      toolUseNamesById,
+    );
 
     expect(traces.map((trace) => trace.text)).toEqual([
       "[工具结果] Bash 已返回：Intermediate JSON written.",

@@ -1,10 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { DiagnosticsLogView } from "./DiagnosticsDrawer";
 import type { DiagnosticLogEntry } from "../../diagnostics/diagnostic-log";
 import type { DiagnosticLogRepository } from "../../diagnostics/diagnostic-log-repository";
+import { DiagnosticsLogView } from "./DiagnosticsDrawer";
 
-function createRepository(overrides: Partial<DiagnosticLogRepository> = {}): DiagnosticLogRepository {
+function createRepository(
+  overrides: Partial<DiagnosticLogRepository> = {},
+): DiagnosticLogRepository {
   const logs: DiagnosticLogEntry[] = [
     {
       id: "log-1",
@@ -43,14 +45,21 @@ describe("DiagnosticsLogView", () => {
     expect(screen.getAllByText("artifact bundle 已生成").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("run=agent-run-1")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "日志详情" })).toHaveTextContent("智能助手请求完成");
-    expect(screen.getByText(/\"provider\": \"智能助手工具\"/)).toBeInTheDocument();
+    expect(screen.getByText(/"provider": "智能助手工具"/)).toBeInTheDocument();
     expect(screen.queryByText(/Claude/)).not.toBeInTheDocument();
   });
 
   it("shows an error state when loading fails", async () => {
-    render(<DiagnosticsLogView sessionId="session-1" repository={createRepository({ list: vi.fn(async () => {
-      throw new Error("database failed");
-    }) })} />);
+    render(
+      <DiagnosticsLogView
+        sessionId="session-1"
+        repository={createRepository({
+          list: vi.fn(async () => {
+            throw new Error("database failed");
+          }),
+        })}
+      />,
+    );
 
     expect(await screen.findByText("日志加载失败：database failed")).toBeInTheDocument();
   });

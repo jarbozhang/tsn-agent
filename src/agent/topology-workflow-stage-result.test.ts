@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createTopologyWorkflowStageResult } from "./topology-workflow-stage-result";
-import { WORKFLOW_STAGE_RESULT_SCHEMA_VERSION, validateWorkflowStageResult } from "./workflow-stage-result";
+import {
+  validateWorkflowStageResult,
+  WORKFLOW_STAGE_RESULT_SCHEMA_VERSION,
+} from "./workflow-stage-result";
 
 describe("topology workflow stage result factory", () => {
   it("builds a workflow stage result from a trusted sidecar mutation", () => {

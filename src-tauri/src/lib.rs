@@ -1,6 +1,9 @@
 mod commands;
 mod db;
 mod diagnostic_store;
+mod inet_bundle;
+mod inet_remote;
+mod inet_verify_command;
 mod log_file_writer;
 mod redaction;
 mod session_export;
@@ -8,9 +11,6 @@ mod session_import;
 mod session_store;
 mod skill_factory_hashes;
 mod skill_files;
-mod inet_bundle;
-mod inet_remote;
-mod inet_verify_command;
 mod topology_backfill;
 mod topology_compute;
 mod topology_intermediate;
@@ -41,15 +41,16 @@ pub fn run() {
         )
         .manage(session_store::SessionStore::default())
         .manage(diagnostic_store::DiagnosticStore::default())
-        .manage(std::sync::Arc::new(topology_mutation_buffer::TopologyMutationBuffer::default()))
+        .manage(std::sync::Arc::new(
+            topology_mutation_buffer::TopologyMutationBuffer::default(),
+        ))
         .setup(|app| {
             // Plan v3 U3 + U4a-1：sidecar 起前先拉起 sqlx pool 与 mutation buffer。
             // emit 闭包桥接到 Tauri AppHandle，生产 emit_to("main", ...)；
             // 失败回退到全局 emit，再失败写 stderr（UI 端 watchdog 兜底）。
-            let pool = tauri::async_runtime::block_on(
-                session_store::connect_app_database(&app.handle()),
-            )
-            .expect("connect app database");
+            let pool =
+                tauri::async_runtime::block_on(session_store::connect_app_database(app.handle()))
+                    .expect("connect app database");
             // Plan v3 U5：把无 backfill_state 的 session 标 pending_walker，然后立即
             // 跑 walker 把 sessions.payload 写进 topology_nodes/_links/_refs。
             // 最小路径只覆盖基础拓扑表；13 张 nodes.* + topo_feature 由 MCP
@@ -73,9 +74,8 @@ pub fn run() {
                 std::sync::Arc::new(move |record| {
                     topology_position_command::emit_session_db_changed(&emit_handle, &record);
                 });
-            let handle = tauri::async_runtime::block_on(topology_sidecar::launch(
-                pool, buffer, emit,
-            ));
+            let handle =
+                tauri::async_runtime::block_on(topology_sidecar::launch(pool, buffer, emit));
             app.manage(handle);
             Ok(())
         })
@@ -97,7 +97,6 @@ pub fn run() {
             topology_query_command::query_topology,
             topology_query_command::verify_topology,
             inet_verify_command::verify_inet, // 暂未接前端：INET 验证挪到后续流量规划阶段，保留作其基础，勿当死代码删
-
             session_store::get_current_session,
             session_store::list_sessions,
             session_store::remove_session,

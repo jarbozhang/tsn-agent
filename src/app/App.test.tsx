@@ -2,7 +2,11 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TsnAgentResult } from "../agent/agent-types";
-import { createInitialWorkflowState, recordStageResult, type WorkflowState } from "../project/project-state";
+import {
+  createInitialWorkflowState,
+  recordStageResult,
+  type WorkflowState,
+} from "../project/project-state";
 import { appVersion, releaseNotes } from "../release/release-info";
 import { App } from "./App";
 
@@ -149,7 +153,10 @@ function firstReleaseNoteItem(): string {
 }
 
 async function typeDefaultIntent(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText("输入你的 TSN 需求"), "我需要4个交换机，每个交换机连接5个端系统");
+  await user.type(
+    screen.getByLabelText("输入你的 TSN 需求"),
+    "我需要4个交换机，每个交换机连接5个端系统",
+  );
 }
 
 describe("App", () => {
@@ -254,9 +261,13 @@ describe("App", () => {
 
     const stored = JSON.parse(window.localStorage.getItem("tsn-agent.sessions.v0") ?? "[]");
     const withTools = stored[0].messages.find(
-      (message: { role: string; toolCalls?: unknown[] }) => message.role === "assistant" && message.toolCalls?.length,
+      (message: { role: string; toolCalls?: unknown[] }) =>
+        message.role === "assistant" && message.toolCalls?.length,
     );
-    expect(withTools?.toolCalls[0]).toMatchObject({ friendlyName: "Bash", result: { stdout: "ok" } });
+    expect(withTools?.toolCalls[0]).toMatchObject({
+      friendlyName: "Bash",
+      result: { stdout: "ok" },
+    });
 
     // U7：卡片在对话流内联渲染。
     expect(screen.getByText("Bash")).toBeInTheDocument();
@@ -266,28 +277,30 @@ describe("App", () => {
   it("streams running cards mid-run (id upsert) and reconciles with done toolCalls (U4/AE1/AE6)", async () => {
     const user = userEvent.setup();
     let resolveRun!: (value: TsnAgentResult) => void;
-    runTsnAgentMock.mockImplementationOnce((request: { onToolCall?: (record: unknown) => void }) => {
-      request.onToolCall?.({
-        id: "toolu-1",
-        name: "Bash",
-        friendlyName: "Bash",
-        status: "running",
-        summary: "ls",
-        args: { command: "ls" },
-      });
-      // 同 id 重复 start：upsert 就地合并，不追加新卡。
-      request.onToolCall?.({
-        id: "toolu-1",
-        name: "Bash",
-        friendlyName: "Bash",
-        status: "running",
-        summary: "ls",
-        args: { command: "ls" },
-      });
-      return new Promise<TsnAgentResult>((resolve) => {
-        resolveRun = resolve;
-      });
-    });
+    runTsnAgentMock.mockImplementationOnce(
+      (request: { onToolCall?: (record: unknown) => void }) => {
+        request.onToolCall?.({
+          id: "toolu-1",
+          name: "Bash",
+          friendlyName: "Bash",
+          status: "running",
+          summary: "ls",
+          args: { command: "ls" },
+        });
+        // 同 id 重复 start：upsert 就地合并，不追加新卡。
+        request.onToolCall?.({
+          id: "toolu-1",
+          name: "Bash",
+          friendlyName: "Bash",
+          status: "running",
+          summary: "ls",
+          args: { command: "ls" },
+        });
+        return new Promise<TsnAgentResult>((resolve) => {
+          resolveRun = resolve;
+        });
+      },
+    );
     render(<App />);
 
     await typeDefaultIntent(user);
@@ -302,8 +315,23 @@ describe("App", () => {
     resolveRun(
       topologyAgentResult({
         toolCalls: [
-          { id: "toolu-1", name: "Bash", friendlyName: "Bash", status: "success", summary: "ls", args: { command: "ls" }, result: "ok" },
-          { id: "toolu-2", name: "Read", friendlyName: "Read", status: "success", summary: "App.tsx", args: { file_path: "App.tsx" } },
+          {
+            id: "toolu-1",
+            name: "Bash",
+            friendlyName: "Bash",
+            status: "success",
+            summary: "ls",
+            args: { command: "ls" },
+            result: "ok",
+          },
+          {
+            id: "toolu-2",
+            name: "Read",
+            friendlyName: "Read",
+            status: "success",
+            summary: "App.tsx",
+            args: { file_path: "App.tsx" },
+          },
         ],
       }),
     );
@@ -315,31 +343,36 @@ describe("App", () => {
 
     const stored = JSON.parse(window.localStorage.getItem("tsn-agent.sessions.v0") ?? "[]");
     const withTools = stored[0].messages.find(
-      (message: { role: string; toolCalls?: Array<{ status: string }> }) => message.role === "assistant" && message.toolCalls?.length,
+      (message: { role: string; toolCalls?: Array<{ status: string }> }) =>
+        message.role === "assistant" && message.toolCalls?.length,
     );
     expect(withTools?.toolCalls).toHaveLength(2);
-    expect(withTools?.toolCalls.every((call: { status: string }) => call.status !== "running")).toBe(true);
+    expect(
+      withTools?.toolCalls.every((call: { status: string }) => call.status !== "running"),
+    ).toBe(true);
   });
 
   it("drops streamed cards when the run resolves a failure result without toolCalls (U4/AE5)", async () => {
     const user = userEvent.setup();
-    runTsnAgentMock.mockImplementationOnce(async (request: { onToolCall?: (record: unknown) => void }) => {
-      request.onToolCall?.({
-        id: "toolu-1",
-        name: "Bash",
-        friendlyName: "Bash",
-        status: "running",
-        summary: "ls",
-        args: { command: "ls" },
-      });
-      // 真实崩溃路径：adapter catch 吞掉异常，resolve 不含 toolCalls 的失败文案结果。
-      return {
-        events: [],
-        workflow: createInitialWorkflowState(),
-        assistantText: "本轮请求失败：智能助手运行时异常退出。",
-        mode: "claude",
-      } satisfies TsnAgentResult;
-    });
+    runTsnAgentMock.mockImplementationOnce(
+      async (request: { onToolCall?: (record: unknown) => void }) => {
+        request.onToolCall?.({
+          id: "toolu-1",
+          name: "Bash",
+          friendlyName: "Bash",
+          status: "running",
+          summary: "ls",
+          args: { command: "ls" },
+        });
+        // 真实崩溃路径：adapter catch 吞掉异常，resolve 不含 toolCalls 的失败文案结果。
+        return {
+          events: [],
+          workflow: createInitialWorkflowState(),
+          assistantText: "本轮请求失败：智能助手运行时异常退出。",
+          mode: "claude",
+        } satisfies TsnAgentResult;
+      },
+    );
     render(<App />);
 
     await typeDefaultIntent(user);
@@ -352,8 +385,12 @@ describe("App", () => {
     // 流式卡片随 done 覆盖（toolCalls: undefined）丢弃：无运行中残卡、不落库。
     expect(screen.queryByText("Bash")).not.toBeInTheDocument();
     const stored = JSON.parse(window.localStorage.getItem("tsn-agent.sessions.v0") ?? "[]");
-    const assistantMessages = stored[0].messages.filter((message: { role: string }) => message.role === "assistant");
-    expect(assistantMessages.every((message: { toolCalls?: unknown[] }) => !message.toolCalls?.length)).toBe(true);
+    const assistantMessages = stored[0].messages.filter(
+      (message: { role: string }) => message.role === "assistant",
+    );
+    expect(
+      assistantMessages.every((message: { toolCalls?: unknown[] }) => !message.toolCalls?.length),
+    ).toBe(true);
   });
 
   it("renames the session after the first user message", async () => {
@@ -369,7 +406,9 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "会话" }));
     const sessionList = screen.getByLabelText("最近会话");
-    expect(within(sessionList).getAllByText("我需要4个交换机，每个交换机连接5个端系统").length).toBeGreaterThan(0);
+    expect(
+      within(sessionList).getAllByText("我需要4个交换机，每个交换机连接5个端系统").length,
+    ).toBeGreaterThan(0);
   });
 
   it("submits a continuation when the user confirms the waiting stage", async () => {
@@ -383,31 +422,31 @@ describe("App", () => {
     });
 
     runTsnAgentMock.mockClear();
-    runTsnAgentMock.mockResolvedValueOnce(topologyAgentResult({
-      assistantText: "时间同步默认值已生成。",
-      mode: "local",
-      workflow: (() => {
-        const workflow = createInitialWorkflowState();
-        workflow.currentStep = "time-sync";
-        workflow.stages.topology = { step: "topology", status: "confirmed" };
-        workflow.stages["time-sync"] = {
-          step: "time-sync",
-          status: "waiting_confirmation",
-          summary: "gPTP 默认同步假设。",
-        };
-        return workflow;
-      })(),
-      topologyMutationId: undefined,
-    }));
+    runTsnAgentMock.mockResolvedValueOnce(
+      topologyAgentResult({
+        assistantText: "时间同步默认值已生成。",
+        mode: "local",
+        workflow: (() => {
+          const workflow = createInitialWorkflowState();
+          workflow.currentStep = "time-sync";
+          workflow.stages.topology = { step: "topology", status: "confirmed" };
+          workflow.stages["time-sync"] = {
+            step: "time-sync",
+            status: "waiting_confirmation",
+            summary: "gPTP 默认同步假设。",
+          };
+          return workflow;
+        })(),
+        topologyMutationId: undefined,
+      }),
+    );
 
     await user.click(screen.getByRole("button", { name: "确认并继续" }));
 
     await waitFor(() => {
       expect(screen.getByText("时间同步默认值已生成。")).toBeInTheDocument();
     });
-    expect(runTsnAgentMock).toHaveBeenCalledWith(
-      expect.objectContaining({ userIntent: "继续" }),
-    );
+    expect(runTsnAgentMock).toHaveBeenCalledWith(expect.objectContaining({ userIntent: "继续" }));
     expect(screen.getByText("时间同步等待确认")).toBeInTheDocument();
   });
 
@@ -422,30 +461,34 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByText(/本次生成失败：worker exited/)).toBeInTheDocument();
     });
-    expect(screen.getByLabelText("输入你的 TSN 需求")).toHaveValue("我需要4个交换机，每个交换机连接5个端系统");
+    expect(screen.getByLabelText("输入你的 TSN 需求")).toHaveValue(
+      "我需要4个交换机，每个交换机连接5个端系统",
+    );
   });
 
   it("renders topology rows from query_topology in Tauri runtime", async () => {
     enableTauriRuntime();
-    invokeMock.mockImplementation(async (command: string, args?: { request?: { sessionId?: string } }) => {
-      if (command === "query_topology") {
-        return sampleTopologyRows(args?.request?.sessionId ?? "unknown");
-      }
+    invokeMock.mockImplementation(
+      async (command: string, args?: { request?: { sessionId?: string } }) => {
+        if (command === "query_topology") {
+          return sampleTopologyRows(args?.request?.sessionId ?? "unknown");
+        }
 
-      if (command === "get_topology_mutations_since") {
-        return { mutations: [], latest: 0, outOfRange: false };
-      }
+        if (command === "get_topology_mutations_since") {
+          return { mutations: [], latest: 0, outOfRange: false };
+        }
 
-      if (command === "list_sessions") {
-        return [];
-      }
+        if (command === "list_sessions") {
+          return [];
+        }
 
-      if (command === "get_current_session") {
-        return null;
-      }
+        if (command === "get_current_session") {
+          return null;
+        }
 
-      return undefined;
-    });
+        return undefined;
+      },
+    );
 
     render(<App />);
 
@@ -461,25 +504,27 @@ describe("App", () => {
 
   it("shows node and link details for canvas selections", async () => {
     enableTauriRuntime();
-    invokeMock.mockImplementation(async (command: string, args?: { request?: { sessionId?: string } }) => {
-      if (command === "query_topology") {
-        return sampleTopologyRows(args?.request?.sessionId ?? "unknown");
-      }
+    invokeMock.mockImplementation(
+      async (command: string, args?: { request?: { sessionId?: string } }) => {
+        if (command === "query_topology") {
+          return sampleTopologyRows(args?.request?.sessionId ?? "unknown");
+        }
 
-      if (command === "get_topology_mutations_since") {
-        return { mutations: [], latest: 0, outOfRange: false };
-      }
+        if (command === "get_topology_mutations_since") {
+          return { mutations: [], latest: 0, outOfRange: false };
+        }
 
-      if (command === "list_sessions") {
-        return [];
-      }
+        if (command === "list_sessions") {
+          return [];
+        }
 
-      if (command === "get_current_session") {
-        return null;
-      }
+        if (command === "get_current_session") {
+          return null;
+        }
 
-      return undefined;
-    });
+        return undefined;
+      },
+    );
     const user = userEvent.setup();
 
     render(<App />);

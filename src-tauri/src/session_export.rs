@@ -87,7 +87,10 @@ pub(crate) async fn perform_single_session_export(
     let target = Path::new(target_path);
     if let Ok(meta) = std::fs::symlink_metadata(target) {
         if meta.file_type().is_symlink() {
-            return Err(format!("目标路径是符号链接，拒绝导出：{}", target.display()));
+            return Err(format!(
+                "目标路径是符号链接，拒绝导出：{}",
+                target.display()
+            ));
         }
     }
 
@@ -212,7 +215,11 @@ async fn copy_slice_into(
 
     // 共享表清单逐表切片复制（同一只读事务 = 一致性快照）。
     for (table, cols) in crate::db::SESSION_SCOPED_TABLES {
-        let select_sql = format!("SELECT {} FROM {} WHERE session_id = ?", cols.join(", "), table);
+        let select_sql = format!(
+            "SELECT {} FROM {} WHERE session_id = ?",
+            cols.join(", "),
+            table
+        );
         let rows = sqlx::query(&select_sql)
             .bind(session_id)
             .fetch_all(&mut *read_tx)
@@ -286,7 +293,10 @@ mod tests {
     }
 
     async fn seed_two_sessions(pool: &sqlx::Pool<sqlx::Sqlite>) {
-        for (id, payload) in [("s1", r#"{"project":{"sensitive":"secret-blob"}}"#), ("s2", "{}")] {
+        for (id, payload) in [
+            ("s1", r#"{"project":{"sensitive":"secret-blob"}}"#),
+            ("s2", "{}"),
+        ] {
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES (?, ?, 'now', 'now', ?)")
                 .bind(id)
                 .bind(format!("title-{id}"))
@@ -301,7 +311,9 @@ mod tests {
         sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) VALUES ('s1', 0, '0', '1', '{}')")
             .execute(pool).await.expect("seed links");
         sqlx::query("INSERT INTO nodes (session_id, node_id) VALUES ('s1', 'n0')")
-            .execute(pool).await.expect("seed legacy node");
+            .execute(pool)
+            .await
+            .expect("seed legacy node");
     }
 
     async fn open_export(path: &std::path::Path) -> sqlx::Pool<sqlx::Sqlite> {
@@ -330,12 +342,11 @@ mod tests {
 
             let export_pool = open_export(&target).await;
             // 仅 1 行 sessions 且为 s1；payload 携带源值（导出完整切片）；title 保留。
-            let sessions: Vec<(String, String, String)> = sqlx::query_as(
-                "SELECT id, title, payload FROM sessions",
-            )
-            .fetch_all(&export_pool)
-            .await
-            .unwrap();
+            let sessions: Vec<(String, String, String)> =
+                sqlx::query_as("SELECT id, title, payload FROM sessions")
+                    .fetch_all(&export_pool)
+                    .await
+                    .unwrap();
             assert_eq!(sessions.len(), 1);
             assert_eq!(sessions[0].0, "s1");
             assert_eq!(sessions[0].1, "title-s1");
@@ -343,18 +354,26 @@ mod tests {
 
             // s1 的 P0 行齐全，s2 的不存在。
             let node_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes")
-                .fetch_one(&export_pool).await.unwrap();
+                .fetch_one(&export_pool)
+                .await
+                .unwrap();
             assert_eq!(node_count, 2);
             let link_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_links")
-                .fetch_one(&export_pool).await.unwrap();
+                .fetch_one(&export_pool)
+                .await
+                .unwrap();
             assert_eq!(link_count, 1);
             let legacy_nodes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes")
-                .fetch_one(&export_pool).await.unwrap();
+                .fetch_one(&export_pool)
+                .await
+                .unwrap();
             assert_eq!(legacy_nodes, 1);
 
             // application_id 正确（import 校验它）。
             let app_id: i64 = sqlx::query_scalar("PRAGMA application_id")
-                .fetch_one(&export_pool).await.unwrap();
+                .fetch_one(&export_pool)
+                .await
+                .unwrap();
             assert_eq!(app_id, 0x5453_4E01);
         });
     }
@@ -366,7 +385,9 @@ mod tests {
             let pool = fresh_pool_on_disk(&dir).await;
             seed_two_sessions(&pool).await;
             let before: String = sqlx::query_scalar("SELECT payload FROM sessions WHERE id='s1'")
-                .fetch_one(&pool).await.unwrap();
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
             let out = tempdir().unwrap();
             let target = out.path().join("export.db");
@@ -376,7 +397,9 @@ mod tests {
 
             // 主库 payload 与导出前逐字节一致（零写入断言；旧 scrub 路径已删）。
             let after: String = sqlx::query_scalar("SELECT payload FROM sessions WHERE id='s1'")
-                .fetch_one(&pool).await.unwrap();
+                .fetch_one(&pool)
+                .await
+                .unwrap();
             assert_eq!(after, before);
             assert!(after.contains("secret-blob"));
         });
@@ -400,7 +423,9 @@ mod tests {
             // 旧内容被替换为合法导出（OS save 对话框已是用户确认点）。
             let export_pool = open_export(&target).await;
             let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
-                .fetch_one(&export_pool).await.unwrap();
+                .fetch_one(&export_pool)
+                .await
+                .unwrap();
             assert_eq!(count, 1);
         });
     }
@@ -423,7 +448,8 @@ mod tests {
 
             // 旧备份原样保留，无临时文件残留（tmp+rename 的备份安全性质）。
             assert_eq!(std::fs::read(&target).unwrap(), b"precious old backup");
-            let leftovers: Vec<_> = std::fs::read_dir(out.path()).unwrap()
+            let leftovers: Vec<_> = std::fs::read_dir(out.path())
+                .unwrap()
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_name().to_string_lossy().contains("export-tmp"))
                 .collect();

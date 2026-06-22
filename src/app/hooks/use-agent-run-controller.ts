@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 
 export type AgentRunPhase = "idle" | "connecting" | "streaming" | "waiting";
 
@@ -103,7 +103,9 @@ export function useAgentRunController(
 
     const updateStick = () => {
       const distanceFromBottom =
-        messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight;
+        messagesContainer.scrollHeight -
+        messagesContainer.scrollTop -
+        messagesContainer.clientHeight;
       stickToBottomRef.current = distanceFromBottom <= STICK_TO_BOTTOM_THRESHOLD_PX;
     };
 

@@ -1,7 +1,7 @@
+import { FileText, Pencil, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { FileText, Pencil, RotateCcw } from "lucide-react";
 import type { StageSkillName } from "../../agent/stage-skill-contract";
 import {
   createSkillFileService,
@@ -61,7 +61,7 @@ export function SkillFilePreview({
   );
   const selectedFile = fileList?.files.find((file) => file.path === selectedPath);
   const hasDraftChanges = content ? draft !== content.content : false;
-  const effectiveText = isEditing ? draft : content?.content ?? "";
+  const effectiveText = isEditing ? draft : (content?.content ?? "");
   const showEmptyGuidanceHint =
     isTopologySkill &&
     selectedPath === "SKILL.md" &&
@@ -88,8 +88,8 @@ export function SkillFilePreview({
 
         setFileList(result);
         const defaultPath =
-          result.files.find((file) => file.path === "SKILL.md" && file.canPreview)?.path
-          ?? result.files.find((file) => file.canPreview)?.path;
+          result.files.find((file) => file.path === "SKILL.md" && file.canPreview)?.path ??
+          result.files.find((file) => file.canPreview)?.path;
         setSelectedPath(defaultPath);
       })
       .catch((cause) => {
@@ -244,16 +244,20 @@ export function SkillFilePreview({
       <div className="skill-files-header">
         <p className="skill-section-kicker">Skill 文件</p>
         <div className="skill-files-header-actions">
-          {fileList?.status && <span className={`skill-file-status ${fileList.status}`}>{rootStatusLabel(fileList.status)}</span>}
+          {fileList?.status && (
+            <span className={`skill-file-status ${fileList.status}`}>
+              {rootStatusLabel(fileList.status)}
+            </span>
+          )}
           <button
             className="skill-restore-btn"
             type="button"
             onClick={previewRestore}
             disabled={
-              fileList?.status !== "available"
-              || restoreState.kind === "previewing"
-              || restoreState.kind === "restoring"
-              || restoreState.kind === "confirming"
+              fileList?.status !== "available" ||
+              restoreState.kind === "previewing" ||
+              restoreState.kind === "restoring" ||
+              restoreState.kind === "confirming"
             }
           >
             <RotateCcw size={13} aria-hidden="true" />
@@ -261,7 +265,9 @@ export function SkillFilePreview({
           </button>
         </div>
       </div>
-      <small className="skill-files-note">编辑会保存到当前选中的 skill 文件，下次 agent 运行生效。</small>
+      <small className="skill-files-note">
+        编辑会保存到当前选中的 skill 文件，下次 agent 运行生效。
+      </small>
 
       {error && <div className="skill-file-error">{error}</div>}
 
@@ -275,7 +281,10 @@ export function SkillFilePreview({
                 : "没有需要恢复的文件（已与内置版本一致）"}
             </li>
             {restoreState.plan.removed.length > 0 && (
-              <li>删除 {restoreState.plan.removed.length} 个出厂已移除文件：{restoreState.plan.removed.join("、")}</li>
+              <li>
+                删除 {restoreState.plan.removed.length} 个出厂已移除文件：
+                {restoreState.plan.removed.join("、")}
+              </li>
             )}
             {restoreState.plan.preserved.length > 0 && (
               <li>自建文件不受影响：{restoreState.plan.preserved.join("、")}</li>
@@ -286,7 +295,9 @@ export function SkillFilePreview({
               className="btn-primary"
               type="button"
               onClick={confirmRestore}
-              disabled={restoreState.plan.restored.length === 0 && restoreState.plan.removed.length === 0}
+              disabled={
+                restoreState.plan.restored.length === 0 && restoreState.plan.removed.length === 0
+              }
             >
               确认恢复
             </button>
@@ -299,7 +310,8 @@ export function SkillFilePreview({
 
       {restoreState.kind === "done" && (
         <div className="skill-file-saved-notice" role="status">
-          已恢复内置版本（恢复 {restoreState.result.restored.length} 个、删除 {restoreState.result.removed.length} 个文件），下次 agent 运行生效。
+          已恢复内置版本（恢复 {restoreState.result.restored.length} 个、删除{" "}
+          {restoreState.result.removed.length} 个文件），下次 agent 运行生效。
           {restoreState.result.warning ? ` ${restoreState.result.warning}` : ""}
         </div>
       )}
@@ -308,19 +320,23 @@ export function SkillFilePreview({
         <div className="empty-panel mono">正在加载 skill 文件...</div>
       ) : (
         <div className="skill-files-layout">
-          <div className="skill-file-list" aria-label="Skill 文件列表">
+          <div className="skill-file-list" role="group" aria-label="Skill 文件列表">
             {fileList?.files.length ? (
               fileList.files.map((file) => (
                 <button
-                  className={selectedPath === file.path ? "skill-file-item active" : "skill-file-item"}
+                  className={
+                    selectedPath === file.path ? "skill-file-item active" : "skill-file-item"
+                  }
                   key={file.path}
                   type="button"
-                  aria-selected={selectedPath === file.path}
+                  aria-current={selectedPath === file.path}
                   onClick={() => selectFile(file)}
                 >
                   <FileText size={14} aria-hidden="true" />
                   <span className="mono">{file.path}</span>
-                  <small>{file.canPreview ? formatSize(file.sizeBytes) : file.reason ?? "不可预览"}</small>
+                  <small>
+                    {file.canPreview ? formatSize(file.sizeBytes) : (file.reason ?? "不可预览")}
+                  </small>
                 </button>
               ))
             ) : (
@@ -361,7 +377,12 @@ export function SkillFilePreview({
                           </button>
                         </>
                       ) : (
-                        <button className="btn" type="button" onClick={startEditing} disabled={isRestoreLocked}>
+                        <button
+                          className="btn"
+                          type="button"
+                          onClick={startEditing}
+                          disabled={isRestoreLocked}
+                        >
                           <Pencil size={14} aria-hidden="true" />
                           编辑文件
                         </button>
@@ -371,7 +392,8 @@ export function SkillFilePreview({
                 </div>
                 {!content.editable && (
                   <div className="skill-file-readonly-notice" role="note">
-                    当前为只读指引（可写副本不可用时的兜底）{content.readonlyReason ? `：${content.readonlyReason}` : ""}
+                    当前为只读指引（可写副本不可用时的兜底）
+                    {content.readonlyReason ? `：${content.readonlyReason}` : ""}
                   </div>
                 )}
                 {savedNotice && !isEditing && (

@@ -54,9 +54,7 @@ export interface PlaceholderWorkflowStageResult extends WorkflowStageBaseResult 
   };
 }
 
-export type WorkflowStageResult =
-  | TopologyWorkflowStageResult
-  | PlaceholderWorkflowStageResult;
+export type WorkflowStageResult = TopologyWorkflowStageResult | PlaceholderWorkflowStageResult;
 
 export interface WorkflowStageSummary {
   schemaVersion: typeof WORKFLOW_STAGE_RESULT_SCHEMA_VERSION;
@@ -152,7 +150,9 @@ export function validateWorkflowStageResult(value: unknown): WorkflowStageValida
     if (result.status !== "success") {
       return {
         ok: false,
-        errors: result.validation.errors.length ? result.validation.errors : [`workflow stage status is ${result.status}.`],
+        errors: result.validation.errors.length
+          ? result.validation.errors
+          : [`workflow stage status is ${result.status}.`],
       };
     }
 
@@ -202,9 +202,10 @@ function parseValidationReport(value: unknown): WorkflowStageValidationReport {
     throw new Error("validation.errors must be a string array.");
   }
 
-  const warnings = Array.isArray(value.warnings) && value.warnings.every((warning) => typeof warning === "string")
-    ? value.warnings
-    : undefined;
+  const warnings =
+    Array.isArray(value.warnings) && value.warnings.every((warning) => typeof warning === "string")
+      ? value.warnings
+      : undefined;
 
   return {
     ok: value.ok,
@@ -225,9 +226,14 @@ function parseSafeEventSummary(value: unknown): WorkflowStageSafeEventSummary | 
   return {
     title: readString(value.title, "safeEventSummary.title"),
     content: readString(value.content, "safeEventSummary.content"),
-    status: value.status === undefined
-      ? undefined
-      : readEnum(value.status, ["info", "success", "warning", "error"] as const, "safeEventSummary.status"),
+    status:
+      value.status === undefined
+        ? undefined
+        : readEnum(
+            value.status,
+            ["info", "success", "warning", "error"] as const,
+            "safeEventSummary.status",
+          ),
   };
 }
 
@@ -239,7 +245,11 @@ function readString(value: unknown, field: string): string {
   return value;
 }
 
-function readEnum<const T extends readonly string[]>(value: unknown, allowed: T, field: string): T[number] {
+function readEnum<const T extends readonly string[]>(
+  value: unknown,
+  allowed: T,
+  field: string,
+): T[number] {
   if (typeof value !== "string" || !allowed.includes(value)) {
     throw new Error(`${field} must be one of ${allowed.join(", ")}.`);
   }

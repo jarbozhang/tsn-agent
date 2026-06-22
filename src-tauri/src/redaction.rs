@@ -137,12 +137,21 @@ mod tests {
         // 而 `Authorization: <jwt>`（含空格）只把 key 部分标记为 [redacted]，
         // 后续 token 不再算 key=value，是已知 split_whitespace 限制。
         let single_token = redact_error("Error: Authorization:abc.def.ghi");
-        assert!(!single_token.contains("abc.def.ghi"), "single_token = {single_token}");
-        assert!(single_token.contains("[redacted]"), "single_token = {single_token}");
+        assert!(
+            !single_token.contains("abc.def.ghi"),
+            "single_token = {single_token}"
+        );
+        assert!(
+            single_token.contains("[redacted]"),
+            "single_token = {single_token}"
+        );
 
         // 含空格的 Authorization 头：当前实现只能脱敏 key 字面，
         // value 落在下一个 token 上不会自动被遮盖（adversarial#4 已知限制）。
         let split_form = redact_error("Error: Authorization: Bearer abc.def.ghi");
-        assert!(split_form.contains("Authorization:[redacted]"), "split_form = {split_form}");
+        assert!(
+            split_form.contains("Authorization:[redacted]"),
+            "split_form = {split_form}"
+        );
     }
 }

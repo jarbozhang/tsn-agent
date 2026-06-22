@@ -1,6 +1,9 @@
 import { useState } from "react";
 import type { ToolCallRecord } from "../../../agent/tool-call-record";
-import { redactProviderNamesForDisplay, redactProviderNamesInValue } from "../../../ui/display-redaction";
+import {
+  redactProviderNamesForDisplay,
+  redactProviderNamesInValue,
+} from "../../../ui/display-redaction";
 
 /**
  * Plan 2026-06-09-003 U7：对话流内联工具调用卡片。折叠态一行（状态 + 友好名 +
@@ -23,10 +26,16 @@ export function ToolCallCard({ record }: { record: ToolCallRecord }) {
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >
-        <span className="tool-call-status" aria-label={failed ? "失败" : running ? "运行中" : "成功"}>
+        <span
+          className="tool-call-status"
+          role="img"
+          aria-label={failed ? "失败" : running ? "运行中" : "成功"}
+        >
           {failed ? "✕" : running ? "…" : "✓"}
         </span>
-        <span className="tool-call-name mono">{redactProviderNamesForDisplay(record.friendlyName)}</span>
+        <span className="tool-call-name mono">
+          {redactProviderNamesForDisplay(record.friendlyName)}
+        </span>
         <span className="tool-call-brief">{redactProviderNamesForDisplay(record.summary)}</span>
         <span className="tool-call-chevron" aria-hidden="true">
           {expanded ? "▾" : "▸"}
@@ -38,7 +47,11 @@ export function ToolCallCard({ record }: { record: ToolCallRecord }) {
           {running ? (
             <ToolCallSection label="出参" placeholder="执行中…" />
           ) : (
-            <ToolCallSection label="出参" value={record.result} truncated={record.resultTruncated} />
+            <ToolCallSection
+              label="出参"
+              value={record.result}
+              truncated={record.resultTruncated}
+            />
           )}
         </div>
       )}

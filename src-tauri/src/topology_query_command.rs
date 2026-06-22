@@ -173,9 +173,13 @@ mod tests {
             .foreign_keys(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
-            .connect_with(opts).await.unwrap();
+            .connect_with(opts)
+            .await
+            .unwrap();
         sqlx::query(&crate::db::safety_net_schema_sql())
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1', 't', 'now', 'now', '{}')")
             .execute(&pool).await.unwrap();
         pool

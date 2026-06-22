@@ -24,7 +24,9 @@ function emit(payload: SessionDbChangedPayload) {
   }
 }
 
-function catchUpResponse(overrides: Partial<{ mutations: unknown[]; latest: number; outOfRange: boolean }> = {}) {
+function catchUpResponse(
+  overrides: Partial<{ mutations: unknown[]; latest: number; outOfRange: boolean }> = {},
+) {
   return { mutations: [], latest: 0, outOfRange: false, ...overrides };
 }
 
@@ -46,10 +48,12 @@ describe("useSessionDbListener", () => {
 
   it("runs an initial catch-up on mount and forwards mutations", async () => {
     const onChange = vi.fn();
-    invokeMock.mockResolvedValueOnce(catchUpResponse({
-      mutations: [{ sessionId: "s1", domain: "topology", mutationId: 2, timestampMs: 1 }],
-      latest: 2,
-    }));
+    invokeMock.mockResolvedValueOnce(
+      catchUpResponse({
+        mutations: [{ sessionId: "s1", domain: "topology", mutationId: 2, timestampMs: 1 }],
+        latest: 2,
+      }),
+    );
 
     renderHook(() => useSessionDbListener({ sessionId: "s1", onChange }));
 
@@ -79,10 +83,12 @@ describe("useSessionDbListener", () => {
 
   it("ignores duplicate or stale events without extra catch-up calls", async () => {
     const onChange = vi.fn();
-    invokeMock.mockResolvedValueOnce(catchUpResponse({
-      mutations: [{ sessionId: "s1", domain: "topology", mutationId: 3, timestampMs: 1 }],
-      latest: 3,
-    }));
+    invokeMock.mockResolvedValueOnce(
+      catchUpResponse({
+        mutations: [{ sessionId: "s1", domain: "topology", mutationId: 3, timestampMs: 1 }],
+        latest: 3,
+      }),
+    );
 
     renderHook(() => useSessionDbListener({ sessionId: "s1", onChange }));
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
@@ -113,16 +119,19 @@ describe("useSessionDbListener", () => {
     // outOfRange 后游标推进到 latest；下一个连续事件走 fast-path。
     onChange.mockClear();
     emit({ sessionId: "s1", domain: "topology", mutationId: 10 });
-    expect(onChange).toHaveBeenCalledWith([
-      expect.objectContaining({ mutationId: 10 }),
-    ]);
+    expect(onChange).toHaveBeenCalledWith([expect.objectContaining({ mutationId: 10 })]);
   });
 
   it("serializes concurrent catch-up triggers on one chain", async () => {
     const onChange = vi.fn();
     let resolveFirst: (value: unknown) => void = () => {};
     invokeMock
-      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
       .mockResolvedValueOnce(catchUpResponse({ latest: 7 }));
 
     renderHook(() => useSessionDbListener({ sessionId: "s1", onChange }));
@@ -132,10 +141,12 @@ describe("useSessionDbListener", () => {
     emit({ sessionId: "s1", domain: "topology", mutationId: 5 });
     expect(invokeMock).toHaveBeenCalledTimes(1);
 
-    resolveFirst(catchUpResponse({
-      mutations: [{ sessionId: "s1", domain: "topology", mutationId: 5, timestampMs: 1 }],
-      latest: 5,
-    }));
+    resolveFirst(
+      catchUpResponse({
+        mutations: [{ sessionId: "s1", domain: "topology", mutationId: 5, timestampMs: 1 }],
+        latest: 5,
+      }),
+    );
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledTimes(2);
@@ -156,10 +167,12 @@ describe("useSessionDbListener", () => {
 
   it("resets the cursor when the session changes", async () => {
     const onChange = vi.fn();
-    invokeMock.mockResolvedValue(catchUpResponse({
-      mutations: [{ sessionId: "s1", domain: "topology", mutationId: 8, timestampMs: 1 }],
-      latest: 8,
-    }));
+    invokeMock.mockResolvedValue(
+      catchUpResponse({
+        mutations: [{ sessionId: "s1", domain: "topology", mutationId: 8, timestampMs: 1 }],
+        latest: 8,
+      }),
+    );
 
     const { rerender } = renderHook(
       ({ sessionId }: { sessionId: string }) => useSessionDbListener({ sessionId, onChange }),

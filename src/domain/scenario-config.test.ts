@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SCENARIO_CONFIG_ID,
-  SCENARIO_CONFIGS,
-  WORKFLOW_STEPS,
   getScenarioConfig,
   resolveScenarioConfig,
+  SCENARIO_CONFIGS,
+  WORKFLOW_STEPS,
 } from "./scenario-config";
 
 describe("scenario config", () => {

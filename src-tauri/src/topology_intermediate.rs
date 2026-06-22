@@ -161,8 +161,8 @@ pub fn create_ports(count: usize) -> Vec<IntermediatePort> {
     (0..count)
         .map(|i| IntermediatePort {
             // 端口 id 对齐规范 P0 起编（R5）；存量数据保持 p1 起编不迁移。
-            id: format!("P{}", i),
-            name: format!("eth{}", i),
+            id: format!("P{i}"),
+            name: format!("eth{i}"),
             index: i as i64,
         })
         .collect()
@@ -175,13 +175,13 @@ pub fn derive_mac_address(ordinal: i64) -> String {
 pub fn derive_legacy_mac(numeric_id: i64) -> String {
     let high = (numeric_id >> 8) & 0xff;
     let low = numeric_id & 0xff;
-    format!("00:00:23:00:{:02X}:{:02X}", high, low)
+    format!("00:00:23:00:{high:02X}:{low:02X}")
 }
 
 pub fn derive_legacy_ip(numeric_id: i64) -> String {
     let high = (numeric_id >> 8) & 0xff;
     let low = numeric_id & 0xff;
-    format!("192.168.{}.{}", high, low)
+    format!("192.168.{high}.{low}")
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 import {
-  WORKFLOW_STAGE_RESULT_SCHEMA_VERSION,
   type TopologyWorkflowStageResult,
+  WORKFLOW_STAGE_RESULT_SCHEMA_VERSION,
   type WorkflowStageProducer,
 } from "./workflow-stage-result";
 
@@ -33,8 +33,9 @@ export function createTopologyWorkflowStageResult(
     throw new Error("trusted topology mutation must include a positive mutationId.");
   }
 
-  const summary = options.summary
-    ?? (trustedResult.appliedCount !== undefined
+  const summary =
+    options.summary ??
+    (trustedResult.appliedCount !== undefined
       ? `拓扑已写入工程数据库（mutation #${trustedResult.mutationId}，${trustedResult.appliedCount} 个操作）。`
       : `拓扑已写入工程数据库（mutation #${trustedResult.mutationId}）。`);
 

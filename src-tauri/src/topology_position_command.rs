@@ -90,7 +90,10 @@ pub fn emit_session_db_changed(
         "mutationId": record.mutation_id,
     });
     use tauri::Emitter;
-    if app.emit_to("main", "session_db_changed", payload.clone()).is_err() {
+    if app
+        .emit_to("main", "session_db_changed", payload.clone())
+        .is_err()
+    {
         let _ = app.emit("session_db_changed", payload);
     }
 }
@@ -103,9 +106,11 @@ pub async fn update_node_position(
     request: UpdateNodePositionRequest,
 ) -> Result<UpdateNodePositionResponse, String> {
     let pool = store.pool(&app).await?;
-    let record = apply_position_update(&pool, buffer.inner(), &request).await?;
+    let record = apply_position_update(pool, buffer.inner(), &request).await?;
     emit_session_db_changed(&app, &record);
-    Ok(UpdateNodePositionResponse { mutation_id: record.mutation_id })
+    Ok(UpdateNodePositionResponse {
+        mutation_id: record.mutation_id,
+    })
 }
 
 #[cfg(test)]
@@ -119,7 +124,10 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        sqlx::query(&crate::db::safety_net_schema_sql()).execute(&pool).await.unwrap();
+        sqlx::query(&crate::db::safety_net_schema_sql())
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query(
             "INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1', 't', 'now', 'now', '{}')",
         )
@@ -151,7 +159,9 @@ mod tests {
             let pool = test_pool_with_node().await;
             let buffer = TopologyMutationBuffer::default();
 
-            let record = apply_position_update(&pool, &buffer, &request(0)).await.unwrap();
+            let record = apply_position_update(&pool, &buffer, &request(0))
+                .await
+                .unwrap();
             assert_eq!(record.session_id, "s1");
             assert_eq!(record.domain, "topology");
 
@@ -174,7 +184,9 @@ mod tests {
             // 推进该 session 的 mutationId（模拟 initialize 已重建）。
             buffer.push("s1".into(), "topology".into());
 
-            let err = apply_position_update(&pool, &buffer, &request(0)).await.unwrap_err();
+            let err = apply_position_update(&pool, &buffer, &request(0))
+                .await
+                .unwrap_err();
             assert!(err.contains("stale"), "expected stale error, got: {err}");
             let row: (f64, f64) = sqlx::query_as(
                 "SELECT x, y FROM topology_nodes WHERE session_id = 's1' AND sync_name = '1'",
@@ -182,7 +194,11 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-            assert_eq!(row, (120.0, 300.0), "stale write must not mutate coordinates");
+            assert_eq!(
+                row,
+                (120.0, 300.0),
+                "stale write must not mutate coordinates"
+            );
         });
     }
 
@@ -195,7 +211,9 @@ mod tests {
             buffer.push("other".into(), "topology".into());
             buffer.push("other".into(), "topology".into());
 
-            apply_position_update(&pool, &buffer, &request(0)).await.unwrap();
+            apply_position_update(&pool, &buffer, &request(0))
+                .await
+                .unwrap();
         });
     }
 
@@ -207,9 +225,14 @@ mod tests {
             let mut req = request(0);
             req.sync_name = "999".into();
 
-            let err = apply_position_update(&pool, &buffer, &req).await.unwrap_err();
+            let err = apply_position_update(&pool, &buffer, &req)
+                .await
+                .unwrap_err();
             assert!(err.contains("not found"));
-            assert!(buffer.since("s1", 0).mutations.is_empty(), "failed write must not mint mutation");
+            assert!(
+                buffer.since("s1", 0).mutations.is_empty(),
+                "failed write must not mint mutation"
+            );
         });
     }
 
@@ -225,7 +248,9 @@ mod tests {
                 .unwrap();
             let buffer = TopologyMutationBuffer::default();
 
-            let err = apply_position_update(&pool, &buffer, &request(0)).await.unwrap_err();
+            let err = apply_position_update(&pool, &buffer, &request(0))
+                .await
+                .unwrap_err();
             assert!(err.contains("update node position failed"));
             assert!(buffer.since("s1", 0).mutations.is_empty());
         });

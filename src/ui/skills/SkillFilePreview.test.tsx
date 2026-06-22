@@ -232,7 +232,9 @@ describe("SkillFilePreview", () => {
     await waitFor(() => {
       expect(service.restoreFactorySkills).toHaveBeenCalledWith(false);
     });
-    expect(await screen.findByText(/已恢复内置版本（恢复 1 个、删除 1 个文件）/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/已恢复内置版本（恢复 1 个、删除 1 个文件）/),
+    ).toBeInTheDocument();
     // 恢复后刷新文件列表（初次加载 + 恢复后各一次）。
     await waitFor(() => {
       expect(service.listFiles).toHaveBeenCalledTimes(2);
@@ -297,7 +299,9 @@ describe("SkillFilePreview", () => {
   it("surfaces restore errors and disables restore on readonly roots", async () => {
     const user = userEvent.setup();
     const failing = createService({
-      restoreFactorySkills: vi.fn().mockRejectedValue(new Error("内置 skill 资源不可用，无法恢复内置版本。")),
+      restoreFactorySkills: vi
+        .fn()
+        .mockRejectedValue(new Error("内置 skill 资源不可用，无法恢复内置版本。")),
     });
 
     render(<SkillFilePreview skillId="tsn-topology" service={failing} />);
@@ -310,7 +314,9 @@ describe("SkillFilePreview", () => {
       listFiles: vi.fn().mockResolvedValue({
         skillId: "tsn-topology",
         status: "readonly",
-        files: [{ path: "SKILL.md", kind: "file", sizeBytes: 10, canPreview: true, canEdit: false }],
+        files: [
+          { path: "SKILL.md", kind: "file", sizeBytes: 10, canPreview: true, canEdit: false },
+        ],
       }),
     });
     render(<SkillFilePreview skillId="tsn-topology" service={readonly} />);

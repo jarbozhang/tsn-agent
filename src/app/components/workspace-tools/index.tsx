@@ -1,4 +1,3 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import {
   Download,
   FolderOpen,
@@ -10,16 +9,17 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 import type { DiagnosticLogRepository } from "../../../diagnostics/diagnostic-log-repository";
-import { DiagnosticsLogView } from "../../../ui/diagnostics/DiagnosticsDrawer";
-import { SkillFilePreview } from "../../../ui/skills/SkillFilePreview";
 import { resolvePlannerBaseUrl } from "../../../planner/planner-contract";
-import { appVersion, releaseNotes, type ReleaseNote } from "../../../release/release-info";
+import { appVersion, type ReleaseNote, releaseNotes } from "../../../release/release-info";
 import type { TsnSession } from "../../../sessions/session-repository";
 import { SKILL_CATALOG, type SkillCatalogItem } from "../../../skills/skill-catalog";
-import { DetailRow, formatTime } from "../shared";
-import { describeBackfillError, type BackfillFailureRow } from "../../hooks/use-backfill-failures";
+import { DiagnosticsLogView } from "../../../ui/diagnostics/DiagnosticsDrawer";
+import { SkillFilePreview } from "../../../ui/skills/SkillFilePreview";
+import { type BackfillFailureRow, describeBackfillError } from "../../hooks/use-backfill-failures";
 import type { TransferNotice } from "../../session-transfer";
+import { DetailRow, formatTime } from "../shared";
 
 export type WorkspaceToolPanel = "sessions" | "diagnostics" | "skills" | "settings";
 
@@ -68,7 +68,9 @@ export function WorkspaceTools({
     <>
       <WorkspaceToolRail
         activePanel={activePanel}
-        onSelectPanel={(panel) => setActivePanel((current) => (current === panel ? undefined : panel))}
+        onSelectPanel={(panel) =>
+          setActivePanel((current) => (current === panel ? undefined : panel))
+        }
       />
       {activePanel && (
         <WorkspaceToolDrawer
@@ -117,7 +119,9 @@ function WorkspaceToolRail({
 
         return (
           <button
-            className={activePanel === tool.id ? "workspace-tool-button active" : "workspace-tool-button"}
+            className={
+              activePanel === tool.id ? "workspace-tool-button active" : "workspace-tool-button"
+            }
             key={tool.id}
             type="button"
             aria-pressed={activePanel === tool.id}
@@ -178,7 +182,12 @@ function WorkspaceToolDrawer({
           <p className="drawer-kicker">{workspacePanelKicker(activePanel)}</p>
           <h2>{workspacePanelLabel(activePanel)}</h2>
         </div>
-        <button className="icon-button" type="button" aria-label={`关闭${workspacePanelLabel(activePanel)}`} onClick={onClose}>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label={`关闭${workspacePanelLabel(activePanel)}`}
+          onClick={onClose}
+        >
           <X size={18} aria-hidden="true" />
         </button>
       </div>
@@ -206,7 +215,9 @@ function WorkspaceToolDrawer({
         <DiagnosticsLogView sessionId={currentSession.id} repository={diagnosticsRepository} />
       )}
       {activePanel === "skills" && <SkillToolPanel />}
-      {activePanel === "settings" && <SettingsToolPanel version={appVersion} releases={releaseNotes} />}
+      {activePanel === "settings" && (
+        <SettingsToolPanel version={appVersion} releases={releaseNotes} />
+      )}
     </aside>
   );
 }
@@ -267,7 +278,7 @@ function SessionToolPanel({
         新建会话
       </button>
 
-      <div className="session-list" aria-label="最近会话">
+      <div className="session-list" role="group" aria-label="最近会话">
         {sessions.map((session) => (
           <button
             className={session.id === currentSession.id ? "session-item active" : "session-item"}
@@ -338,7 +349,7 @@ function SessionToolPanel({
       )}
 
       {backfillFailures.length > 0 && (
-        <div className="backfill-failures" aria-label="待恢复会话">
+        <div className="backfill-failures" role="group" aria-label="待恢复会话">
           <p className="drawer-kicker">待恢复会话</p>
           {backfillFailures.map((failure) => (
             <div className="backfill-failure-item" key={failure.sessionId}>
@@ -370,7 +381,7 @@ function SessionToolPanel({
       )}
 
       {payloadView && (
-        <div className="payload-view" aria-label="原始数据预览">
+        <div className="payload-view" role="group" aria-label="原始数据预览">
           <div className="payload-view-header">
             <span className="mono">{payloadView.sessionId.slice(0, 18)}</span>
             <div className="failure-actions">
@@ -395,7 +406,8 @@ function SessionToolPanel({
 
 function SkillToolPanel() {
   const [selectedSkillId, setSelectedSkillId] = useState(SKILL_CATALOG[0]?.id);
-  const selectedSkill = SKILL_CATALOG.find((skill) => skill.id === selectedSkillId) ?? SKILL_CATALOG[0];
+  const selectedSkill =
+    SKILL_CATALOG.find((skill) => skill.id === selectedSkillId) ?? SKILL_CATALOG[0];
 
   return (
     <div className="workspace-tool-panel split-panel">
@@ -403,13 +415,15 @@ function SkillToolPanel() {
         查看当前工作台可调用的 TSN 阶段能力，并预览已注册 skill 的本地文件。
       </p>
       <div className="master-detail-layout skill-detail-layout">
-        <div className="master-list" aria-label="Skill 列表">
+        <div className="master-list" role="group" aria-label="Skill 列表">
           {SKILL_CATALOG.map((skill) => (
             <button
-              className={selectedSkill?.id === skill.id ? "master-list-item active" : "master-list-item"}
+              className={
+                selectedSkill?.id === skill.id ? "master-list-item active" : "master-list-item"
+              }
               key={skill.id}
               type="button"
-              aria-selected={selectedSkill?.id === skill.id}
+              aria-current={selectedSkill?.id === skill.id}
               onClick={() => setSelectedSkillId(skill.id)}
             >
               <span className="tool-card-label mono">{skill.id}</span>
@@ -425,7 +439,9 @@ function SkillToolPanel() {
               {/* 描述 + 状态一行带过：标题已由上方选中卡片承担，不再重复占位。 */}
               <div className="skill-detail-meta">
                 <p className="detail-description">{selectedSkill.description}</p>
-                <span className={`skill-status ${selectedSkill.status}`}>{skillStatusLabel(selectedSkill.status)}</span>
+                <span className={`skill-status ${selectedSkill.status}`}>
+                  {skillStatusLabel(selectedSkill.status)}
+                </span>
               </div>
               <SkillFilePreview skillId={selectedSkill.id} />
             </>
@@ -439,9 +455,11 @@ function SkillToolPanel() {
 }
 
 function SettingsToolPanel({ version, releases }: { version: string; releases: ReleaseNote[] }) {
-  const defaultSelectedVersion = releases.find((release) => release.version === version)?.version ?? releases[0]?.version;
+  const defaultSelectedVersion =
+    releases.find((release) => release.version === version)?.version ?? releases[0]?.version;
   const [selectedVersion, setSelectedVersion] = useState(defaultSelectedVersion);
-  const selectedRelease = releases.find((release) => release.version === selectedVersion) ?? releases[0];
+  const selectedRelease =
+    releases.find((release) => release.version === selectedVersion) ?? releases[0];
 
   useEffect(() => {
     setSelectedVersion(defaultSelectedVersion);
@@ -450,11 +468,17 @@ function SettingsToolPanel({ version, releases }: { version: string; releases: R
   return (
     <div className="workspace-tool-panel split-panel">
       <p className="tool-panel-summary">集中管理工作台运行参数、版本号和客户可见的更新内容。</p>
-      <div className="settings-list" aria-label="工作台设置">
+      <div className="settings-list" role="group" aria-label="工作台设置">
         <DetailRow label="当前版本" value={`v${version}`} />
         <DetailRow label="默认规划服务" value={resolvePlannerBaseUrl()} />
-        <DetailRow label="会话存储" value={window.__TAURI_INTERNALS__ ? "本机数据库" : "浏览器 localStorage"} />
-        <DetailRow label="导出模式" value={window.__TAURI_INTERNALS__ ? "桌面文件系统" : "浏览器预览"} />
+        <DetailRow
+          label="会话存储"
+          value={window.__TAURI_INTERNALS__ ? "本机数据库" : "浏览器 localStorage"}
+        />
+        <DetailRow
+          label="导出模式"
+          value={window.__TAURI_INTERNALS__ ? "桌面文件系统" : "浏览器预览"}
+        />
       </div>
 
       <section className="settings-release-panel" aria-label="更新日志">
@@ -466,17 +490,23 @@ function SettingsToolPanel({ version, releases }: { version: string; releases: R
         </div>
         {releases.length > 0 ? (
           <div className="master-detail-layout release-detail-layout">
-            <div className="master-list release-version-list" aria-label="版本列表">
+            <div className="master-list release-version-list" role="group" aria-label="版本列表">
               {releases.map((release) => (
                 <button
-                  className={selectedRelease?.version === release.version ? "master-list-item active" : "master-list-item"}
+                  className={
+                    selectedRelease?.version === release.version
+                      ? "master-list-item active"
+                      : "master-list-item"
+                  }
                   key={release.version}
                   type="button"
-                  aria-selected={selectedRelease?.version === release.version}
+                  aria-current={selectedRelease?.version === release.version}
                   onClick={() => setSelectedVersion(release.version)}
                 >
                   <span className="release-version mono">v{release.version}</span>
-                  <strong>{release.version === version ? "当前版本" : `版本 ${release.version}`}</strong>
+                  <strong>
+                    {release.version === version ? "当前版本" : `版本 ${release.version}`}
+                  </strong>
                   {release.date && <small>{release.date}</small>}
                 </button>
               ))}
@@ -519,7 +549,10 @@ function ReleaseNoteDetail({ version, release }: { version: string; release?: Re
   }
 
   return (
-    <article className="detail-surface release-note-detail" aria-label={`v${release.version} 更新内容`}>
+    <article
+      className="detail-surface release-note-detail"
+      aria-label={`v${release.version} 更新内容`}
+    >
       <div className="release-note-header">
         <div>
           <span className="release-version mono">v{release.version}</span>

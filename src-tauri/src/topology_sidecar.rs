@@ -101,9 +101,9 @@ fn mint_token() -> SecretToken {
 /// Bind 127.0.0.1:0 拿 ephemeral port。绑定失败直接 panic（plan v3 fail-closed）。
 async fn bind_loopback() -> Result<(TcpListener, u16), String> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
-    let listener = TcpListener::bind(addr)
-        .await
-        .map_err(|error| format!("拓扑 sidecar 服务启动失败：{error}；建议检查 127.0.0.1 占用或重启应用"))?;
+    let listener = TcpListener::bind(addr).await.map_err(|error| {
+        format!("拓扑 sidecar 服务启动失败：{error}；建议检查 127.0.0.1 占用或重启应用")
+    })?;
     let port = listener
         .local_addr()
         .map_err(|error| format!("拓扑 sidecar 端口解析失败：{error}"))?
@@ -211,9 +211,7 @@ pub async fn launch(
     emit: MutationEmitFn,
 ) -> SidecarHandle {
     let token = mint_token();
-    let (listener, port) = bind_loopback()
-        .await
-        .unwrap_or_else(|msg| panic!("{msg}"));
+    let (listener, port) = bind_loopback().await.unwrap_or_else(|msg| panic!("{msg}"));
     let url = format!("http://127.0.0.1:{port}");
     let cancel = CancellationToken::new();
     let cancel_for_task = cancel.clone();
@@ -226,8 +224,8 @@ pub async fn launch(
     let router = build_router(token.clone(), route_state);
 
     tauri::async_runtime::spawn(async move {
-        let serve = axum::serve(listener, router.into_make_service())
-            .with_graceful_shutdown(async move {
+        let serve =
+            axum::serve(listener, router.into_make_service()).with_graceful_shutdown(async move {
                 cancel_for_task.cancelled().await;
             });
         if let Err(error) = serve.await {
@@ -274,7 +272,9 @@ mod tests {
         let t = mint_token();
         let exposed = t.expose();
         assert_eq!(exposed.len(), 43);
-        assert!(exposed.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'));
+        assert!(exposed
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'));
     }
 
     #[test]
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn debug_secret_token_redacts() {
         let t = mint_token();
-        let formatted = format!("{:?}", t);
+        let formatted = format!("{t:?}");
         assert!(!formatted.contains(t.expose()));
         assert!(formatted.contains("REDACTED"));
     }
@@ -299,8 +299,15 @@ mod tests {
             let (router, _token) = build_test_router_with_pool(pool, buf).await;
             let resp = router
                 .clone()
-                .oneshot(Request::builder().method("GET").uri("/healthz").body(Body::empty()).unwrap())
-                .await.unwrap();
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/healthz")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         });
     }
@@ -311,10 +318,16 @@ mod tests {
             let (pool, buf) = test_state().await;
             let (router, _token) = build_test_router_with_pool(pool, buf).await;
             let resp = router
-                .oneshot(Request::builder().method("GET").uri("/healthz")
-                    .header("Authorization", "Bearer wrong-token-xxxxxxxxxxxxxxxxxxxxx")
-                    .body(Body::empty()).unwrap())
-                .await.unwrap();
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/healthz")
+                        .header("Authorization", "Bearer wrong-token-xxxxxxxxxxxxxxxxxxxxx")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         });
     }
@@ -325,10 +338,16 @@ mod tests {
             let (pool, buf) = test_state().await;
             let (router, token) = build_test_router_with_pool(pool, buf).await;
             let resp = router
-                .oneshot(Request::builder().method("GET").uri("/healthz")
-                    .header("Authorization", format!("Bearer {}", token.expose()))
-                    .body(Body::empty()).unwrap())
-                .await.unwrap();
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/healthz")
+                        .header("Authorization", format!("Bearer {}", token.expose()))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
             let body = to_bytes(resp.into_body(), 1024).await.unwrap();
             assert!(body.starts_with(b"{\"status\":\"ok\""));
@@ -344,11 +363,17 @@ mod tests {
             let (router, token) = build_test_router_with_pool(pool, buf).await;
             let body = serde_json::json!({ "sessionId": "s1" }).to_string();
             let resp = router
-                .oneshot(Request::builder().method("POST").uri("/db/topology/describe_templates")
-                    .header("Authorization", format!("Bearer {}", token.expose()))
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(body)).unwrap())
-                .await.unwrap();
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/db/topology/describe_templates")
+                        .header("Authorization", format!("Bearer {}", token.expose()))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
             let bytes = to_bytes(resp.into_body(), 16_384).await.unwrap();
             let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -369,13 +394,20 @@ mod tests {
                 "sessionId": "s1",
                 "templateId": "generic-line",
                 "params": { "switchCount": 2, "endSystemsPerSwitch": 2, "dataRateMbps": 1000 }
-            }).to_string();
+            })
+            .to_string();
             let resp = router
-                .oneshot(Request::builder().method("POST").uri("/db/topology/initialize")
-                    .header("Authorization", format!("Bearer {}", token.expose()))
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(body)).unwrap())
-                .await.unwrap();
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/db/topology/initialize")
+                        .header("Authorization", format!("Bearer {}", token.expose()))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
 
             let bytes = to_bytes(resp.into_body(), 16_384).await.unwrap();
@@ -388,10 +420,16 @@ mod tests {
             assert!(parsed.get("full").is_none());
 
             // 2 交换机 + 4 端系统 = 6 节点；1 条骨干 + 4 条接入 = 5 链路。
-            let node_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
-                .fetch_one(&pool).await.unwrap();
-            let link_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_links WHERE session_id='s1'")
-                .fetch_one(&pool).await.unwrap();
+            let node_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            let link_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_links WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(node_count, 6);
             assert_eq!(link_count, 5);
 
@@ -416,19 +454,30 @@ mod tests {
                     "sessionId": "s1",
                     "templateId": "generic-line",
                     "params": params,
-                }).to_string();
-                let resp = router.clone()
-                    .oneshot(Request::builder().method("POST").uri("/db/topology/initialize")
-                        .header("Authorization", format!("Bearer {}", token.expose()))
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(body)).unwrap())
-                    .await.unwrap();
+                })
+                .to_string();
+                let resp = router
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/db/topology/initialize")
+                            .header("Authorization", format!("Bearer {}", token.expose()))
+                            .header("Content-Type", "application/json")
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
                 assert_eq!(resp.status(), StatusCode::OK);
             }
 
             // 第二次 initialize 整表重建为 2×2。
-            let node_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
-                .fetch_one(&pool).await.unwrap();
+            let node_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(node_count, 6);
             assert_eq!(buf.since("s1", 0).latest, 2);
         });
@@ -443,18 +492,27 @@ mod tests {
             let (router, token) = build_test_router_with_pool(pool, buf).await;
 
             let operations: Vec<serde_json::Value> = (0..33)
-                .map(|i| serde_json::json!({
-                    "op": "node_add", "syncName": i.to_string(),
-                    "x": 0.0, "y": 0.0, "insertOrder": i
-                }))
+                .map(|i| {
+                    serde_json::json!({
+                        "op": "node_add", "syncName": i.to_string(),
+                        "x": 0.0, "y": 0.0, "insertOrder": i
+                    })
+                })
                 .collect();
-            let body = serde_json::json!({ "sessionId": "s1", "operations": operations }).to_string();
+            let body =
+                serde_json::json!({ "sessionId": "s1", "operations": operations }).to_string();
             let resp = router
-                .oneshot(Request::builder().method("POST").uri("/db/topology/apply_operations")
-                    .header("Authorization", format!("Bearer {}", token.expose()))
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(body)).unwrap())
-                .await.unwrap();
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/db/topology/apply_operations")
+                        .header("Authorization", format!("Bearer {}", token.expose()))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
             let bytes = to_bytes(resp.into_body(), 8192).await.unwrap();
             let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -490,11 +548,17 @@ mod tests {
 
             // 语法级非法 JSON（extractor rejection 路径，区别于形状级 serde 失败）。
             let resp = router
-                .oneshot(Request::builder().method("POST").uri("/db/topology/apply_operations")
-                    .header("Authorization", format!("Bearer {}", token.expose()))
-                    .header("Content-Type", "application/json")
-                    .body(Body::from("{not valid json")).unwrap())
-                .await.unwrap();
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/db/topology/apply_operations")
+                        .header("Authorization", format!("Bearer {}", token.expose()))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from("{not valid json"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
             let bytes = to_bytes(resp.into_body(), 8192).await.unwrap();
             let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -516,13 +580,20 @@ mod tests {
             let body = serde_json::json!({
                 "sessionId": "s1",
                 "operations": [{ "kind": "insert-switch" }]
-            }).to_string();
+            })
+            .to_string();
             let resp = router
-                .oneshot(Request::builder().method("POST").uri("/db/topology/apply_operations")
-                    .header("Authorization", format!("Bearer {}", token.expose()))
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(body)).unwrap())
-                .await.unwrap();
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/db/topology/apply_operations")
+                        .header("Authorization", format!("Bearer {}", token.expose()))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
             let bytes = to_bytes(resp.into_body(), 8192).await.unwrap();
             let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -550,13 +621,20 @@ mod tests {
                     { "op": "node_add", "syncName": "0", "x": 0.0, "y": 0.0, "insertOrder": 0 }
                 ],
                 "dryRun": false
-            }).to_string();
+            })
+            .to_string();
             let resp = router
-                .oneshot(Request::builder().method("POST").uri("/db/topology/apply_operations")
-                    .header("Authorization", format!("Bearer {}", token.expose()))
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(body)).unwrap())
-                .await.unwrap();
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/db/topology/apply_operations")
+                        .header("Authorization", format!("Bearer {}", token.expose()))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
 
             let bytes = to_bytes(resp.into_body(), 8192).await.unwrap();
@@ -565,8 +643,11 @@ mod tests {
             assert_eq!(parsed["summary"]["mutationId"], 1);
 
             // 验证行真的写到 db
-            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
-                .fetch_one(&pool).await.unwrap();
+            let count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(count, 1);
 
             // 验证 ring buffer 推进了
@@ -589,21 +670,31 @@ mod tests {
                     { "op": "node_add", "syncName": "0", "x": 0.0, "y": 0.0, "insertOrder": 0 }
                 ],
                 "dryRun": true
-            }).to_string();
+            })
+            .to_string();
             let resp = router
-                .oneshot(Request::builder().method("POST").uri("/db/topology/apply_operations")
-                    .header("Authorization", format!("Bearer {}", token.expose()))
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(body)).unwrap())
-                .await.unwrap();
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/db/topology/apply_operations")
+                        .header("Authorization", format!("Bearer {}", token.expose()))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
             let bytes = to_bytes(resp.into_body(), 8192).await.unwrap();
             let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(parsed["summary"]["dryRun"], true);
             assert!(parsed["summary"]["mutationId"].is_null());
 
-            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
-                .fetch_one(&pool).await.unwrap();
+            let count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(count, 0);
             assert_eq!(buf.since("s1", 0).mutations.len(), 0);
         });
@@ -618,13 +709,20 @@ mod tests {
                 "sessionId": "ghost",
                 "operations": [],
                 "dryRun": false
-            }).to_string();
+            })
+            .to_string();
             let resp = router
-                .oneshot(Request::builder().method("POST").uri("/db/topology/apply_operations")
-                    .header("Authorization", format!("Bearer {}", token.expose()))
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(body)).unwrap())
-                .await.unwrap();
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/db/topology/apply_operations")
+                        .header("Authorization", format!("Bearer {}", token.expose()))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
         });
     }
@@ -638,11 +736,17 @@ mod tests {
     ) -> (StatusCode, serde_json::Value) {
         let body = serde_json::json!({ "sessionId": session_id }).to_string();
         let resp = router
-            .oneshot(Request::builder().method("POST").uri("/db/topology/inspect")
-                .header("Authorization", format!("Bearer {}", token.expose()))
-                .header("Content-Type", "application/json")
-                .body(Body::from(body)).unwrap())
-            .await.unwrap();
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/db/topology/inspect")
+                    .header("Authorization", format!("Bearer {}", token.expose()))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         let status = resp.status();
         let bytes = to_bytes(resp.into_body(), 65_536).await.unwrap();
         (status, serde_json::from_slice(&bytes).unwrap())
@@ -691,7 +795,10 @@ mod tests {
             assert_eq!(links[0]["name"], "l-bb");
             assert_eq!(links[0]["srcSyncName"], "0");
             assert_eq!(links[0]["dstSyncName"], "1");
-            assert_eq!(links[0]["stylesJson"], r#"{"leftLabel":"P1","rightLabel":"P1","speed":1000}"#);
+            assert_eq!(
+                links[0]["stylesJson"],
+                r#"{"leftLabel":"P1","rightLabel":"P1","speed":1000}"#
+            );
             assert_eq!(links[1]["linkSeq"], 1);
         });
     }
@@ -733,13 +840,20 @@ mod tests {
         session_id: &str,
         operations: serde_json::Value,
     ) -> (StatusCode, serde_json::Value) {
-        let body = serde_json::json!({ "sessionId": session_id, "operations": operations }).to_string();
+        let body =
+            serde_json::json!({ "sessionId": session_id, "operations": operations }).to_string();
         let resp = router
-            .oneshot(Request::builder().method("POST").uri("/db/topology/apply_operations")
-                .header("Authorization", format!("Bearer {}", token.expose()))
-                .header("Content-Type", "application/json")
-                .body(Body::from(body)).unwrap())
-            .await.unwrap();
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/db/topology/apply_operations")
+                    .header("Authorization", format!("Bearer {}", token.expose()))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         let status = resp.status();
         let bytes = to_bytes(resp.into_body(), 65_536).await.unwrap();
         (status, serde_json::from_slice(&bytes).unwrap())
@@ -759,39 +873,64 @@ mod tests {
             "params": { "switchCount": switch_count, "endSystemsPerSwitch": end_systems_per_switch, "dataRateMbps": 1000 }
         }).to_string();
         let resp = router
-            .oneshot(Request::builder().method("POST").uri("/db/topology/initialize")
-                .header("Authorization", format!("Bearer {}", token.expose()))
-                .header("Content-Type", "application/json")
-                .body(Body::from(body)).unwrap())
-            .await.unwrap();
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/db/topology/initialize")
+                    .header("Authorization", format!("Bearer {}", token.expose()))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
     /// 模拟模型读 inspect rows：定位第一条骨干链路（两端皆 switch）与建新行参照。
     /// 返回 (backbone_seq, sw1_sync_name, sw2_sync_name, styles_json,
     ///        next_sync_name, next_link_seq, next_insert_order)。
-    fn locate_insert_site(summary: &serde_json::Value) -> (i64, String, String, String, String, i64, i64) {
+    fn locate_insert_site(
+        summary: &serde_json::Value,
+    ) -> (i64, String, String, String, String, i64, i64) {
         let nodes = summary["nodes"].as_array().unwrap();
         let links = summary["links"].as_array().unwrap();
-        let switch_syncs: std::collections::HashSet<String> = nodes.iter()
+        let switch_syncs: std::collections::HashSet<String> = nodes
+            .iter()
             .filter(|n| n["nodeType"] == "switch")
             .map(|n| n["syncName"].as_str().unwrap().to_string())
             .collect();
-        let backbone = links.iter()
-            .find(|l| switch_syncs.contains(l["srcSyncName"].as_str().unwrap())
-                && switch_syncs.contains(l["dstSyncName"].as_str().unwrap()))
+        let backbone = links
+            .iter()
+            .find(|l| {
+                switch_syncs.contains(l["srcSyncName"].as_str().unwrap())
+                    && switch_syncs.contains(l["dstSyncName"].as_str().unwrap())
+            })
             .expect("generic-line must have a switch-switch backbone link");
-        let next_sync = nodes.iter()
+        let next_sync = nodes
+            .iter()
             .map(|n| n["syncName"].as_str().unwrap().parse::<i64>().unwrap())
-            .max().unwrap() + 1;
+            .max()
+            .unwrap()
+            + 1;
         (
             backbone["linkSeq"].as_i64().unwrap(),
             backbone["srcSyncName"].as_str().unwrap().to_string(),
             backbone["dstSyncName"].as_str().unwrap().to_string(),
             backbone["stylesJson"].as_str().unwrap().to_string(),
             next_sync.to_string(),
-            links.iter().map(|l| l["linkSeq"].as_i64().unwrap()).max().unwrap() + 1,
-            nodes.iter().map(|n| n["insertOrder"].as_i64().unwrap()).max().unwrap() + 1,
+            links
+                .iter()
+                .map(|l| l["linkSeq"].as_i64().unwrap())
+                .max()
+                .unwrap()
+                + 1,
+            nodes
+                .iter()
+                .map(|n| n["insertOrder"].as_i64().unwrap())
+                .max()
+                .unwrap()
+                + 1,
         )
     }
 
@@ -817,7 +956,10 @@ mod tests {
             let before = parsed["summary"].clone();
             assert_eq!(before["nodeCount"], 24);
             assert_eq!(before["linkCount"], 23);
-            let original_identity: Vec<String> = before["nodes"].as_array().unwrap().iter()
+            let original_identity: Vec<String> = before["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
                 .map(|n| n["syncName"].as_str().unwrap().to_string())
                 .collect();
 
@@ -847,15 +989,25 @@ mod tests {
             assert_eq!(after["nodeCount"], 25);
             assert_eq!(after["linkCount"], 24);
             let after_nodes = after["nodes"].as_array().unwrap();
-            assert!(after_nodes.iter().any(|n| n["syncName"].as_str() == Some(new_sync.as_str())));
+            assert!(after_nodes
+                .iter()
+                .any(|n| n["syncName"].as_str() == Some(new_sync.as_str())));
             let after_links = after["links"].as_array().unwrap();
-            assert!(after_links.iter().any(|l| l["linkSeq"].as_i64() == Some(new_seq)));
-            assert!(after_links.iter().any(|l| l["linkSeq"].as_i64() == Some(new_seq + 1)));
-            assert!(!after_links.iter().any(|l| l["linkSeq"].as_i64() == Some(backbone_seq)));
+            assert!(after_links
+                .iter()
+                .any(|l| l["linkSeq"].as_i64() == Some(new_seq)));
+            assert!(after_links
+                .iter()
+                .any(|l| l["linkSeq"].as_i64() == Some(new_seq + 1)));
+            assert!(!after_links
+                .iter()
+                .any(|l| l["linkSeq"].as_i64() == Some(backbone_seq)));
 
             // 原有 24 节点的 syncName 逐一保持不变（轮 5 整表重建破坏的性质）。
             for sync_name in &original_identity {
-                let preserved = after_nodes.iter().any(|n| n["syncName"].as_str() == Some(sync_name));
+                let preserved = after_nodes
+                    .iter()
+                    .any(|n| n["syncName"].as_str() == Some(sync_name));
                 assert!(preserved, "node syncName={sync_name} lost identity");
             }
 
@@ -870,8 +1022,13 @@ mod tests {
             assert_eq!(parsed["code"], "SYNC_NAME_TAKEN");
             assert!(parsed["message"].as_str().unwrap().contains("node_update"));
             let (_, parsed) = inspect_session(router, &token, "s1").await;
-            let sw1_row = parsed["summary"]["nodes"].as_array().unwrap().iter()
-                .find(|n| n["syncName"].as_str() == Some(sw1.as_str())).unwrap().clone();
+            let sw1_row = parsed["summary"]["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|n| n["syncName"].as_str() == Some(sw1.as_str()))
+                .unwrap()
+                .clone();
             assert_ne!(sw1_row["x"], 9.0, "碰撞不得覆盖原节点坐标");
         });
     }
@@ -894,32 +1051,47 @@ mod tests {
             let (backbone_seq, sw1, sw2, styles, new_sync, new_seq, new_order) =
                 locate_insert_site(&parsed["summary"]);
 
-            let batch_with_seqs = |seq_a: i64, seq_b: i64| serde_json::json!([
-                { "op": "link_delete", "linkSeq": backbone_seq },
-                { "op": "node_add", "syncName": new_sync,
-                  "x": 150.0, "y": 40.0, "nodeType": "switch",
-                  "insertOrder": new_order },
-                { "op": "link_add", "linkSeq": seq_a, "srcSyncName": sw1, "dstSyncName": new_sync,
-                  "stylesJson": styles },
-                { "op": "link_add", "linkSeq": seq_b, "srcSyncName": new_sync, "dstSyncName": sw2,
-                  "stylesJson": styles },
-            ]);
+            let batch_with_seqs = |seq_a: i64, seq_b: i64| {
+                serde_json::json!([
+                    { "op": "link_delete", "linkSeq": backbone_seq },
+                    { "op": "node_add", "syncName": new_sync,
+                      "x": 150.0, "y": 40.0, "nodeType": "switch",
+                      "insertOrder": new_order },
+                    { "op": "link_add", "linkSeq": seq_a, "srcSyncName": sw1, "dstSyncName": new_sync,
+                      "stylesJson": styles },
+                    { "op": "link_add", "linkSeq": seq_b, "srcSyncName": new_sync, "dstSyncName": sw2,
+                      "stylesJson": styles },
+                ])
+            };
 
-            let (status, _) = apply_ops(router.clone(), &token, "s1",
-                batch_with_seqs(new_seq, new_seq + 1)).await;
+            let (status, _) = apply_ops(
+                router.clone(),
+                &token,
+                "s1",
+                batch_with_seqs(new_seq, new_seq + 1),
+            )
+            .await;
             assert_eq!(status, StatusCode::OK);
             let (_, parsed) = inspect_session(router.clone(), &token, "s1").await;
             let link_count_first = parsed["summary"]["linkCount"].as_i64().unwrap();
 
             // 「重试」时重新分配 linkSeq：node_add 同值 no-op，link_delete no-op，
             // 两条 link_add 是全新 key → 静默成功，平行链路 +2。
-            let (status, parsed) = apply_ops(router.clone(), &token, "s1",
-                batch_with_seqs(new_seq + 2, new_seq + 3)).await;
+            let (status, parsed) = apply_ops(
+                router.clone(),
+                &token,
+                "s1",
+                batch_with_seqs(new_seq + 2, new_seq + 3),
+            )
+            .await;
             assert_eq!(status, StatusCode::OK);
             assert_eq!(parsed["ok"], true);
 
             let (_, parsed) = inspect_session(router, &token, "s1").await;
-            assert_eq!(parsed["summary"]["linkCount"].as_i64().unwrap(), link_count_first + 2);
+            assert_eq!(
+                parsed["summary"]["linkCount"].as_i64().unwrap(),
+                link_count_first + 2
+            );
         });
     }
 
@@ -935,16 +1107,22 @@ mod tests {
             let (router, token) = build_test_router_with_pool(pool, buf).await;
             let body = serde_json::json!({ "sessionId": "s1" }).to_string();
             let resp = router
-                .oneshot(Request::builder().method("POST").uri("/db/topology/validate")
-                    .header("Authorization", format!("Bearer {}", token.expose()))
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(body)).unwrap())
-                .await.unwrap();
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/db/topology/validate")
+                        .header("Authorization", format!("Bearer {}", token.expose()))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
             let bytes = to_bytes(resp.into_body(), 4096).await.unwrap();
             let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(parsed["ok"], false);
-            assert!(parsed["summary"]["errors"].as_array().unwrap().len() >= 1);
+            assert!(!parsed["summary"]["errors"].as_array().unwrap().is_empty());
         });
     }
 }

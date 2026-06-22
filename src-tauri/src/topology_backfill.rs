@@ -95,12 +95,14 @@ pub async fn list_backfill_failures(
     .map_err(|e| format!("查询 backfill 失败列表：{e}"))?;
     Ok(rows
         .into_iter()
-        .map(|(session_id, state, error_code, attempted_at)| BackfillStateRow {
-            session_id,
-            state,
-            error_code,
-            attempted_at,
-        })
+        .map(
+            |(session_id, state, error_code, attempted_at)| BackfillStateRow {
+                session_id,
+                state,
+                error_code,
+                attempted_at,
+            },
+        )
         .collect())
 }
 
@@ -277,9 +279,13 @@ mod tests {
             .foreign_keys(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
-            .connect_with(opts).await.unwrap();
+            .connect_with(opts)
+            .await
+            .unwrap();
         sqlx::query(&crate::db::safety_net_schema_sql())
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
         pool
     }
 
@@ -304,8 +310,12 @@ mod tests {
             let marked = mark_pending_for_all_sessions(&pool).await.unwrap();
             assert_eq!(marked, 1); // 只 s1 新增
 
-            let s2_state: String = sqlx::query_scalar("SELECT state FROM session_backfill_state WHERE session_id='s2'")
-                .fetch_one(&pool).await.unwrap();
+            let s2_state: String = sqlx::query_scalar(
+                "SELECT state FROM session_backfill_state WHERE session_id='s2'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             assert_eq!(s2_state, "failed_parse"); // 不被覆盖
         });
     }
@@ -324,8 +334,12 @@ mod tests {
             let marked = mark_pending_for_all_sessions(&pool).await.unwrap();
             assert_eq!(marked, 1); // 只 no_p0 被标 pending
 
-            let with_p0_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM session_backfill_state WHERE session_id='with_p0'")
-                .fetch_one(&pool).await.unwrap();
+            let with_p0_rows: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM session_backfill_state WHERE session_id='with_p0'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             assert_eq!(with_p0_rows, 0); // 有 P0 拓扑 → 不标 pending
         });
     }
@@ -345,12 +359,15 @@ mod tests {
             let state: String = sqlx::query_scalar(
                 "SELECT state FROM session_backfill_state WHERE session_id='bad'",
             )
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             assert!(state.starts_with("failed_"), "state={state}");
-            let p0_rows: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM topology_nodes WHERE session_id='bad'",
-            )
-            .fetch_one(&pool).await.unwrap();
+            let p0_rows: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='bad'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(p0_rows, 0);
         });
     }
@@ -362,7 +379,10 @@ mod tests {
         let long_tail = "x".repeat(80 * 1024);
         let payload = format!("{secret_part} {long_tail}");
         let viewed = redact_then_truncate(&payload);
-        assert!(!viewed.contains("sk-ant-super-secret-token"), "secret 必须被打码");
+        assert!(
+            !viewed.contains("sk-ant-super-secret-token"),
+            "secret 必须被打码"
+        );
         assert!(viewed.len() < payload.len());
         assert!(viewed.contains("已截断"));
 
@@ -388,8 +408,12 @@ mod tests {
             )
             .bind("s1").bind("new").execute(&pool).await.unwrap();
 
-            let (state, code): (String, Option<String>) = sqlx::query_as("SELECT state, error_code FROM session_backfill_state WHERE session_id='s1'")
-                .fetch_one(&pool).await.unwrap();
+            let (state, code): (String, Option<String>) = sqlx::query_as(
+                "SELECT state, error_code FROM session_backfill_state WHERE session_id='s1'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             assert_eq!(state, "pending_walker");
             assert!(code.is_none());
         });
@@ -406,7 +430,9 @@ mod tests {
             let (state, code): (String, Option<String>) = sqlx::query_as(
                 "SELECT state, error_code FROM session_backfill_state WHERE session_id = 's1'",
             )
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             assert_eq!(state, "failed_parse");
             assert_eq!(code.as_deref(), Some("PAYLOAD_NOT_JSON"));
         });
@@ -418,7 +444,8 @@ mod tests {
         // 直接落 P0 表，walker 视为无需迁移 → completed，不进失败列表。
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
-            let payload = r#"{"title":"新会话","messages":[],"workflow":{"currentStep":"topology"}}"#;
+            let payload =
+                r#"{"title":"新会话","messages":[],"workflow":{"currentStep":"topology"}}"#;
             sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1', 't', 'now', 'now', ?)")
                 .bind(payload).execute(&pool).await.unwrap();
             walker_run_session(&pool, "s1").await.unwrap();
@@ -426,7 +453,9 @@ mod tests {
             let (state, code): (String, Option<String>) = sqlx::query_as(
                 "SELECT state, error_code FROM session_backfill_state WHERE session_id = 's1'",
             )
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             assert_eq!(state, "completed_walker");
             assert!(code.is_none());
         });
@@ -446,11 +475,15 @@ mod tests {
             let s1_state: String = sqlx::query_scalar(
                 "SELECT state FROM session_backfill_state WHERE session_id = 's1'",
             )
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             let s2_state: String = sqlx::query_scalar(
                 "SELECT state FROM session_backfill_state WHERE session_id = 's2'",
             )
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             assert_eq!(s1_state, "completed_walker");
             assert_eq!(s2_state, "completed_walker");
         });

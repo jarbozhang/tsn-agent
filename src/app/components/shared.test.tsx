@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { DetailRow, Stat, formatTime } from "./shared";
+import { DetailRow, formatTime, Stat } from "./shared";
 
 describe("shared primitives", () => {
   it("DetailRow renders its label and value", () => {

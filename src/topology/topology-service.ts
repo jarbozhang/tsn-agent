@@ -22,7 +22,9 @@ export const TOPOLOGY_TOOL_NAMES = [
 
 export type TopologyToolName = (typeof TOPOLOGY_TOOL_NAMES)[number];
 
-export function getTopologyRuntimeSummary(status: TopologyRuntimeStatus = "available"): TopologyRuntimeSummary {
+export function getTopologyRuntimeSummary(
+  status: TopologyRuntimeStatus = "available",
+): TopologyRuntimeSummary {
   return {
     serverName: TOPOLOGY_MCP_SERVER_NAME,
     status,

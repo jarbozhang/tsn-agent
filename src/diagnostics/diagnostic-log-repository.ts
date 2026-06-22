@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
   createDiagnosticLogEntry,
-  sanitizeDiagnosticLogEntry,
   type DiagnosticLogEntry,
   type DiagnosticLogInput,
+  sanitizeDiagnosticLogEntry,
 } from "./diagnostic-log";
 
 const STORAGE_KEY = "tsn-agent.diagnostic-logs.v0";
@@ -106,7 +106,9 @@ export function createDiagnosticLogRepository(): DiagnosticLogRepository {
   return new BrowserDiagnosticLogRepository(createMemoryStorage());
 }
 
-export function normalizeDiagnosticInput(input: DiagnosticLogInput | DiagnosticLogEntry): DiagnosticLogEntry {
+export function normalizeDiagnosticInput(
+  input: DiagnosticLogInput | DiagnosticLogEntry,
+): DiagnosticLogEntry {
   if ("id" in input && "createdAt" in input) {
     return sanitizeDiagnosticLogEntry(input);
   }
@@ -115,7 +117,10 @@ export function normalizeDiagnosticInput(input: DiagnosticLogInput | DiagnosticL
 }
 
 function trimLogsForSession(logs: DiagnosticLogEntry[], sessionId: string): DiagnosticLogEntry[] {
-  const sessionLogs = sortLogs(logs.filter((entry) => entry.sessionId === sessionId)).slice(0, MAX_LOGS_PER_SESSION);
+  const sessionLogs = sortLogs(logs.filter((entry) => entry.sessionId === sessionId)).slice(
+    0,
+    MAX_LOGS_PER_SESSION,
+  );
   const otherLogs = logs.filter((entry) => entry.sessionId !== sessionId);
 
   return [...sessionLogs, ...otherLogs];

@@ -62,14 +62,7 @@ function bumpVersion(version, bump) {
 }
 
 function latestReleaseTag() {
-  return tryGit([
-    "tag",
-    "--merged",
-    "HEAD",
-    "--list",
-    "v[0-9]*.[0-9]*.[0-9]*",
-    "--sort=-v:refname",
-  ])
+  return tryGit(["tag", "--merged", "HEAD", "--list", "v[0-9]*.[0-9]*.[0-9]*", "--sort=-v:refname"])
     .split("\n")
     .map((line) => line.trim())
     .find(Boolean);
@@ -93,9 +86,8 @@ function collectCommits(fromTag) {
     .filter(Boolean)
     .map((record) => {
       const [hash, subject, body = ""] = record.split("\x1f");
-      const conventional = /^(?<type>[a-z]+)(?:\((?<scope>[^)]+)\))?(?<breaking>!)?:\s*(?<summary>.+)$/i.exec(
-        subject,
-      );
+      const conventional =
+        /^(?<type>[a-z]+)(?:\((?<scope>[^)]+)\))?(?<breaking>!)?:\s*(?<summary>.+)$/i.exec(subject);
       return {
         hash,
         shortHash: hash.slice(0, 7),

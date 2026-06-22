@@ -2,10 +2,10 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { ChatPane, AgentRunStatusBar, type ChatPaneProps } from "./index";
-import type { ChatMessage } from "../../../sessions/session-repository";
 import { getScenarioConfig } from "../../../domain/scenario-config";
 import { createInitialWorkflowState } from "../../../project/project-state";
+import type { ChatMessage } from "../../../sessions/session-repository";
+import { AgentRunStatusBar, ChatPane, type ChatPaneProps } from "./index";
 
 function baseProps(overrides: Partial<ChatPaneProps> = {}): ChatPaneProps {
   const workflow = createInitialWorkflowState();
@@ -47,12 +47,15 @@ describe("ChatPane", () => {
       {
         id: "m1",
         role: "assistant",
-        content: "拓扑还差一点，先修好再继续（仅结构级）：\n· ES-2 没连任何线，是个孤立节点。\n改好后再点「确认并继续」。",
+        content:
+          "拓扑还差一点，先修好再继续（仅结构级）：\n· ES-2 没连任何线，是个孤立节点。\n改好后再点「确认并继续」。",
         createdAt: "2026-06-17T00:00:00Z",
         verification: {
           ok: false,
           caliber: "structural_only",
-          errors: [{ code: "ISOLATED_NODE", messageZh: "ES-2 没连任何线，是个孤立节点。", nodeRef: "2" }],
+          errors: [
+            { code: "ISOLATED_NODE", messageZh: "ES-2 没连任何线，是个孤立节点。", nodeRef: "2" },
+          ],
         },
       },
     ];
@@ -149,9 +152,9 @@ describe("ChatPane", () => {
     const article = screen.getByText("topology.initialize").closest("article");
     const waiting = screen.getByText(/正在连接智能助手，并结合当前会话上下文/);
     expect(article).toContainElement(waiting);
-    expect(
-      article?.querySelector(".tool-call-list")?.compareDocumentPosition(waiting) ?? 0,
-    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(article?.querySelector(".tool-call-list")?.compareDocumentPosition(waiting) ?? 0).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
   it("disables the send button when input is empty", () => {
@@ -188,7 +191,9 @@ describe("ChatPane", () => {
   it("does not submit on Enter while the agent is running or input is empty", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
-    const { rerender } = render(<ChatPane {...baseProps({ input: "需求", onSubmit, isAgentRunning: true })} />);
+    const { rerender } = render(
+      <ChatPane {...baseProps({ input: "需求", onSubmit, isAgentRunning: true })} />,
+    );
     screen.getByLabelText("输入你的 TSN 需求").focus();
     await user.keyboard("{Enter}");
     expect(onSubmit).not.toHaveBeenCalled();

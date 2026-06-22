@@ -1,8 +1,11 @@
 import type { TsnSession } from "../sessions/session-repository";
+import { type DiagnosticLogInput, summarizeText } from "./diagnostic-log";
 import type { DiagnosticLogRepository } from "./diagnostic-log-repository";
-import { summarizeText, type DiagnosticLogInput } from "./diagnostic-log";
 
-export function logDiagnostic(repository: DiagnosticLogRepository, input: DiagnosticLogInput): void {
+export function logDiagnostic(
+  repository: DiagnosticLogRepository,
+  input: DiagnosticLogInput,
+): void {
   void repository.append(input);
 }
 

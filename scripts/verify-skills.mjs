@@ -4,9 +4,10 @@
 // ③ frontmatter / worker 声明 / git 跟踪既有校验保留；
 // ④ R9 三方对账：reference 文件名 == 已注册 ScenarioConfigId；preset 表 `templateId`
 //    必须存在于 Rust catalog；声明了场景的模板必须在该场景 reference 的 preset 表有行。
-import { access, readdir, readFile } from "node:fs/promises";
-import { constants } from "node:fs";
+
 import { execFile } from "node:child_process";
+import { constants } from "node:fs";
+import { access, readdir, readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -26,16 +27,22 @@ async function main() {
   }
 
   if (!workerAllowsSkill(workerSource)) {
-    errors.push("src-node/claude-agent-worker.mjs must allow the Skill tool when project skills are configured.");
+    errors.push(
+      "src-node/claude-agent-worker.mjs must allow the Skill tool when project skills are configured.",
+    );
   }
 
   // ① 整目录映射（R13）：单条目覆盖全部 skill 文件，悬空 per-file 映射不允许残留。
   if (resources[DIRECTORY_RESOURCE_SOURCE] !== DIRECTORY_RESOURCE_TARGET) {
-    errors.push(`src-tauri/tauri.conf.json must map "${DIRECTORY_RESOURCE_SOURCE}" to "${DIRECTORY_RESOURCE_TARGET}".`);
+    errors.push(
+      `src-tauri/tauri.conf.json must map "${DIRECTORY_RESOURCE_SOURCE}" to "${DIRECTORY_RESOURCE_TARGET}".`,
+    );
   }
   for (const source of Object.keys(resources)) {
     if (source !== DIRECTORY_RESOURCE_SOURCE && source.startsWith("../.claude/skills/")) {
-      errors.push(`src-tauri/tauri.conf.json has a stale per-file skill mapping "${source}"; the directory mapping covers it.`);
+      errors.push(
+        `src-tauri/tauri.conf.json has a stale per-file skill mapping "${source}"; the directory mapping covers it.`,
+      );
     }
   }
 
@@ -44,9 +51,13 @@ async function main() {
   const rootEntries = await readdir(skillRoot, { withFileTypes: true });
   for (const entry of rootEntries) {
     if (entry.isFile()) {
-      errors.push(`${skillRoot}/${entry.name} is a stray root-level file; the directory bundle would ship it — remove it.`);
+      errors.push(
+        `${skillRoot}/${entry.name} is a stray root-level file; the directory bundle would ship it — remove it.`,
+      );
     } else if (entry.isDirectory() && !skillNames.includes(entry.name)) {
-      errors.push(`${skillRoot}/${entry.name}/ has no SKILL.md; the directory bundle would ship it — remove it or add SKILL.md.`);
+      errors.push(
+        `${skillRoot}/${entry.name}/ has no SKILL.md; the directory bundle would ship it — remove it or add SKILL.md.`,
+      );
     }
   }
 
@@ -55,12 +66,19 @@ async function main() {
     const skillSource = await readFile(skillPath, "utf8");
     const frontmatterName = readFrontmatterName(skillSource);
 
-    if (skillName === "tsn-topology" && /topology\.render_mac_table_html|mac-forwarding-table\.html/.test(skillSource)) {
-      errors.push(`${skillPath} must not require topology.render_mac_table_html or mac-forwarding-table.html.`);
+    if (
+      skillName === "tsn-topology" &&
+      /topology\.render_mac_table_html|mac-forwarding-table\.html/.test(skillSource)
+    ) {
+      errors.push(
+        `${skillPath} must not require topology.render_mac_table_html or mac-forwarding-table.html.`,
+      );
     }
 
     if (frontmatterName !== skillName) {
-      errors.push(`${skillPath} frontmatter name must be "${skillName}", got "${frontmatterName ?? "missing"}".`);
+      errors.push(
+        `${skillPath} frontmatter name must be "${skillName}", got "${frontmatterName ?? "missing"}".`,
+      );
     }
 
     if (!workerSource.includes(`"${skillName}"`) && !workerSource.includes(`'${skillName}'`)) {
@@ -73,17 +91,21 @@ async function main() {
       const relative = filePath.slice(`${skillRoot}/${skillName}/`.length);
       const allowed = relative === "SKILL.md" || /^references\/[^/]+\.md$/.test(relative);
       if (!allowed) {
-        errors.push(`${filePath} is not allowed; skill directories may only contain SKILL.md and references/*.md.`);
+        errors.push(
+          `${filePath} is not allowed; skill directories may only contain SKILL.md and references/*.md.`,
+        );
       }
 
       if (await isGitIgnored(filePath)) {
-        errors.push(`${filePath} is ignored by git; update .gitignore so the project skill is tracked.`);
+        errors.push(
+          `${filePath} is ignored by git; update .gitignore so the project skill is tracked.`,
+        );
       }
     }
   }
 
   // ④ R9 三方对账（tsn-topology 场景体系）。
-  errors.push(...await verifyScenarioAccounting());
+  errors.push(...(await verifyScenarioAccounting()));
 
   if (errors.length > 0) {
     for (const error of errors) {
@@ -109,7 +131,9 @@ async function verifyScenarioAccounting() {
     ? [...allMatch[1].matchAll(/(\w+_descriptor)\(\)/g)].map((m) => m[1])
     : [];
   if (descriptorFns.length === 0) {
-    errors.push("topology_compute.rs `let all = [...]` descriptor anchor extracted no entries; update verify-skills anchors.");
+    errors.push(
+      "topology_compute.rs `let all = [...]` descriptor anchor extracted no entries; update verify-skills anchors.",
+    );
     return errors;
   }
 
@@ -120,7 +144,9 @@ async function verifyScenarioAccounting() {
   for (const fnName of descriptorFns) {
     const fnStart = rustSource.indexOf(`fn ${fnName}() -> Value {`);
     if (fnStart === -1) {
-      errors.push(`descriptor function "${fnName}" referenced by catalog but not found; update verify-skills anchors.`);
+      errors.push(
+        `descriptor function "${fnName}" referenced by catalog but not found; update verify-skills anchors.`,
+      );
       continue;
     }
     const nextFn = rustSource.indexOf("\nfn ", fnStart + 1);
@@ -138,22 +164,26 @@ async function verifyScenarioAccounting() {
   }
   const templateIds = [...templateScenarios.keys()];
   if (templateIds.length !== descriptorFns.length) {
-    errors.push(`scenario accounting extracted ${templateIds.length} descriptors (expected ${descriptorFns.length}); update verify-skills anchors.`);
+    errors.push(
+      `scenario accounting extracted ${templateIds.length} descriptors (expected ${descriptorFns.length}); update verify-skills anchors.`,
+    );
     return errors;
   }
   for (const [templateId, scenarios] of templateScenarios) {
     if (scenarios.length === 0) {
-      errors.push(`template "${templateId}" must declare a non-empty scenarios list in topology_compute.rs.`);
+      errors.push(
+        `template "${templateId}" must declare a non-empty scenarios list in topology_compute.rs.`,
+      );
     }
   }
 
   // 已注册场景 id：ScenarioConfigId union 单行锚点。
   const unionMatch = scenarioSource.match(/export type ScenarioConfigId\s*=\s*([^;]+);/);
-  const scenarioIds = unionMatch
-    ? [...unionMatch[1].matchAll(/"([^"]+)"/g)].map((m) => m[1])
-    : [];
+  const scenarioIds = unionMatch ? [...unionMatch[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]) : [];
   if (scenarioIds.length === 0) {
-    errors.push("scenario-config.ts ScenarioConfigId anchor extracted no ids; update verify-skills anchors.");
+    errors.push(
+      "scenario-config.ts ScenarioConfigId anchor extracted no ids; update verify-skills anchors.",
+    );
     return errors;
   }
 
@@ -169,7 +199,9 @@ async function verifyScenarioAccounting() {
   for (const file of referenceFiles) {
     const scenarioId = file.replace(/\.md$/, "");
     if (!scenarioIds.includes(scenarioId)) {
-      errors.push(`${referenceDir}/${file} does not match any registered ScenarioConfigId (${scenarioIds.join(", ")}).`);
+      errors.push(
+        `${referenceDir}/${file} does not match any registered ScenarioConfigId (${scenarioIds.join(", ")}).`,
+      );
     }
   }
 
@@ -184,7 +216,9 @@ async function verifyScenarioAccounting() {
 
     for (const id of ids) {
       if (!templateIds.includes(id)) {
-        errors.push(`${referenceDir}/${file} preset table references unknown templateId \`${id}\` (catalog: ${templateIds.join(", ")}).`);
+        errors.push(
+          `${referenceDir}/${file} preset table references unknown templateId \`${id}\` (catalog: ${templateIds.join(", ")}).`,
+        );
       }
     }
   }
@@ -194,11 +228,15 @@ async function verifyScenarioAccounting() {
     for (const scenario of scenarios) {
       const presetIds = presetTemplateIdsByScenario.get(scenario);
       if (!presetIds) {
-        errors.push(`template "${templateId}" declares scenario "${scenario}" but ${referenceDir}/${scenario}.md is missing.`);
+        errors.push(
+          `template "${templateId}" declares scenario "${scenario}" but ${referenceDir}/${scenario}.md is missing.`,
+        );
         continue;
       }
       if (!presetIds.has(templateId)) {
-        errors.push(`template "${templateId}" declares scenario "${scenario}" but ${referenceDir}/${scenario}.md has no preset row for it.`);
+        errors.push(
+          `template "${templateId}" declares scenario "${scenario}" but ${referenceDir}/${scenario}.md has no preset row for it.`,
+        );
       }
     }
   }
@@ -251,7 +289,7 @@ async function listSkillFiles(skillDir) {
   for (const entry of entries) {
     const path = `${skillDir}/${entry.name}`;
     if (entry.isDirectory()) {
-      files.push(...await listSkillFiles(path));
+      files.push(...(await listSkillFiles(path)));
     } else if (entry.isFile()) {
       files.push(path);
     }
@@ -295,9 +333,11 @@ function readFrontmatterName(source) {
 }
 
 function workerAllowsSkill(source) {
-  return /allowedTools:\s*\[[^\]]*["']Skill["']/s.test(source)
-    || /allowedTools:\s*buildAllowedToolsForStage\(/.test(source)
-      && /return\s*\[[^\]]*["']Skill["']/s.test(source);
+  return (
+    /allowedTools:\s*\[[^\]]*["']Skill["']/s.test(source) ||
+    (/allowedTools:\s*buildAllowedToolsForStage\(/.test(source) &&
+      /return\s*\[[^\]]*["']Skill["']/s.test(source))
+  );
 }
 
 async function isGitIgnored(path) {

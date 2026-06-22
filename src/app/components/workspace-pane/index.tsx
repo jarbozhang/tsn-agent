@@ -1,18 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   applyNodeChanges,
   Background,
   Controls,
-  Handle,
-  Position,
-  ReactFlow,
   type Edge,
+  Handle,
   type Node,
   type NodeChange,
   type NodeProps,
+  Position,
+  ReactFlow,
   type ReactFlowInstance,
 } from "@xyflow/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   countEndSystems,
   countSwitches,
@@ -20,15 +20,16 @@ import {
   type TopologyRowSnapshot,
 } from "../../../sessions/topology-snapshot";
 import { DetailRow, Stat } from "../shared";
-import { TsnFloatingEdge } from "./tsn-floating-edge";
 import {
   linkRowId,
   nodeRowLabel,
   nodeTypeToken,
-  topologySnapshotToReactFlow,
   type TsnNodeKind,
+  topologySnapshotToReactFlow,
 } from "./topology-flow";
+import { TsnFloatingEdge } from "./tsn-floating-edge";
 
+export type { TsnEdgeData, TsnNodeKind } from "./topology-flow";
 export {
   nodeRowLabel,
   nodeTypeToken,
@@ -36,13 +37,10 @@ export {
   planeClassName,
   topologySnapshotToReactFlow,
 } from "./topology-flow";
-export type { TsnEdgeData, TsnNodeKind } from "./topology-flow";
 
 export type ConfigTabId = "node-detail" | "link-detail";
 
-export type SelectedTopologyItem =
-  | { kind: "node"; id: string }
-  | { kind: "link"; id: string };
+export type SelectedTopologyItem = { kind: "node"; id: string } | { kind: "link"; id: string };
 
 const CONFIG_TABS: Array<{ id: ConfigTabId; label: string }> = [
   { id: "node-detail", label: "节点详情" },
@@ -70,7 +68,9 @@ export interface CommitNodePositionResult {
 }
 
 /** R5：默认写通道 = update_node_position Tauri command（测试可注入替身）。 */
-async function invokeCommitNodePosition(args: CommitNodePositionArgs): Promise<CommitNodePositionResult> {
+async function invokeCommitNodePosition(
+  args: CommitNodePositionArgs,
+): Promise<CommitNodePositionResult> {
   return await invoke<CommitNodePositionResult>("update_node_position", { request: args });
 }
 
@@ -84,7 +84,9 @@ interface PendingPosition {
 const VIEWPORT_NODE_WIDTH = 126;
 const VIEWPORT_NODE_HEIGHT = 56;
 
-function topologyViewportCenter(snapshot: TopologyRowSnapshot | undefined): { x: number; y: number } | undefined {
+function topologyViewportCenter(
+  snapshot: TopologyRowSnapshot | undefined,
+): { x: number; y: number } | undefined {
   if (!snapshot || snapshot.nodes.length === 0) {
     return undefined;
   }
@@ -105,12 +107,17 @@ function topologyViewportCenter(snapshot: TopologyRowSnapshot | undefined): { x:
   };
 }
 
-function topologyViewportResetKey(snapshot: TopologyRowSnapshot | undefined, lastMutationId: number): string | undefined {
+function topologyViewportResetKey(
+  snapshot: TopologyRowSnapshot | undefined,
+  lastMutationId: number,
+): string | undefined {
   if (!snapshot || snapshot.nodes.length === 0) {
     return undefined;
   }
   const nodeKey = snapshot.nodes
-    .map((node) => `${node.syncName}:${node.x}:${node.y}:${node.nodeType ?? ""}:${node.insertOrder}`)
+    .map(
+      (node) => `${node.syncName}:${node.x}:${node.y}:${node.nodeType ?? ""}:${node.insertOrder}`,
+    )
     .join(",");
   const linkKey = snapshot.links
     .map((link) => `${link.linkSeq}:${link.srcSyncName}:${link.dstSyncName}`)
@@ -151,9 +158,10 @@ export function WorkspacePane({
   commitNodePosition = invokeCommitNodePosition,
 }: WorkspacePaneProps) {
   const flowTopology = useMemo(
-    () => (topologySnapshot && !isEmptyTopologySnapshot(topologySnapshot)
-      ? topologySnapshotToReactFlow(topologySnapshot)
-      : undefined),
+    () =>
+      topologySnapshot && !isEmptyTopologySnapshot(topologySnapshot)
+        ? topologySnapshotToReactFlow(topologySnapshot)
+        : undefined,
     [topologySnapshot],
   );
 
@@ -163,7 +171,9 @@ export function WorkspacePane({
   // 快照坐标与 overlay 一致（写入确认）/出现更新 mutation/NACK 回正时清除。
   // ref 为权威（回调同步读写，无闭包过期）；state 仅供渲染（详情面板）。
   const pendingRef = useRef<Map<string, PendingPosition>>(new Map());
-  const [pendingPositions, setPendingPositions] = useState<ReadonlyMap<string, PendingPosition>>(new Map());
+  const [pendingPositions, setPendingPositions] = useState<ReadonlyMap<string, PendingPosition>>(
+    new Map(),
+  );
   const draggingRef = useRef(false);
   const dragStartMutationIdRef = useRef(0);
   const dragSessionRef = useRef<string | undefined>(undefined);
@@ -240,8 +250,9 @@ export function WorkspacePane({
           continue;
         }
         const confirmed = row.position.x === pending.x && row.position.y === pending.y;
-        const superseded = pending.committedMutationId !== undefined
-          && lastMutationIdRef.current > pending.committedMutationId;
+        const superseded =
+          pending.committedMutationId !== undefined &&
+          lastMutationIdRef.current > pending.committedMutationId;
         if (confirmed || superseded) {
           released.push(id);
         }
@@ -271,11 +282,14 @@ export function WorkspacePane({
     applySnapshotNodes(nodes, pendingRef.current);
   }, [flowTopology, pendingPositions, releasePendingAgainst, applySnapshotNodes]);
 
-  useEffect(() => () => {
-    if (saveFailedTimerRef.current !== undefined) {
-      window.clearTimeout(saveFailedTimerRef.current);
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (saveFailedTimerRef.current !== undefined) {
+        window.clearTimeout(saveFailedTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const showSaveFailed = useCallback(() => {
     setSaveFailed(true);
@@ -367,7 +381,9 @@ export function WorkspacePane({
           localPositionMutationIdsRef.current.add(result.mutationId);
           const entry = pendingRef.current.get(node.id);
           if (entry && entry.x === x && entry.y === y) {
-            mutatePending((next) => next.set(node.id, { x, y, committedMutationId: result.mutationId }));
+            mutatePending((next) =>
+              next.set(node.id, { x, y, committedMutationId: result.mutationId }),
+            );
           }
         })
         .catch(() => {
@@ -380,16 +396,24 @@ export function WorkspacePane({
           onRefreshTopology();
         });
     },
-    [mutatePending, onNodeSelect, applySnapshotNodes, commitNodePosition, showSaveFailed, onRefreshTopology],
+    [
+      mutatePending,
+      onNodeSelect,
+      applySnapshotNodes,
+      commitNodePosition,
+      showSaveFailed,
+      onRefreshTopology,
+    ],
   );
 
   const hasTopology = !isEmptyTopologySnapshot(topologySnapshot);
   const switchCount = topologySnapshot ? countSwitches(topologySnapshot) : 0;
   const endSystemCount = topologySnapshot ? countEndSystems(topologySnapshot) : 0;
   const linkCount = topologySnapshot?.links.length ?? 0;
-  const selectedNodeRow = selectedTopologyItem?.kind === "node"
-    ? topologySnapshot?.nodes.find((node) => node.syncName === selectedTopologyItem.id)
-    : undefined;
+  const selectedNodeRow =
+    selectedTopologyItem?.kind === "node"
+      ? topologySnapshot?.nodes.find((node) => node.syncName === selectedTopologyItem.id)
+      : undefined;
   // 详情面板坐标优先读 overlay（R9：拖毕即显示新坐标，无确认窗口跳变）。
   const selectedNode = selectedNodeRow
     ? (() => {
@@ -397,9 +421,10 @@ export function WorkspacePane({
         return pending ? { ...selectedNodeRow, x: pending.x, y: pending.y } : selectedNodeRow;
       })()
     : undefined;
-  const selectedLink = selectedTopologyItem?.kind === "link"
-    ? topologySnapshot?.links.find((link) => linkRowId(link) === selectedTopologyItem.id)
-    : undefined;
+  const selectedLink =
+    selectedTopologyItem?.kind === "link"
+      ? topologySnapshot?.links.find((link) => linkRowId(link) === selectedTopologyItem.id)
+      : undefined;
   const selectedLinkSourceNode = selectedLink
     ? topologySnapshot?.nodes.find((node) => node.syncName === selectedLink.srcSyncName)
     : undefined;
@@ -410,7 +435,7 @@ export function WorkspacePane({
   return (
     <section className="workspace-pane" aria-label="工程状态">
       <div className="topology-stage grid-bg">
-        <div className="topology-stats" aria-label="拓扑统计">
+        <div className="topology-stats" role="group" aria-label="拓扑统计">
           <Stat label="交换机" value={switchCount} />
           <Stat label="端系统" value={endSystemCount} />
           <Stat label="链路" value={linkCount} />
@@ -420,7 +445,12 @@ export function WorkspacePane({
             位置保存失败，已恢复
           </div>
         )}
-        <div className="topology-canvas" aria-label="拓扑画布" data-testid="topology-canvas">
+        <div
+          className="topology-canvas"
+          role="group"
+          aria-label="拓扑画布"
+          data-testid="topology-canvas"
+        >
           {flowTopology ? (
             <ReactFlow
               nodes={flowNodes}
@@ -464,95 +494,112 @@ export function WorkspacePane({
 
       {/* 详情面板默认隐藏，点击节点/链路打开（流功能后续在此承载）。 */}
       {selectedTopologyItem && (
-      <div className="config-panel">
-        <div className="config-tabs" role="tablist" aria-label="工程详情">
-          {CONFIG_TABS.map((tab) => (
+        <div className="config-panel">
+          <div className="config-tabs" role="tablist" aria-label="工程详情">
+            {CONFIG_TABS.map((tab) => (
+              <button
+                className={activeConfigTab === tab.id ? "config-tab active" : "config-tab"}
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={activeConfigTab === tab.id}
+                aria-controls={`config-panel-${tab.id}`}
+                id={`config-tab-${tab.id}`}
+                onClick={() => onSelectConfigTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+            <div className="config-spacer" />
+            <span className="config-state mono">配置 · {hasTopology ? "草案" : "未生成"}</span>
             <button
-              className={activeConfigTab === tab.id ? "config-tab active" : "config-tab"}
-              key={tab.id}
               type="button"
-              role="tab"
-              aria-selected={activeConfigTab === tab.id}
-              aria-controls={`config-panel-${tab.id}`}
-              id={`config-tab-${tab.id}`}
-              onClick={() => onSelectConfigTab(tab.id)}
+              className="config-close"
+              aria-label="关闭详情"
+              onClick={onClearSelection}
             >
-              {tab.label}
+              ×
             </button>
-          ))}
-          <div className="config-spacer" />
-          <span className="config-state mono">配置 · {hasTopology ? "草案" : "未生成"}</span>
-          <button
-            type="button"
-            className="config-close"
-            aria-label="关闭详情"
-            onClick={onClearSelection}
-          >
-            ×
-          </button>
-        </div>
+          </div>
 
-        <div className="config-body">
-          {activeConfigTab === "node-detail" && (
-            <section
-              className="detail-panel"
-              id="config-panel-node-detail"
-              role="tabpanel"
-              aria-label="节点详情"
-            >
-            <div className="panel-heading">
-              <div>
-                <h2>节点详情</h2>
-                <p>{selectedNode ? nodeRowLabel(selectedNode) : "在拓扑画布选择一个节点查看类型、地址和位置。"}</p>
-              </div>
-            </div>
-            {selectedNode ? (
-              <div className="detail-grid">
-                <DetailRow label="名称" value={selectedNode.name ?? "无"} />
-                <DetailRow label="节点号" value={selectedNode.syncName} />
-                <DetailRow label="类型" value={NODE_KIND_NAME[nodeTypeToken(selectedNode.nodeType)]} />
-                <DetailRow label="坐标" value={`${selectedNode.x}, ${selectedNode.y}`} />
-                <DetailRow label="插入顺序" value={selectedNode.insertOrder} />
-              </div>
-            ) : (
-              <div className="empty-panel mono">请选择拓扑画布中的节点</div>
+          <div className="config-body">
+            {activeConfigTab === "node-detail" && (
+              <section
+                className="detail-panel"
+                id="config-panel-node-detail"
+                role="tabpanel"
+                aria-label="节点详情"
+              >
+                <div className="panel-heading">
+                  <div>
+                    <h2>节点详情</h2>
+                    <p>
+                      {selectedNode
+                        ? nodeRowLabel(selectedNode)
+                        : "在拓扑画布选择一个节点查看类型、地址和位置。"}
+                    </p>
+                  </div>
+                </div>
+                {selectedNode ? (
+                  <div className="detail-grid">
+                    <DetailRow label="名称" value={selectedNode.name ?? "无"} />
+                    <DetailRow label="节点号" value={selectedNode.syncName} />
+                    <DetailRow
+                      label="类型"
+                      value={NODE_KIND_NAME[nodeTypeToken(selectedNode.nodeType)]}
+                    />
+                    <DetailRow label="坐标" value={`${selectedNode.x}, ${selectedNode.y}`} />
+                    <DetailRow label="插入顺序" value={selectedNode.insertOrder} />
+                  </div>
+                ) : (
+                  <div className="empty-panel mono">请选择拓扑画布中的节点</div>
+                )}
+              </section>
             )}
-          </section>
-          )}
 
-          {activeConfigTab === "link-detail" && (
-            <section
-              className="detail-panel"
-              id="config-panel-link-detail"
-              role="tabpanel"
-              aria-label="链路详情"
-            >
-            <div className="panel-heading">
-              <div>
-                <h2>链路详情</h2>
-                <p>{selectedLink ? linkRowId(selectedLink) : "在拓扑画布选择一条链路查看端点。"}</p>
-              </div>
-            </div>
-            {selectedLink ? (
-              <div className="detail-grid">
-                <DetailRow label="链路序号" value={selectedLink.linkSeq} />
-                <DetailRow label="名称" value={selectedLink.name ?? "无"} />
-                <DetailRow
-                  label="源端点"
-                  value={selectedLinkSourceNode ? nodeRowLabel(selectedLinkSourceNode) : `节点 ${selectedLink.srcSyncName}`}
-                />
-                <DetailRow
-                  label="目标端点"
-                  value={selectedLinkTargetNode ? nodeRowLabel(selectedLinkTargetNode) : `节点 ${selectedLink.dstSyncName}`}
-                />
-              </div>
-            ) : (
-              <div className="empty-panel mono">请选择拓扑画布中的链路</div>
+            {activeConfigTab === "link-detail" && (
+              <section
+                className="detail-panel"
+                id="config-panel-link-detail"
+                role="tabpanel"
+                aria-label="链路详情"
+              >
+                <div className="panel-heading">
+                  <div>
+                    <h2>链路详情</h2>
+                    <p>
+                      {selectedLink ? linkRowId(selectedLink) : "在拓扑画布选择一条链路查看端点。"}
+                    </p>
+                  </div>
+                </div>
+                {selectedLink ? (
+                  <div className="detail-grid">
+                    <DetailRow label="链路序号" value={selectedLink.linkSeq} />
+                    <DetailRow label="名称" value={selectedLink.name ?? "无"} />
+                    <DetailRow
+                      label="源端点"
+                      value={
+                        selectedLinkSourceNode
+                          ? nodeRowLabel(selectedLinkSourceNode)
+                          : `节点 ${selectedLink.srcSyncName}`
+                      }
+                    />
+                    <DetailRow
+                      label="目标端点"
+                      value={
+                        selectedLinkTargetNode
+                          ? nodeRowLabel(selectedLinkTargetNode)
+                          : `节点 ${selectedLink.dstSyncName}`
+                      }
+                    />
+                  </div>
+                ) : (
+                  <div className="empty-panel mono">请选择拓扑画布中的链路</div>
+                )}
+              </section>
             )}
-          </section>
-          )}
+          </div>
         </div>
-      </div>
       )}
     </section>
   );

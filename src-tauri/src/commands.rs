@@ -213,23 +213,21 @@ fn run_claude_agent_blocking(
     // Windows 无进程组语义：超时改用 taskkill /T 按 PID 树端掉（见 try_wait 超时分支）。
     #[cfg(unix)]
     command.process_group(0);
-    let mut child = command
-        .spawn()
-        .map_err(|error| {
-            log_worker_event(
-                &app,
-                app_session_id.as_deref(),
-                &run_id,
-                "error",
-                "Agent worker 启动失败",
-                None,
-                serde_json::json!({ "error": redact_error(&error.to_string()) }),
-            );
-            format!(
-                "无法启动智能助手运行时。请确认 Node.js 可用。{}",
-                redact_error(&error.to_string())
-            )
-        })?;
+    let mut child = command.spawn().map_err(|error| {
+        log_worker_event(
+            &app,
+            app_session_id.as_deref(),
+            &run_id,
+            "error",
+            "Agent worker 启动失败",
+            None,
+            serde_json::json!({ "error": redact_error(&error.to_string()) }),
+        );
+        format!(
+            "无法启动智能助手运行时。请确认 Node.js 可用。{}",
+            redact_error(&error.to_string())
+        )
+    })?;
     log_worker_event(
         &app,
         app_session_id.as_deref(),
@@ -333,10 +331,8 @@ fn run_claude_agent_blocking(
     let stdout = stdout_lines.join("\n");
 
     if !output.success() {
-        let error_summary = redact_error(&first_non_empty(
-            &stderr,
-            "智能助手运行时未返回最终结果。",
-        ));
+        let error_summary =
+            redact_error(first_non_empty(&stderr, "智能助手运行时未返回最终结果。"));
         log_worker_event(
             &app,
             app_session_id.as_deref(),
@@ -349,17 +345,12 @@ fn run_claude_agent_blocking(
                 "error": error_summary.clone(),
             }),
         );
-        return Err(format!("智能助手运行时执行失败：{}", error_summary));
+        return Err(format!("智能助手运行时执行失败：{error_summary}"));
     }
 
     let final_response = response
         .or_else(|| parse_worker_output(&stdout).ok())
-        .ok_or_else(|| {
-            format!(
-                "智能助手运行时没有返回最终结果：{}",
-                redact_error(&stdout)
-            )
-        })?;
+        .ok_or_else(|| format!("智能助手运行时没有返回最终结果：{}", redact_error(&stdout)))?;
 
     log_worker_event(
         &app,
@@ -386,12 +377,8 @@ fn parse_worker_output(stdout: &str) -> Result<ClaudeAgentResponse, String> {
         .rev()
         .find(|line| !line.trim().is_empty())
         .unwrap_or(stdout.trim());
-    let parsed: ClaudeWorkerResponse = serde_json::from_str(final_line.trim()).map_err(|_| {
-        format!(
-            "智能助手运行时返回了非 JSON 输出：{}",
-            redact_error(stdout)
-        )
-    })?;
+    let parsed: ClaudeWorkerResponse = serde_json::from_str(final_line.trim())
+        .map_err(|_| format!("智能助手运行时返回了非 JSON 输出：{}", redact_error(stdout)))?;
     let assistant_text = parsed.assistant_text.trim().to_string();
 
     if assistant_text.is_empty() {
@@ -501,12 +488,8 @@ fn handle_worker_line(
     app_session_id: Option<&str>,
     response: &mut Option<ClaudeAgentResponse>,
 ) -> Result<(), String> {
-    let parsed: ClaudeWorkerEvent = serde_json::from_str(line).map_err(|_| {
-        format!(
-            "智能助手运行时返回了非 JSON 输出：{}",
-            redact_error(line)
-        )
-    })?;
+    let parsed: ClaudeWorkerEvent = serde_json::from_str(line)
+        .map_err(|_| format!("智能助手运行时返回了非 JSON 输出：{}", redact_error(line)))?;
     let run_id = parsed.run_id.unwrap_or_else(|| fallback_run_id.to_string());
 
     match parsed.event.as_str() {
@@ -696,7 +679,11 @@ fn find_claude_binary(app: Option<&tauri::AppHandle>) -> Option<PathBuf> {
     if cfg!(debug_assertions) {
         return None;
     }
-    let exe = if cfg!(windows) { "claude.exe" } else { "claude" };
+    let exe = if cfg!(windows) {
+        "claude.exe"
+    } else {
+        "claude"
+    };
     let resource_path = app?
         .path()
         .resolve(format!("claude-runtime/{exe}"), BaseDirectory::Resource)
@@ -719,7 +706,11 @@ fn resolve_node_command() -> std::ffi::OsString {
     #[cfg(unix)]
     {
         // homebrew（apple silicon / intel）/ 官方 pkg / system
-        for c in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"] {
+        for c in [
+            "/opt/homebrew/bin/node",
+            "/usr/local/bin/node",
+            "/usr/bin/node",
+        ] {
             if Path::new(c).exists() {
                 return OsString::from(c);
             }
@@ -760,7 +751,11 @@ fn repo_root_from_worker(worker_path: &Path) -> PathBuf {
         .and_then(|name| name.to_str())
         == Some("dist")
     {
-        if let Some(repo_root) = worker_path.parent().and_then(Path::parent).and_then(Path::parent) {
+        if let Some(repo_root) = worker_path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+        {
             return repo_root.to_path_buf();
         }
     }
@@ -879,7 +874,8 @@ mod tests {
     #[test]
     fn existing_event_lines_parse_without_tool_call() {
         let chunk: ClaudeWorkerEvent =
-            serde_json::from_str(r#"{"event":"chunk","runId":"run-1","text":"hi"}"#).expect("chunk parses");
+            serde_json::from_str(r#"{"event":"chunk","runId":"run-1","text":"hi"}"#)
+                .expect("chunk parses");
         assert!(chunk.tool_call.is_none());
 
         let done: ClaudeWorkerEvent = serde_json::from_str(
@@ -911,9 +907,10 @@ mod tests {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let repo_root = manifest_dir.parent().expect("repo root");
         let tauri_config_path = manifest_dir.join("tauri.conf.json");
-        let tauri_config: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(tauri_config_path).expect("tauri config"))
-                .expect("tauri config json");
+        let tauri_config: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(tauri_config_path).expect("tauri config"),
+        )
+        .expect("tauri config json");
 
         // skills 走整目录映射（R13）：新增 reference 不需要逐文件登记。
         let resources = tauri_config["bundle"]["resources"]
@@ -931,7 +928,9 @@ mod tests {
         }
 
         // package.json 已出厂移除（R1a），磁盘上不得回潮。
-        assert!(!repo_root.join(".claude/skills/tsn-topology/package.json").exists());
+        assert!(!repo_root
+            .join(".claude/skills/tsn-topology/package.json")
+            .exists());
         // 场景 reference 必须真实存在，目录映射才有内容可打包。
         assert!(repo_root
             .join(".claude/skills/tsn-topology/references/generic-tsn.md")
