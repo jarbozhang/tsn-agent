@@ -10,11 +10,13 @@ import { TOPOLOGY_TOOL_NAMES } from "../../src/topology/topology-service";
 // Plan v3 U4b complete: 所有 handler 走 sidecar HTTP；测试 hoist mock fetchSidecar
 // 提供 canned 响应。每个测试断言 (a) 请求路由 / body 正确 (b) MCP 包封正确。
 const fetchSidecarMock = vi.hoisted(() =>
-  vi.fn(async () => ({
-    ok: true as const,
-    status: 200,
-    body: { ok: true, summary: {} },
-  })),
+  vi.fn(
+    async (_route: string, _body?: unknown): Promise<SidecarResult> => ({
+      ok: true,
+      status: 200,
+      body: { ok: true, summary: {} },
+    }),
+  ),
 );
 const readSidecarEnvMock = vi.hoisted(() =>
   vi.fn(() => ({
@@ -30,6 +32,7 @@ vi.mock("./sidecar-client", () => ({
 }));
 
 import { z } from "zod";
+import type { SidecarResult } from "./sidecar-client";
 import {
   applyOperationsInputSchema,
   assertTopologyToolMapping,
@@ -48,13 +51,16 @@ async function parseToolText(
   return JSON.parse(result.content[0].text ?? "{}");
 }
 
+// MCP client.callTool 的运行时结果形状（SDK 默认返回类型里 content 为 unknown）。
+type McpToolResult = { content: Array<{ type: string; text?: string }>; isError?: boolean };
+
 function lastFetchCall(): { route: string; body: Record<string, unknown> } {
   const call = fetchSidecarMock.mock.calls.at(-1);
   if (!call) {
     throw new Error("fetchSidecar was not called");
   }
   return {
-    route: call[0] as string,
+    route: call[0],
     body: (call[1] ?? {}) as Record<string, unknown>,
   };
 }
@@ -548,14 +554,14 @@ describe("topology MCP tool registry", () => {
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
     try {
-      const result = await client.callTool({
+      const result = (await client.callTool({
         name: "topology.initialize",
         arguments: {
           templateId: "generic-line",
           params: { switchCount: 2, endSystemsPerSwitch: 1 },
         },
-      });
-      const text = result.content[0]?.type === "text" ? result.content[0].text : "{}";
+      })) as McpToolResult;
+      const text = result.content[0]?.type === "text" ? (result.content[0].text ?? "{}") : "{}";
       const payload = JSON.parse(text);
 
       expect(payload).toMatchObject({
@@ -599,10 +605,10 @@ describe("topology MCP tool registry", () => {
 
     try {
       // 轮 3 真机错误输入：模型发明的 {"kind":"insert-switch"}。
-      const result = await client.callTool({
+      const result = (await client.callTool({
         name: "topology.apply_operations",
         arguments: { operations: [{ kind: "insert-switch" }] },
-      });
+      })) as McpToolResult;
 
       expect(result.isError).toBe(true);
       const text = result.content[0]?.type === "text" ? result.content[0].text : "";
