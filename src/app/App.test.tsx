@@ -35,7 +35,7 @@ vi.mock("@xyflow/react", () => ({
     onEdgeClick?: (event: unknown, edge: { id: string }) => void;
     children?: React.ReactNode;
   }) => (
-    <div aria-label="拓扑画布">
+    <div role="group" aria-label="拓扑画布">
       {nodes.length} nodes / {edges.length} edges
       {nodes.map((node) => (
         <button key={node.id} type="button" onClick={() => onNodeClick?.({}, node)}>

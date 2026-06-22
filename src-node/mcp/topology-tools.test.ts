@@ -785,13 +785,13 @@ describe("initializeInputSchema dual-plane narrowing (U2)", () => {
   });
 
   it("rejects backbone.mode=ring after narrowing to line", () => {
-    const ring = structuredClone(base) as Record<string, any>;
+    const ring = structuredClone(base);
     ring.params.backbone.mode = "ring";
     expect(schema.safeParse(ring).success).toBe(false);
   });
 
   it("rejects crossPlaneLinks.mode=paired after narrowing to none", () => {
-    const paired = structuredClone(base) as Record<string, any>;
+    const paired = structuredClone(base);
     paired.params.crossPlaneLinks.mode = "paired";
     expect(schema.safeParse(paired).success).toBe(false);
   });

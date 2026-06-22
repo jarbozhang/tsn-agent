@@ -101,10 +101,10 @@ describe("useTopologySnapshot", () => {
     await waitFor(() => expect(pending.has("s2")).toBe(true));
 
     // s2 先返回 → 应用；迟到的 s1 响应必须被 requestSeq 守卫丢弃。
-    pending.get("s2")!.resolve(snapshotFor("s2", 3));
+    pending.get("s2")?.resolve(snapshotFor("s2", 3));
     await waitFor(() => expect(result.current.snapshot?.sessionId).toBe("s2"));
 
-    pending.get("s1")!.resolve(snapshotFor("s1", 9));
+    pending.get("s1")?.resolve(snapshotFor("s1", 9));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(result.current.snapshot?.sessionId).toBe("s2");

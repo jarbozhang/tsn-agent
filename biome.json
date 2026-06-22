@@ -24,17 +24,5 @@
         "useExhaustiveDependencies": "warn"
       }
     }
-  },
-  "overrides": [
-    {
-      "includes": ["**/*.test.ts", "**/*.test.tsx", "**/*.test.mjs"],
-      "linter": {
-        "rules": {
-          "style": { "noNonNullAssertion": "off" },
-          "suspicious": { "noExplicitAny": "off" },
-          "a11y": { "useAriaPropsSupportedByRole": "off" }
-        }
-      }
-    }
-  ]
+  }
 }
