@@ -954,7 +954,7 @@ mod tests {
             via_command,
             crate::topology_compute::describe_templates_catalog()
         );
-        assert_eq!(via_command["templateCount"], 3);
+        assert_eq!(via_command["templateCount"], 2);
     }
 
     #[test]

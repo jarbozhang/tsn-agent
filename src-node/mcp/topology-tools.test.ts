@@ -97,7 +97,7 @@ describe("topology MCP tool registry", () => {
         ok: true,
         summary: {
           templateCount: 3,
-          templateIds: ["generic-line", "generic-ring", "dual-plane-redundant"],
+          templateIds: ["hop-linear", "dual-plane-redundant"],
         },
       },
     });
@@ -110,7 +110,7 @@ describe("topology MCP tool registry", () => {
       ok: true,
       summary: {
         templateCount: 3,
-        templateIds: ["generic-line", "generic-ring", "dual-plane-redundant"],
+        templateIds: ["hop-linear", "dual-plane-redundant"],
       },
     });
   });
@@ -148,7 +148,7 @@ describe("topology MCP tool registry", () => {
 
     const payload = await parseToolText(
       runTopologyTool("topology.initialize", {
-        templateId: "generic-line",
+        templateId: "hop-linear",
         params: { switchCount: 200 },
       }),
     );
@@ -156,7 +156,7 @@ describe("topology MCP tool registry", () => {
     const { route, body } = lastFetchCall();
     expect(route).toBe("/db/topology/initialize");
     expect(body).toMatchObject({
-      templateId: "generic-line",
+      templateId: "hop-linear",
       params: { switchCount: 200 },
     });
     expect(payload).toMatchObject({
@@ -446,7 +446,7 @@ describe("topology MCP tool registry", () => {
     const deepResult = await parseToolText(runTopologyTool("topology.initialize", deepPayload));
     const wideResult = await parseToolText(
       runTopologyTool("topology.initialize", {
-        templateId: "generic-line",
+        templateId: "hop-linear",
         values: Array.from({ length: 70_000 }, (_, index) => ({ index })),
       }),
     );
@@ -462,7 +462,7 @@ describe("topology MCP tool registry", () => {
   });
 
   it("keeps measurement failures inside the structured error envelope", async () => {
-    const circular: Record<string, unknown> = { templateId: "generic-line" };
+    const circular: Record<string, unknown> = { templateId: "hop-linear" };
     circular.self = circular;
 
     const payload = await parseToolText(runTopologyTool("topology.initialize", circular));
@@ -542,7 +542,7 @@ describe("topology MCP tool registry", () => {
       status: 200,
       body: {
         ok: true,
-        summary: { templateId: "generic-line", nodeCount: 4, linkCount: 3 },
+        summary: { templateId: "hop-linear", nodeCount: 4, linkCount: 3 },
         full: { topology: { schemaVersion: "tsn-agent.topology.intermediate.v0" } },
       },
     });
@@ -557,8 +557,8 @@ describe("topology MCP tool registry", () => {
       const result = (await client.callTool({
         name: "topology.initialize",
         arguments: {
-          templateId: "generic-line",
-          params: { switchCount: 2, endSystemsPerSwitch: 1 },
+          templateId: "hop-linear",
+          params: { switchCount: 2 },
         },
       })) as McpToolResult;
       const text = result.content[0]?.type === "text" ? (result.content[0].text ?? "{}") : "{}";
@@ -567,7 +567,7 @@ describe("topology MCP tool registry", () => {
       expect(payload).toMatchObject({
         ok: true,
         summary: {
-          templateId: "generic-line",
+          templateId: "hop-linear",
           nodeCount: 4,
           linkCount: 3,
         },

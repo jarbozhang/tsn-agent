@@ -378,7 +378,7 @@ mod tests {
             let bytes = to_bytes(resp.into_body(), 16_384).await.unwrap();
             let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(parsed["ok"], true);
-            assert_eq!(parsed["summary"]["templateCount"], 3);
+            assert_eq!(parsed["summary"]["templateCount"], 2);
         });
     }
 
@@ -392,8 +392,8 @@ mod tests {
 
             let body = serde_json::json!({
                 "sessionId": "s1",
-                "templateId": "generic-line",
-                "params": { "switchCount": 2, "endSystemsPerSwitch": 2, "dataRateMbps": 1000 }
+                "templateId": "hop-linear",
+                "params": { "switchCount": 2, "dataRateMbps": 1000 }
             })
             .to_string();
             let resp = router
@@ -419,7 +419,7 @@ mod tests {
             // 不再返回 full topology（agent 用 inspect 查询切片）。
             assert!(parsed.get("full").is_none());
 
-            // 2 交换机 + 4 端系统 = 6 节点；1 条骨干 + 4 条接入 = 5 链路。
+            // 2 交换机 + 2 端系统（两端）= 4 节点；1 条骨干 + 2 条接入 = 3 链路。
             let node_count: i64 =
                 sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
                     .fetch_one(&pool)
@@ -430,8 +430,8 @@ mod tests {
                     .fetch_one(&pool)
                     .await
                     .unwrap();
-            assert_eq!(node_count, 6);
-            assert_eq!(link_count, 5);
+            assert_eq!(node_count, 4);
+            assert_eq!(link_count, 3);
 
             // ring buffer 推进。
             assert_eq!(buf.since("s1", 0).latest, 1);
@@ -447,12 +447,12 @@ mod tests {
             let (router, token) = build_test_router_with_pool(pool.clone(), buf.clone()).await;
 
             for params in [
-                serde_json::json!({ "switchCount": 4, "endSystemsPerSwitch": 5, "dataRateMbps": 1000 }),
-                serde_json::json!({ "switchCount": 2, "endSystemsPerSwitch": 2, "dataRateMbps": 1000 }),
+                serde_json::json!({ "switchCount": 4, "dataRateMbps": 1000 }),
+                serde_json::json!({ "switchCount": 2, "dataRateMbps": 1000 }),
             ] {
                 let body = serde_json::json!({
                     "sessionId": "s1",
-                    "templateId": "generic-line",
+                    "templateId": "hop-linear",
                     "params": params,
                 })
                 .to_string();
@@ -472,13 +472,13 @@ mod tests {
                 assert_eq!(resp.status(), StatusCode::OK);
             }
 
-            // 第二次 initialize 整表重建为 2×2。
+            // 第二次 initialize 整表重建为 hop-linear(2)。
             let node_count: i64 =
                 sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
                     .fetch_one(&pool)
                     .await
                     .unwrap();
-            assert_eq!(node_count, 6);
+            assert_eq!(node_count, 4);
             assert_eq!(buf.since("s1", 0).latest, 2);
         });
     }
@@ -859,19 +859,19 @@ mod tests {
         (status, serde_json::from_slice(&bytes).unwrap())
     }
 
-    /// initialize 路由的 oneshot helper（generic-line A×B）。
-    async fn initialize_generic_line(
+    /// initialize 路由的 oneshot helper（hop-linear，switchCount 跳）。
+    async fn initialize_hop_linear(
         router: axum::Router,
         token: &SecretToken,
         session_id: &str,
         switch_count: i64,
-        end_systems_per_switch: i64,
     ) {
         let body = serde_json::json!({
             "sessionId": session_id,
-            "templateId": "generic-line",
-            "params": { "switchCount": switch_count, "endSystemsPerSwitch": end_systems_per_switch, "dataRateMbps": 1000 }
-        }).to_string();
+            "templateId": "hop-linear",
+            "params": { "switchCount": switch_count, "dataRateMbps": 1000 }
+        })
+        .to_string();
         let resp = router
             .oneshot(
                 Request::builder()
@@ -906,7 +906,7 @@ mod tests {
                 switch_syncs.contains(l["srcSyncName"].as_str().unwrap())
                     && switch_syncs.contains(l["dstSyncName"].as_str().unwrap())
             })
-            .expect("generic-line must have a switch-switch backbone link");
+            .expect("hop-linear must have a switch-switch backbone link");
         let next_sync = nodes
             .iter()
             .map(|n| n["syncName"].as_str().unwrap().parse::<i64>().unwrap())
@@ -947,15 +947,15 @@ mod tests {
                 .execute(&pool).await.unwrap();
             let (router, token) = build_test_router_with_pool(pool, buf).await;
 
-            // initialize 4×5 → 24 节点 23 链路（mutationId=1）。
-            initialize_generic_line(router.clone(), &token, "s1", 4, 5).await;
+            // initialize hop-linear(4) → 6 节点 5 链路（mutationId=1）。
+            initialize_hop_linear(router.clone(), &token, "s1", 4).await;
 
             // inspect 全量 → 程序化定位 sw1-sw2 骨干与新行参照（模拟模型行为）。
             let (status, parsed) = inspect_session(router.clone(), &token, "s1").await;
             assert_eq!(status, StatusCode::OK);
             let before = parsed["summary"].clone();
-            assert_eq!(before["nodeCount"], 24);
-            assert_eq!(before["linkCount"], 23);
+            assert_eq!(before["nodeCount"], 6);
+            assert_eq!(before["linkCount"], 5);
             let original_identity: Vec<String> = before["nodes"]
                 .as_array()
                 .unwrap()
@@ -983,11 +983,11 @@ mod tests {
             // mutationId 递增：initialize=1 → apply=2。
             assert_eq!(parsed["summary"]["mutationId"], 2);
 
-            // 再次 inspect：25 节点 24 链路，新交换机与两条新链路在 rows 中。
+            // 再次 inspect：7 节点 6 链路，新交换机与两条新链路在 rows 中。
             let (_, parsed) = inspect_session(router.clone(), &token, "s1").await;
             let after = &parsed["summary"];
-            assert_eq!(after["nodeCount"], 25);
-            assert_eq!(after["linkCount"], 24);
+            assert_eq!(after["nodeCount"], 7);
+            assert_eq!(after["linkCount"], 6);
             let after_nodes = after["nodes"].as_array().unwrap();
             assert!(after_nodes
                 .iter()
@@ -1003,7 +1003,7 @@ mod tests {
                 .iter()
                 .any(|l| l["linkSeq"].as_i64() == Some(backbone_seq)));
 
-            // 原有 24 节点的 syncName 逐一保持不变（轮 5 整表重建破坏的性质）。
+            // 原有 6 节点的 syncName 逐一保持不变（轮 5 整表重建破坏的性质）。
             for sync_name in &original_identity {
                 let preserved = after_nodes
                     .iter()
@@ -1046,7 +1046,7 @@ mod tests {
                 .execute(&pool).await.unwrap();
             let (router, token) = build_test_router_with_pool(pool, buf).await;
 
-            initialize_generic_line(router.clone(), &token, "s1", 2, 2).await;
+            initialize_hop_linear(router.clone(), &token, "s1", 2).await;
             let (_, parsed) = inspect_session(router.clone(), &token, "s1").await;
             let (backbone_seq, sw1, sw2, styles, new_sync, new_seq, new_order) =
                 locate_insert_site(&parsed["summary"]);

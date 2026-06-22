@@ -2,7 +2,7 @@
 
 # 箭载 TSN 场景指引
 
-面向宇航验收（《TSN 典型组网测试方案》）：双平面冗余（A 主路径、B 冗余路径，物理隔离）、五跳线性级联、环形冗余。用户提到典型组网名（如「双平面双跳」「五跳线性」「4SW_4NIC」）时，按下表选模板、填参数——但这些是推荐默认假设，先把隐含的规模 / 特征 / 冗余用中文讲给用户确认，再照着生成，别直接套出图。
+面向宇航验收（《TSN 典型组网测试方案》）：双平面冗余（A 主路径、B 冗余路径，物理隔离）、跳线性级联。用户提到典型组网名（如「双平面双跳」「跳线性」「4SW_4NIC」）时，按下表选模板、填参数——但这些是推荐默认假设，先把隐含的规模 / 特征 / 冗余用中文讲给用户确认，再照着生成，别直接套出图。
 
 ## 参数默认值
 
@@ -10,7 +10,7 @@
 
 - `dataRateMbps`：缺省 `1000`
 - 双平面：按确认的 switch group 数和每组端系统数构造；没指定时缺省 2 组、每组 2 台端系统
-- 自由线型描述：`switchCount` 缺省 `4`、`endSystemsPerSwitch` 缺省 `2`
+- 跳线性：`switchCount` 缺省 `4`
 
 合法范围以 `describe_templates` 为准，这里只给推荐值。
 
@@ -21,7 +21,6 @@
 | 类型 | `templateId` | 关键参数 / 结构 |
 |---|---|---|
 | 双平面冗余（A/B 双平面、端系统双归属） | `dual-plane-redundant` | 完整参数结构照 `describe_templates` 返回的 `example` 抄，按确认的**组数**、**每组端系统数**扩展。单跳 = 1 个 switch group；双跳 = 2 个 group + 平面内 backbone 级联。每个 group 含一台 A、一台 B 交换机；每台端系统声明 primary（A 平面）+ backup（B 平面）双归属。`backbone` 固定 `{"mode":"line","withinPlane":true}`、`crossPlaneLinks` 固定 `{"mode":"none"}`（模板必填、只此一组合法值，别省）。 |
-| 五跳线性级联 | `generic-line` | 加 `endSystemPlacement:"ends-only"`：端系统只挂链路两端各 1 台，`endSystemsPerSwitch` 必须是 1；`switchCount ≥ 5` 时画布自动蛇形折叠。 |
-| 环形冗余 / 双环 / 交换机环网 | `generic-ring` | `switchCount` + `endSystemsPerSwitch`（线型布局 + 首尾闭环），规模按确认调整。 |
+| 跳线性级联（任意跳） | `hop-linear` | `switchCount`（任意 N）、`dataRateMbps`；端系统只挂链路两端各 1 台，`switchCount ≥ 5` 时画布自动蛇形折叠。 |
 
-用户描述不带宇航味（普通线型、规模化挂载）时，按通用场景的 `generic-line` 处理。
+用户描述不带宇航味（普通线型）时，按通用场景的 `hop-linear` 处理。

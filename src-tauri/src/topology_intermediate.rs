@@ -192,7 +192,7 @@ mod tests {
     fn deserialize_basic_topology_json() {
         let raw = serde_json::json!({
             "schemaVersion": "tsn-agent.topology.intermediate.v0",
-            "metadata": { "templateId": "generic-line", "layout": "line", "source": "template" },
+            "metadata": { "templateId": "hop-linear", "layout": "line", "source": "template" },
             "nodes": [{
                 "id": "sw1", "numericId": 0, "name": "SW-1", "type": "switch",
                 "ports": [{ "id": "p1", "name": "eth0", "index": 0 }],

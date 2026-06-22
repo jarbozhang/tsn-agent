@@ -43,8 +43,8 @@ describe("skill file service", () => {
       editable: true,
     });
     invokeMock.mockResolvedValueOnce({
-      templateCount: 3,
-      templateIds: ["generic-line", "generic-ring", "dual-plane-redundant"],
+      templateCount: 2,
+      templateIds: ["hop-linear", "dual-plane-redundant"],
       templates: [],
     });
 

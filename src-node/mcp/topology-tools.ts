@@ -511,17 +511,13 @@ export function initializeInputSchema(): z.ZodRawShape {
     .strict();
 
   return {
-    templateId: z.enum(["generic-line", "generic-ring", "dual-plane-redundant"]),
+    templateId: z.enum(["hop-linear", "dual-plane-redundant"]),
     params: z
       .union([
         z
           .object({
             switchCount: z.number().int().min(1).max(12).optional(),
-            endSystemsPerSwitch: z.number().int().min(1).max(24).optional(),
             dataRateMbps: z.number().int().optional(),
-            // R10：ends-only 仅 generic-line 支持且 endSystemsPerSwitch 必须为 1——
-            // 语义约束由 Rust 校验给出精确错误，zod 只收窄枚举形态。
-            endSystemPlacement: z.enum(["per-switch", "ends-only"]).optional(),
           })
           .strict(),
         dualPlaneParamsSchema,

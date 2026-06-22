@@ -10,10 +10,7 @@
 //! - `describe_artifacts`：summary
 //! - `validate_artifacts`：4 件套结构校验
 //!
-//! Phase A 边界 (Boss 已批准)：
-//! - `initialize` 只支持 generic-line / generic-ring；dual-plane-redundant 返
-//!   `INVALID_TEMPLATE_PARAM` 含 "Phase B" 提示，UI / agent 提示用户后续版本支持。
-//!   理由：dual-plane 参数验证 + 拓扑生成 ≥600 LOC，是独立工作量，Phase A 不阻塞。
+//! `initialize` 支持 hop-linear 与 dual-plane-redundant 两个模板。
 //! - `inspect` / `validate` 实现核心校验 + selector 解析，与 TS 保持 byte-equal
 //!   summary。adjacency / portUsage 在 full 模式仍输出，但 sidecar 默认 summary。
 
@@ -99,11 +96,7 @@ pub fn describe_templates_catalog_filtered(scenario: Option<&str>) -> Value {
     // verify-skills.mjs 正则锚点：`let all = [...]` 清单与各 descriptor 函数内
     // 首个 "id" 字段（必须先于 example 的伪 id）被 R9 对账消费——改名/重排前
     // 同步 scripts/verify-skills.mjs。
-    let all = [
-        generic_line_descriptor(),
-        generic_ring_descriptor(),
-        dual_plane_descriptor(),
-    ];
+    let all = [hop_linear_descriptor(), dual_plane_descriptor()];
     let templates: Vec<Value> = match scenario {
         None => all.to_vec(),
         Some(scenario) => all
@@ -137,41 +130,16 @@ pub fn describe_templates_catalog_filtered(scenario: Option<&str>) -> Value {
     catalog
 }
 
-fn generic_line_descriptor() -> Value {
-    let mut params = generic_distributed_params();
-    if let Some(list) = params.as_array_mut() {
-        list.push(json!({
-            "name": "endSystemPlacement", "type": "enum",
-            "values": ["per-switch", "ends-only"], "required": false,
-            "description": "端系统挂载策略：per-switch（缺省，每台交换机均匀挂载）；ends-only（端系统仅挂链两端各 1 台，endSystemsPerSwitch 必须为 1；switchCount ≥ 5 时画布蛇形折叠，对应规范图 5-1 五跳线性）。",
-        }));
-    }
+fn hop_linear_descriptor() -> Value {
     json!({
-        "id": "generic-line",
-        "name": "通用线型拓扑",
-        "description": "多台交换机线型互联；端系统按策略均匀挂载或仅挂链两端（五跳线性）。",
-        "tags": ["generic", "line", "beginner"],
+        "id": "hop-linear",
+        "name": "跳线性拓扑",
+        "description": "多台交换机线型互联（任意跳数）；端系统仅挂链路两端各 1 台。",
+        "tags": ["generic", "line"],
         "scenarios": ["generic-tsn", "aerospace-onboard"],
-        "params": params,
+        "params": hop_linear_params(),
         "example": {
             "switchCount": 4,
-            "endSystemsPerSwitch": 2,
-            "dataRateMbps": 1000,
-        },
-    })
-}
-
-fn generic_ring_descriptor() -> Value {
-    json!({
-        "id": "generic-ring",
-        "name": "通用环形拓扑",
-        "description": "多台交换机环形互联，每台交换机接入固定数量端系统。",
-        "tags": ["generic", "ring", "redundant"],
-        "scenarios": ["generic-tsn", "aerospace-onboard"],
-        "params": generic_distributed_params(),
-        "example": {
-            "switchCount": 4,
-            "endSystemsPerSwitch": 2,
             "dataRateMbps": 1000,
         },
     })
@@ -242,14 +210,11 @@ fn dual_plane_descriptor() -> Value {
     })
 }
 
-fn generic_distributed_params() -> Value {
+fn hop_linear_params() -> Value {
     json!([
         { "name": "switchCount", "type": "integer",
           "minimum": SWITCH_COUNT_MIN, "maximum": SWITCH_COUNT_MAX,
-          "description": "交换机数量。" },
-        { "name": "endSystemsPerSwitch", "type": "integer",
-          "minimum": END_SYSTEMS_PER_SWITCH_MIN, "maximum": END_SYSTEMS_PER_SWITCH_MAX,
-          "description": "每台交换机接入的端系统数量。" },
+          "description": "交换机数量（跳数）。" },
         data_rate_param()
     ])
 }
@@ -264,18 +229,16 @@ fn data_rate_param() -> Value {
 
 // ============================================================================
 // 参数合法域单一常量源（catalog 与 initialize 校验共用，禁止双硬编码）
-// MCP 层 zod（src-node/mcp/topology-tools.ts）有意双写 SWITCH_COUNT_*/END_SYSTEMS_*
+// MCP 层 zod（src-node/mcp/topology-tools.ts）有意双写 SWITCH_COUNT_*
 // 上下限以提供早失败；drift 由测试守一致，改这里须同步 zod。
 // ============================================================================
 
 pub const SWITCH_COUNT_MIN: i64 = 1;
 pub const SWITCH_COUNT_MAX: i64 = 12;
-pub const END_SYSTEMS_PER_SWITCH_MIN: i64 = 1;
-pub const END_SYSTEMS_PER_SWITCH_MAX: i64 = 24;
 const SUPPORTED_DATA_RATES: [i64; 4] = [10, 100, 1000, 10000];
 
 // ============================================================================
-// initialize: generic-line / generic-ring (dual-plane → INVALID_TEMPLATE_PARAM)
+// initialize: hop-linear (dual-plane 走独立分支)
 // ============================================================================
 
 #[derive(Debug, Clone, Deserialize)]
@@ -300,10 +263,7 @@ pub struct InitializeSummary {
 pub fn initialize_topology(
     intent: &InitializeIntent,
 ) -> Result<(IntermediateTopology, InitializeSummary), Vec<TopologyErrorOut>> {
-    if intent.template_id != "generic-line"
-        && intent.template_id != "generic-ring"
-        && intent.template_id != "dual-plane-redundant"
-    {
+    if intent.template_id != "hop-linear" && intent.template_id != "dual-plane-redundant" {
         return Err(vec![TopologyErrorOut::new(
             "UNKNOWN_TEMPLATE_ID",
             format!("Unknown topology templateId: {}", intent.template_id),
@@ -365,55 +325,7 @@ pub fn initialize_topology(
         SWITCH_COUNT_MAX,
         "$.params.switchCount",
     )?;
-    let end_systems_per_switch = normalize_integer_param(
-        params_obj.get("endSystemsPerSwitch"),
-        END_SYSTEMS_PER_SWITCH_MIN,
-        END_SYSTEMS_PER_SWITCH_MAX,
-        "$.params.endSystemsPerSwitch",
-    )?;
-    // R10：endSystemPlacement 仅 generic-line 支持 ends-only；该模式下
-    // endSystemsPerSwitch 必须为 1（不做语义重载，错值早失败）。
-    let ends_only = match params_obj.get("endSystemPlacement") {
-        None => false,
-        Some(Value::String(s)) if s == "per-switch" => false,
-        Some(Value::String(s)) if s == "ends-only" => {
-            if intent.template_id != "generic-line" {
-                return Err(vec![TopologyErrorOut::new(
-                    "INVALID_TEMPLATE_PARAM",
-                    "endSystemPlacement \"ends-only\" 仅 generic-line 模板支持。",
-                    "$.params.endSystemPlacement",
-                )
-                .requires_clarification()]);
-            }
-            if end_systems_per_switch != 1 {
-                return Err(vec![TopologyErrorOut::new(
-                    "INVALID_TEMPLATE_PARAM",
-                    "ends-only 模式下 endSystemsPerSwitch 必须为 1（端系统仅挂链两端各 1 台）。",
-                    "$.params.endSystemsPerSwitch",
-                )
-                .requires_clarification()]);
-            }
-            true
-        }
-        Some(_) => {
-            return Err(vec![TopologyErrorOut::new(
-                "INVALID_TEMPLATE_PARAM",
-                "endSystemPlacement 取值仅支持 \"per-switch\" 或 \"ends-only\"。",
-                "$.params.endSystemPlacement",
-            )
-            .requires_clarification()]);
-        }
-    };
-    let topology = if ends_only {
-        create_generic_line_ends_only_topology(switch_count as usize, data_rate)
-    } else {
-        create_generic_distributed_topology(
-            &intent.template_id,
-            switch_count as usize,
-            end_systems_per_switch as usize,
-            data_rate,
-        )
-    };
+    let topology = create_hop_linear_topology(switch_count as usize, data_rate);
 
     let summary = InitializeSummary {
         template_id: intent.template_id.clone(),
@@ -535,8 +447,6 @@ const LINE_ROW_Y: f64 = 220.0;
 const LINE_ROW_PITCH: f64 = 200.0;
 const LINE_X_BASE: f64 = 80.0;
 const LINE_X_PITCH: f64 = 300.0;
-const LINE_ES_X_PITCH: f64 = 180.0;
-const LINE_ES_GROUP_GAP: f64 = 180.0;
 const LINE_ES_GAP: f64 = 220.0;
 const LINE_FOLD_THRESHOLD: usize = 5;
 
@@ -547,48 +457,8 @@ struct LineEndsOnlyLayout {
     folded: bool,
 }
 
-fn generic_line_column_pitch(end_systems_per_switch: usize) -> f64 {
-    let row_len = end_systems_per_switch.div_ceil(2).max(1);
-    let group_width = (row_len.saturating_sub(1)) as f64 * LINE_ES_X_PITCH;
-    LINE_X_PITCH.max(group_width + LINE_ES_GROUP_GAP)
-}
-
-fn layout_generic_line_switch(
-    switch_index: usize,
-    end_systems_per_switch: usize,
-) -> IntermediatePosition {
-    let column_pitch = generic_line_column_pitch(end_systems_per_switch);
-    IntermediatePosition {
-        x: LINE_X_BASE + column_pitch * (switch_index as f64 - 1.0),
-        y: LINE_ROW_Y,
-    }
-}
-
-fn layout_generic_line_end_system(
-    switch_index: usize,
-    host_index: usize,
-    end_systems_per_switch: usize,
-) -> IntermediatePosition {
-    let switch_pos = layout_generic_line_switch(switch_index, end_systems_per_switch);
-    let y_offset = if host_index % 2 == 0 { 390.0 } else { 70.0 };
-    let row_index = (host_index - 1) / 2;
-    let row_len = if host_index % 2 == 1 {
-        end_systems_per_switch.div_ceil(2)
-    } else {
-        end_systems_per_switch / 2
-    };
-    let row_start = -((row_len.saturating_sub(1)) as f64 * LINE_ES_X_PITCH) / 2.0;
-    let x_jitter = row_start + row_index as f64 * LINE_ES_X_PITCH;
-
-    IntermediatePosition {
-        x: switch_pos.x + x_jitter,
-        y: y_offset,
-    }
-}
-
-/// R10/R11：generic-line ends-only（规范图 5-1 五跳线性）。端系统仅挂链两端
-/// 各 1 台；switchCount ≥ 5 时蛇形折叠（boustrophedon：行容量 ceil(N/2)、
-/// 行向交替、折返处上下对齐），<5 单行直线。
+/// hop-linear 布局：端系统仅挂链两端各 1 台；switchCount ≥ 5 时蛇形折叠
+/// （boustrophedon：行容量 ceil(N/2)、行向交替、折返处上下对齐），<5 单行直线。
 fn layout_line_ends_only(switch_count: usize) -> LineEndsOnlyLayout {
     let folded = switch_count >= LINE_FOLD_THRESHOLD;
     let row_capacity = if folded {
@@ -642,12 +512,8 @@ fn layout_line_ends_only(switch_count: usize) -> LineEndsOnlyLayout {
     }
 }
 
-/// R10/R11：generic-line ends-only（规范图 5-1 五跳线性）。端系统仅挂链两端
-/// 各 1 台。端口用 per-node first-free 游标（ends-only 打破均匀挂载的定偏移前提）。
-fn create_generic_line_ends_only_topology(
-    switch_count: usize,
-    data_rate: i64,
-) -> IntermediateTopology {
+/// hop-linear：端系统仅挂链两端各 1 台。端口用 per-node first-free 游标。
+fn create_hop_linear_topology(switch_count: usize, data_rate: i64) -> IntermediateTopology {
     let layout = layout_line_ends_only(switch_count);
 
     let mut nodes: Vec<IntermediateNode> = Vec::new();
@@ -733,123 +599,13 @@ fn create_generic_line_ends_only_topology(
     IntermediateTopology {
         schema_version: INTERMEDIATE_TOPOLOGY_SCHEMA_VERSION.to_string(),
         metadata: IntermediateTopologyMetadata {
-            template_id: Some("generic-line".to_string()),
+            template_id: Some("hop-linear".to_string()),
             template_params: Some(json!({
                 "switchCount": switch_count,
-                "endSystemsPerSwitch": 1,
-                "endSystemPlacement": "ends-only",
                 "dataRateMbps": data_rate,
             })),
             layout: Some(if layout.folded {
                 "line-serpentine".into()
-            } else {
-                "line".into()
-            }),
-            source: Some("template".into()),
-        },
-        nodes,
-        links,
-        diagnostics: Vec::new(),
-    }
-}
-
-fn create_generic_distributed_topology(
-    template_id: &str,
-    switch_count: usize,
-    end_systems_per_switch: usize,
-    data_rate: i64,
-) -> IntermediateTopology {
-    let mut nodes: Vec<IntermediateNode> = Vec::new();
-    let mut links: Vec<IntermediateLink> = Vec::new();
-    let mut switch_ids: Vec<String> = Vec::new();
-    let mut numeric_node_id: i64 = 0;
-    let mut numeric_link_id: i64 = 0;
-
-    for switch_index in 1..=switch_count {
-        let switch_id = format!("sw{switch_index}");
-        switch_ids.push(switch_id.clone());
-        nodes.push(IntermediateNode {
-            id: switch_id,
-            numeric_id: numeric_node_id,
-            name: format!("SW-{switch_index}"),
-            node_type: IntermediateNodeType::Switch,
-            ports: create_ports(end_systems_per_switch + 2),
-            position: layout_generic_line_switch(switch_index, end_systems_per_switch),
-            mac_address: None,
-            ip_address: None,
-        });
-        numeric_node_id += 1;
-    }
-
-    for switch_index in 1..=switch_count {
-        let switch_id = format!("sw{switch_index}");
-        for host_index in 1..=end_systems_per_switch {
-            let host_id = format!("es{switch_index}-{host_index}");
-            let host_ordinal = ((switch_index - 1) * end_systems_per_switch + host_index) as i64;
-
-            nodes.push(IntermediateNode {
-                id: host_id.clone(),
-                numeric_id: numeric_node_id,
-                name: format!("ES-{switch_index}-{host_index}"),
-                node_type: IntermediateNodeType::EndSystem,
-                ports: create_ports(1),
-                position: layout_generic_line_end_system(
-                    switch_index,
-                    host_index,
-                    end_systems_per_switch,
-                ),
-                mac_address: Some(derive_mac_address(host_ordinal)),
-                ip_address: Some(format!("10.0.{switch_index}.{host_index}")),
-            });
-            numeric_node_id += 1;
-
-            links.push(create_link(
-                numeric_link_id,
-                &host_id,
-                "P0",
-                &switch_id,
-                &format!("P{}", host_index - 1),
-                data_rate,
-            ));
-            numeric_link_id += 1;
-        }
-    }
-
-    let switch_interconnect_port_offset = end_systems_per_switch;
-    for index in 0..switch_ids.len().saturating_sub(1) {
-        links.push(create_link(
-            numeric_link_id,
-            &switch_ids[index],
-            &format!("P{switch_interconnect_port_offset}"),
-            &switch_ids[index + 1],
-            &format!("P{}", switch_interconnect_port_offset + 1),
-            data_rate,
-        ));
-        numeric_link_id += 1;
-    }
-
-    if template_id == "generic-ring" && switch_ids.len() > 2 {
-        links.push(create_link(
-            numeric_link_id,
-            &switch_ids[switch_ids.len() - 1],
-            &format!("P{switch_interconnect_port_offset}"),
-            &switch_ids[0],
-            &format!("P{}", switch_interconnect_port_offset + 1),
-            data_rate,
-        ));
-    }
-
-    IntermediateTopology {
-        schema_version: INTERMEDIATE_TOPOLOGY_SCHEMA_VERSION.to_string(),
-        metadata: IntermediateTopologyMetadata {
-            template_id: Some(template_id.to_string()),
-            template_params: Some(json!({
-                "switchCount": switch_count,
-                "endSystemsPerSwitch": end_systems_per_switch,
-                "dataRateMbps": data_rate,
-            })),
-            layout: Some(if template_id == "generic-ring" {
-                "ring".into()
             } else {
                 "line".into()
             }),
@@ -2961,41 +2717,38 @@ pub fn validate_topology_artifacts(artifacts_value: &Value) -> ValidateArtifacts
 mod tests {
     use super::*;
 
-    fn build_minimal_generic_line() -> IntermediateTopology {
+    fn build_minimal_hop_linear() -> IntermediateTopology {
         initialize_topology(&InitializeIntent {
-            template_id: "generic-line".into(),
-            params: json!({ "switchCount": 2, "endSystemsPerSwitch": 1, "dataRateMbps": 1000 }),
+            template_id: "hop-linear".into(),
+            params: json!({ "switchCount": 2, "dataRateMbps": 1000 }),
         })
         .map(|(t, _)| t)
-        .expect("generic-line topology should be valid")
+        .expect("hop-linear topology should be valid")
     }
 
     #[test]
-    fn describe_templates_includes_all_three_templates() {
+    fn describe_templates_includes_all_templates() {
         let catalog = describe_templates_catalog();
-        assert_eq!(catalog["templateCount"], 3);
+        assert_eq!(catalog["templateCount"], 2);
         let ids = catalog["templateIds"].as_array().unwrap();
-        assert!(ids.iter().any(|v| v == "generic-line"));
-        assert!(ids.iter().any(|v| v == "generic-ring"));
+        assert!(ids.iter().any(|v| v == "hop-linear"));
         assert!(ids.iter().any(|v| v == "dual-plane-redundant"));
     }
 
-    fn ends_only_intent(switch_count: i64, es_per_switch: i64) -> InitializeIntent {
+    fn hop_linear_intent(switch_count: i64) -> InitializeIntent {
         InitializeIntent {
-            template_id: "generic-line".into(),
+            template_id: "hop-linear".into(),
             params: json!({
                 "switchCount": switch_count,
-                "endSystemsPerSwitch": es_per_switch,
                 "dataRateMbps": 1000,
-                "endSystemPlacement": "ends-only",
             }),
         }
     }
 
     #[test]
-    fn ends_only_five_hop_matches_spec_figure_5_1() {
-        // AE3：7 节点（5 SW + 2 ES）6 链路、ES 仅两端、两行蛇形坐标快照。
-        let (topo, summary) = initialize_topology(&ends_only_intent(5, 1)).unwrap();
+    fn hop_linear_five_switch_matches_ends_only_layout() {
+        // 7 节点（5 SW + 2 ES）6 链路、ES 仅两端、两行蛇形坐标快照。
+        let (topo, summary) = initialize_topology(&hop_linear_intent(5)).unwrap();
         assert_eq!(summary.node_count, 7);
         assert_eq!(summary.link_count, 6);
         assert_eq!(summary.switch_count, 5);
@@ -3048,7 +2801,7 @@ mod tests {
         }
 
         // 确定性 + 无坐标重叠。
-        let (topo2, _) = initialize_topology(&ends_only_intent(5, 1)).unwrap();
+        let (topo2, _) = initialize_topology(&hop_linear_intent(5)).unwrap();
         let coords: Vec<_> = topo
             .nodes
             .iter()
@@ -3078,7 +2831,7 @@ mod tests {
 
     #[test]
     fn ends_only_below_fold_threshold_stays_single_row() {
-        let (topo, summary) = initialize_topology(&ends_only_intent(3, 1)).unwrap();
+        let (topo, summary) = initialize_topology(&hop_linear_intent(3)).unwrap();
         assert_eq!(summary.node_count, 5);
         assert_eq!(summary.link_count, 4);
         let ys: std::collections::BTreeSet<i64> =
@@ -3094,7 +2847,7 @@ mod tests {
         // 偶数折叠（6 → 3+3）与上限 12（6+6）的反向行算式、防穿框、唯一性、
         // 校验兜底（坐标快照只钉规范图 5-1 的 N=5，其余只验不变量）。
         for switch_count in [1i64, 2, 6, 12] {
-            let (topo, summary) = initialize_topology(&ends_only_intent(switch_count, 1)).unwrap();
+            let (topo, summary) = initialize_topology(&hop_linear_intent(switch_count)).unwrap();
             assert_eq!(summary.node_count, switch_count as usize + 2);
             assert_eq!(summary.link_count, switch_count as usize + 1);
 
@@ -3153,42 +2906,6 @@ mod tests {
     }
 
     #[test]
-    fn ends_only_rejects_invalid_parameter_combinations() {
-        // endSystemsPerSwitch 必须为 1（不做语义重载）。
-        let errors = initialize_topology(&ends_only_intent(5, 2)).unwrap_err();
-        assert!(errors
-            .iter()
-            .any(|e| e.path == "$.params.endSystemsPerSwitch"));
-
-        // ends-only 仅 generic-line 支持。
-        let mut ring = ends_only_intent(5, 1);
-        ring.template_id = "generic-ring".into();
-        let errors = initialize_topology(&ring).unwrap_err();
-        assert!(errors
-            .iter()
-            .any(|e| e.path == "$.params.endSystemPlacement"));
-
-        // 非法枚举值。
-        let intent = InitializeIntent {
-            template_id: "generic-line".into(),
-            params: json!({
-                "switchCount": 5, "endSystemsPerSwitch": 1, "dataRateMbps": 1000,
-                "endSystemPlacement": "middle",
-            }),
-        };
-        let errors = initialize_topology(&intent).unwrap_err();
-        assert!(errors
-            .iter()
-            .any(|e| e.path == "$.params.endSystemPlacement"));
-
-        // 显式 per-switch 与缺省等价（向后兼容，ring 也接受）。
-        let mut ring_default = ends_only_intent(4, 2);
-        ring_default.template_id = "generic-ring".into();
-        ring_default.params["endSystemPlacement"] = json!("per-switch");
-        assert!(initialize_topology(&ring_default).is_ok());
-    }
-
-    #[test]
     fn describe_templates_scenario_filter_matches_r7_matrix() {
         // R7：每个 descriptor 都有非空 scenarios；过滤按归属矩阵收窄候选集。
         let full = describe_templates_catalog_filtered(None);
@@ -3203,8 +2920,8 @@ mod tests {
 
         let aero = describe_templates_catalog_filtered(Some("aerospace-onboard"));
         assert_eq!(
-            aero["templateCount"], 3,
-            "宇航场景含全部三模板（ring 双场景归属）"
+            aero["templateCount"], 2,
+            "宇航场景含 hop-linear + dual-plane-redundant"
         );
         // 匹配场景与全量均不得携带 warning（否则 agent 每次过滤都收到误导警告）。
         assert!(aero.get("warning").is_none());
@@ -3212,8 +2929,9 @@ mod tests {
         assert!(full.get("scenario").is_none());
 
         let generic = describe_templates_catalog_filtered(Some("generic-tsn"));
-        assert_eq!(generic["templateCount"], 2);
+        assert_eq!(generic["templateCount"], 1);
         let ids = generic["templateIds"].as_array().unwrap();
+        assert!(ids.iter().any(|v| v == "hop-linear"));
         assert!(!ids.iter().any(|v| v == "dual-plane-redundant"));
 
         let unknown = describe_templates_catalog_filtered(Some("industrial"));
@@ -3226,25 +2944,14 @@ mod tests {
     }
 
     #[test]
-    fn initialize_generic_line_produces_chain_topology() {
-        let topology = build_minimal_generic_line();
+    fn initialize_hop_linear_produces_chain_topology() {
+        let topology = build_minimal_hop_linear();
         assert_eq!(topology.nodes.len(), 4);
         // 2 switches + 2 end systems
         assert_eq!(topology.switch_count(), 2);
         assert_eq!(topology.end_system_count(), 2);
         // 2 host-to-switch links + 1 switch interconnect = 3 links
         assert_eq!(topology.links.len(), 3);
-    }
-
-    #[test]
-    fn initialize_generic_ring_closes_loop_with_enough_switches() {
-        let (topology, _) = initialize_topology(&InitializeIntent {
-            template_id: "generic-ring".into(),
-            params: json!({ "switchCount": 4, "endSystemsPerSwitch": 1, "dataRateMbps": 1000 }),
-        })
-        .unwrap();
-        // 4 host-switch + 3 interconnect (line) + 1 closing = 8
-        assert_eq!(topology.links.len(), 8);
     }
 
     fn dual_plane_single_hop_params() -> serde_json::Value {
@@ -3418,7 +3125,7 @@ mod tests {
         assert_eq!(backbone_a.plane.as_deref(), Some("A"));
         assert_eq!(backbone_a.role.as_deref(), Some("backbone"));
 
-        let line = build_minimal_generic_line();
+        let line = build_minimal_hop_linear();
         assert!(line
             .links
             .iter()
@@ -3450,18 +3157,7 @@ mod tests {
     }
 
     #[test]
-    fn line_layout_helpers_only_compute_positions() {
-        let sw3 = layout_generic_line_switch(3, 2);
-        assert_eq!((sw3.x, sw3.y), (680.0, 220.0));
-
-        let es = layout_generic_line_end_system(2, 2, 3);
-        assert_eq!((es.x, es.y), (440.0, 390.0));
-
-        let dense_sw3 = layout_generic_line_switch(3, 5);
-        assert_eq!((dense_sw3.x, dense_sw3.y), (1160.0, 220.0));
-        let dense_es = layout_generic_line_end_system(2, 5, 5);
-        assert_eq!((dense_es.x, dense_es.y), (800.0, 70.0));
-
+    fn hop_linear_layout_computes_positions() {
         let ends = layout_line_ends_only(5);
         assert!(
             ends.folded,
@@ -3483,48 +3179,6 @@ mod tests {
             (ends.last_end_system.x, ends.last_end_system.y),
             (160.0, 420.0)
         );
-    }
-
-    #[test]
-    fn generic_line_dense_per_switch_layout_keeps_node_boxes_apart() {
-        let (topo, summary) = initialize_topology(&InitializeIntent {
-            template_id: "generic-line".into(),
-            params: json!({ "switchCount": 4, "endSystemsPerSwitch": 5, "dataRateMbps": 1000 }),
-        })
-        .unwrap();
-        assert_eq!(summary.switch_count, 4);
-        assert_eq!(summary.end_system_count, 20);
-        assert_eq!(dp_pos(&topo, "sw2").0 - dp_pos(&topo, "sw1").0, 540.0);
-
-        let boxes_overlap = |a: &IntermediateNode, b: &IntermediateNode| -> bool {
-            let margin = 8.0;
-            let width = 126.0;
-            let height = 56.0;
-            let ax0 = a.position.x - margin;
-            let ax1 = a.position.x + width + margin;
-            let ay0 = a.position.y - margin;
-            let ay1 = a.position.y + height + margin;
-            let bx0 = b.position.x - margin;
-            let bx1 = b.position.x + width + margin;
-            let by0 = b.position.y - margin;
-            let by1 = b.position.y + height + margin;
-            ax0 < bx1 && bx0 < ax1 && ay0 < by1 && by0 < ay1
-        };
-
-        for (i, a) in topo.nodes.iter().enumerate() {
-            for b in topo.nodes.iter().skip(i + 1) {
-                assert!(
-                    !boxes_overlap(a, b),
-                    "{} at ({}, {}) overlaps {} at ({}, {})",
-                    a.id,
-                    a.position.x,
-                    a.position.y,
-                    b.id,
-                    b.position.x,
-                    b.position.y
-                );
-            }
-        }
     }
 
     #[test]
@@ -4225,10 +3879,9 @@ mod tests {
     fn initialize_rejects_switch_count_out_of_range() {
         let over_max = SWITCH_COUNT_MAX + 188;
         let err = initialize_topology(&InitializeIntent {
-            template_id: "generic-line".into(),
+            template_id: "hop-linear".into(),
             params: json!({
                 "switchCount": over_max,
-                "endSystemsPerSwitch": 1,
                 "dataRateMbps": 1000
             }),
         })
@@ -4244,8 +3897,8 @@ mod tests {
     fn initialize_requires_explicit_switch_count() {
         // 缺 switchCount → requires_clarification，不再静默用 4
         let err = initialize_topology(&InitializeIntent {
-            template_id: "generic-line".into(),
-            params: json!({ "endSystemsPerSwitch": 2, "dataRateMbps": 1000 }),
+            template_id: "hop-linear".into(),
+            params: json!({ "dataRateMbps": 1000 }),
         })
         .unwrap_err();
         assert_eq!(err[0].code, "INVALID_TEMPLATE_PARAM");
@@ -4254,22 +3907,10 @@ mod tests {
     }
 
     #[test]
-    fn initialize_requires_explicit_end_systems_per_switch() {
-        let err = initialize_topology(&InitializeIntent {
-            template_id: "generic-line".into(),
-            params: json!({ "switchCount": 4, "dataRateMbps": 1000 }),
-        })
-        .unwrap_err();
-        assert_eq!(err[0].code, "INVALID_TEMPLATE_PARAM");
-        assert_eq!(err[0].path, "$.params.endSystemsPerSwitch");
-        assert!(err[0].requires_user_clarification);
-    }
-
-    #[test]
     fn initialize_requires_explicit_data_rate() {
         let err = initialize_topology(&InitializeIntent {
-            template_id: "generic-line".into(),
-            params: json!({ "switchCount": 4, "endSystemsPerSwitch": 2 }),
+            template_id: "hop-linear".into(),
+            params: json!({ "switchCount": 4 }),
         })
         .unwrap_err();
         assert_eq!(err[0].code, "INVALID_TEMPLATE_PARAM");
@@ -4278,52 +3919,38 @@ mod tests {
     }
 
     #[test]
-    fn describe_templates_generic_params_omit_default_and_carry_legal_domain() {
+    fn describe_templates_hop_linear_params_omit_default_and_carry_legal_domain() {
         let catalog = describe_templates_catalog();
-        for template_id in ["generic-line", "generic-ring"] {
-            let template = catalog["templates"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|t| t["id"] == template_id)
-                .unwrap_or_else(|| panic!("template {template_id} should exist"));
-            let params = template["params"].as_array().unwrap();
+        let template = catalog["templates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == "hop-linear")
+            .expect("hop-linear template should exist");
+        let params = template["params"].as_array().unwrap();
 
-            let switch_count = params
-                .iter()
-                .find(|p| p["name"] == "switchCount")
-                .expect("switchCount param");
-            assert!(
-                switch_count.get("default").is_none(),
-                "switchCount must not carry default"
-            );
-            assert_eq!(switch_count["type"], "integer");
-            assert_eq!(switch_count["minimum"], json!(SWITCH_COUNT_MIN));
-            assert_eq!(switch_count["maximum"], json!(SWITCH_COUNT_MAX));
+        let switch_count = params
+            .iter()
+            .find(|p| p["name"] == "switchCount")
+            .expect("switchCount param");
+        assert!(
+            switch_count.get("default").is_none(),
+            "switchCount must not carry default"
+        );
+        assert_eq!(switch_count["type"], "integer");
+        assert_eq!(switch_count["minimum"], json!(SWITCH_COUNT_MIN));
+        assert_eq!(switch_count["maximum"], json!(SWITCH_COUNT_MAX));
 
-            let end_systems = params
-                .iter()
-                .find(|p| p["name"] == "endSystemsPerSwitch")
-                .expect("endSystemsPerSwitch param");
-            assert!(
-                end_systems.get("default").is_none(),
-                "endSystemsPerSwitch must not carry default"
-            );
-            assert_eq!(end_systems["type"], "integer");
-            assert_eq!(end_systems["minimum"], json!(END_SYSTEMS_PER_SWITCH_MIN));
-            assert_eq!(end_systems["maximum"], json!(END_SYSTEMS_PER_SWITCH_MAX));
-
-            let data_rate = params
-                .iter()
-                .find(|p| p["name"] == "dataRateMbps")
-                .expect("dataRateMbps param");
-            assert!(
-                data_rate.get("default").is_none(),
-                "dataRateMbps must not carry default"
-            );
-            assert_eq!(data_rate["type"], "enum");
-            assert_eq!(data_rate["values"], json!(SUPPORTED_DATA_RATES));
-        }
+        let data_rate = params
+            .iter()
+            .find(|p| p["name"] == "dataRateMbps")
+            .expect("dataRateMbps param");
+        assert!(
+            data_rate.get("default").is_none(),
+            "dataRateMbps must not carry default"
+        );
+        assert_eq!(data_rate["type"], "enum");
+        assert_eq!(data_rate["values"], json!(SUPPORTED_DATA_RATES));
     }
 
     #[test]
@@ -4332,27 +3959,15 @@ mod tests {
         // 改 Rust 常量却忘改 zod（或反之）会 red。
         let zod_src = include_str!("../../src-node/mcp/topology-tools.ts");
         let switch_clause = format!(".min({SWITCH_COUNT_MIN}).max({SWITCH_COUNT_MAX})");
-        let end_systems_clause =
-            format!(".min({END_SYSTEMS_PER_SWITCH_MIN}).max({END_SYSTEMS_PER_SWITCH_MAX})");
         assert!(
             zod_src.contains(&format!("switchCount: z.number().int(){switch_clause}")),
             "zod switchCount bounds drifted from Rust SWITCH_COUNT_MIN/MAX ({switch_clause})"
-        );
-        assert!(
-            zod_src.contains(&format!(
-                "endSystemsPerSwitch: z.number().int(){end_systems_clause}"
-            )),
-            "zod endSystemsPerSwitch bounds drifted from Rust END_SYSTEMS_PER_SWITCH_MIN/MAX ({end_systems_clause})"
-        );
-        assert!(
-            zod_src.contains(r#"endSystemPlacement: z.enum(["per-switch", "ends-only"]).optional()"#),
-            "zod endSystemPlacement enum drifted from Rust placement parsing (per-switch/ends-only)"
         );
     }
 
     #[test]
     fn validate_intermediate_passes_for_initialize_output() {
-        let topology = build_minimal_generic_line();
+        let topology = build_minimal_hop_linear();
         let raw = serde_json::to_value(&topology).unwrap();
         let report = validate_intermediate_topology(&raw);
         assert!(report.ok, "errors={:?}", report.errors);
@@ -4362,7 +3977,7 @@ mod tests {
     #[test]
     fn ports_are_p0_indexed_across_templates() {
         // R5：全模板 P0 起编——节点端口与链路标签同源一致。
-        let line = build_minimal_generic_line();
+        let line = build_minimal_hop_linear();
         assert_eq!(line.nodes[0].ports[0].id, "P0");
         assert!(line
             .links
@@ -4383,20 +3998,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_intermediate_passes_for_generic_ring_output() {
-        // ring 闭环块有独立端口字面量，漏改时悬空端口引用在此即红（U1 护栏）。
-        let (topology, _) = initialize_topology(&InitializeIntent {
-            template_id: "generic-ring".into(),
-            params: json!({ "switchCount": 4, "endSystemsPerSwitch": 2, "dataRateMbps": 1000 }),
-        })
-        .unwrap();
-        let raw = serde_json::to_value(&topology).unwrap();
-        let report = validate_intermediate_topology(&raw);
-        assert!(report.ok, "errors={:?}", report.errors);
-        assert!(report.summary.valid);
-    }
-
-    #[test]
     fn validate_intermediate_detects_missing_schema_version() {
         let raw = json!({
             "metadata": {},
@@ -4414,7 +4015,7 @@ mod tests {
 
     #[test]
     fn build_artifacts_returns_four_jsons_with_expected_counts() {
-        let topology = build_minimal_generic_line();
+        let topology = build_minimal_hop_linear();
         let raw = serde_json::to_value(&topology).unwrap();
         let result = build_topology_artifacts(&raw).expect("build OK");
         assert_eq!(result.summary.artifact_count, 4);
@@ -4424,7 +4025,7 @@ mod tests {
         // 2 host-switch + 1 interconnect
         assert_eq!(result.summary.topology_link_count, 3);
         // 2 switches × (3 dst non-self) but only ones reachable count;
-        // 在最简 generic-line(2/1) fixture 中，2 switches 之间每边能算到对方 + 终端系统 → 至少 ≥2
+        // 在最简 hop-linear(2) fixture 中，2 switches 之间每边能算到对方 + 终端系统 → 至少 ≥2
         assert!(result.summary.mac_entry_count >= 2);
 
         let arts = &result.artifacts;
@@ -4442,7 +4043,7 @@ mod tests {
 
     #[test]
     fn describe_artifacts_summarizes_built_artifacts() {
-        let topology = build_minimal_generic_line();
+        let topology = build_minimal_hop_linear();
         let raw = serde_json::to_value(&topology).unwrap();
         let built = build_topology_artifacts(&raw).unwrap();
         let summary = describe_topology_artifacts(&built.artifacts);
@@ -4453,7 +4054,7 @@ mod tests {
 
     #[test]
     fn validate_artifacts_passes_for_built_artifacts() {
-        let topology = build_minimal_generic_line();
+        let topology = build_minimal_hop_linear();
         let raw = serde_json::to_value(&topology).unwrap();
         let built = build_topology_artifacts(&raw).unwrap();
         let report = validate_topology_artifacts(&built.artifacts);

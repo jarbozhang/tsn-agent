@@ -46,8 +46,8 @@ function createService(overrides: Partial<SkillFileService> = {}): SkillFileServ
       preserved: ["tsn-topology/my-notes.md"],
     })),
     describeTopologyTemplates: vi.fn().mockResolvedValue({
-      templateCount: 3,
-      templateIds: ["generic-line", "generic-ring", "dual-plane-redundant"],
+      templateCount: 2,
+      templateIds: ["hop-linear", "dual-plane-redundant"],
       templates: [],
     }),
     ...overrides,
@@ -165,10 +165,10 @@ describe("SkillFilePreview", () => {
     const service = createService({
       describeTopologyTemplates: vi.fn().mockResolvedValue({
         templateCount: 1,
-        templateIds: ["generic-line"],
+        templateIds: ["hop-linear"],
         templates: [
           {
-            id: "generic-line",
+            id: "hop-linear",
             name: "通用线型拓扑",
             params: [
               { name: "switchCount", type: "integer", minimum: 1, maximum: 12 },
