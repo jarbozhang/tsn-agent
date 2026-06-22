@@ -257,7 +257,7 @@ describe("runTsnAgent", () => {
         appSessionId: "session-1",
         stageRunnerInput: expect.objectContaining({
           stage: "topology",
-          scenarioConfigId: "generic-tsn",
+          scenarioConfigId: "aerospace-onboard",
         }),
       }),
     });
@@ -657,7 +657,7 @@ describe("runTsnAgent", () => {
     expect(result.workflow.currentStep).toBe("time-sync");
     expect(result.workflow.stages["time-sync"].status).toBe("waiting_confirmation");
     // 阶段处理没丢：进入 time-sync 自动生成默认摘要。
-    expect(result.workflow.stages["time-sync"].summary).toContain("时间同步");
+    expect(result.workflow.stages["time-sync"].summary).toContain("统一时钟");
     expect(result.events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: "confirmation-required", stage: "time-sync" }),
@@ -876,7 +876,7 @@ describe("runTsnAgent", () => {
     expect(result.mode).toBe("local");
     expect(result.workflow.currentStep).toBe("time-sync");
     expect(result.workflow.stages["time-sync"].status).toBe("waiting_confirmation");
-    expect(result.workflow.stages["time-sync"].summary).toContain("时间同步");
+    expect(result.workflow.stages["time-sync"].summary).toContain("统一时钟");
     expect(result.workflow.pendingStageChange).toBeUndefined();
     expect(result.workflow.stages["flow-template"].status).toBe("locked");
   });

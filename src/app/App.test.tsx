@@ -178,24 +178,19 @@ describe("App", () => {
     expect(screen.getByText("草稿")).toBeInTheDocument();
   });
 
-  it("keeps the Phase B offline banner and disabled flow steps visible", () => {
+  it("keeps the disabled flow step visible", () => {
     render(<App />);
 
-    expect(screen.getByRole("note")).toHaveTextContent("流量规划与规划导出在当前版本暂时下线");
     const stepper = screen.getByLabelText("配置步骤");
     const flowStep = within(stepper).getByText("流量规划").closest(".stepper-item");
     expect(flowStep).toHaveAttribute("aria-disabled", "true");
   });
 
-  it("U11: picking the aerospace scenario at entry applies it to the agent session", async () => {
+  it("defaults to the aerospace scenario and applies it to the agent session", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    // 进门 picker：选「箭载/舰载」。
-    const aero = screen.getByRole("button", { name: "箭载/舰载 TSN 典型场景" });
-    await user.click(aero);
-    await waitFor(() => expect(aero).toHaveAttribute("aria-pressed", "true"));
-    // placeholder 跟着场景变成双平面双跳推荐。
+    // 进门默认箭载：placeholder 即双平面双跳推荐（不再展示场景选择控件）。
     expect(screen.getByPlaceholderText(/双平面双跳/)).toBeInTheDocument();
 
     // 提交后 agent 收到的会话 scenarioConfigId 已是 aerospace-onboard。
@@ -227,7 +222,7 @@ describe("App", () => {
         userIntent: "我需要4个交换机，每个交换机连接5个端系统",
       }),
     );
-    expect(screen.getByText("拓扑等待确认")).toBeInTheDocument();
+    expect(screen.getByText("拓扑生成等待确认")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "确认并继续" })).toBeEnabled();
   });
 

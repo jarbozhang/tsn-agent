@@ -34,11 +34,6 @@ describe("AgentRunStatusBar", () => {
 });
 
 describe("ChatPane", () => {
-  it("keeps the Phase B offline banner visible", () => {
-    render(<ChatPane {...baseProps()} />);
-    expect(screen.getByRole("note")).toHaveTextContent("流量规划与规划导出在当前版本暂时下线");
-  });
-
   it("renders chat messages", () => {
     const messages: ChatMessage[] = [
       { id: "m1", role: "user", content: "我需要 4 个交换机", createdAt: "2026-06-07T00:00:00Z" },

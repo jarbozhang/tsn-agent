@@ -12,7 +12,7 @@ describe("workflow state machine", () => {
   it("initializes workflow state for new projects", () => {
     const workflow = createInitialWorkflowState();
 
-    expect(workflow.scenarioConfigId).toBe("generic-tsn");
+    expect(workflow.scenarioConfigId).toBe("aerospace-onboard");
     expect(workflow.currentStep).toBe("topology");
     expect(workflow.stages.topology.status).toBe("current");
     expect(workflow.stages["time-sync"].status).toBe("locked");
@@ -83,7 +83,7 @@ describe("workflow state machine", () => {
 
   it("normalizes old workflow payloads without stage state", () => {
     expect(normalizeWorkflowState(undefined, "missing-config")).toMatchObject({
-      scenarioConfigId: "generic-tsn",
+      scenarioConfigId: "aerospace-onboard",
       currentStep: "topology",
     });
   });

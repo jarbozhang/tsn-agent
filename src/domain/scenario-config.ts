@@ -21,7 +21,7 @@ export interface ScenarioFlowTemplate {
 export interface ScenarioConfig {
   id: ScenarioConfigId;
   displayName: string;
-  /** 进门输入框的示例需求（placeholder / 引导用户怎么描述，U11 配套）。 */
+  /** 进门输入框的示例需求（placeholder / 引导用户怎么描述）。 */
   exampleIntent: string;
   stageLabels: Record<WorkflowStep, string>;
   // 拓扑推荐默认已收口到 skill 场景 reference（R10）：唯一事实源是
@@ -40,7 +40,7 @@ export interface ScenarioConfigResolution {
   warning?: string;
 }
 
-export const DEFAULT_SCENARIO_CONFIG_ID: ScenarioConfigId = "generic-tsn";
+export const DEFAULT_SCENARIO_CONFIG_ID: ScenarioConfigId = "aerospace-onboard";
 
 export const SCENARIO_CONFIGS: Record<ScenarioConfigId, ScenarioConfig> = {
   "generic-tsn": {
@@ -51,7 +51,7 @@ export const SCENARIO_CONFIGS: Record<ScenarioConfigId, ScenarioConfig> = {
       topology: "拓扑",
       "time-sync": "时间同步",
       "flow-template": "流量规划",
-      "planning-export": "模拟仿真",
+      "planning-export": "配置下发",
     },
     defaults: {
       timeSyncSummary: "默认假设全网已完成时间同步，后续仿真配置再细化 gPTP 主时钟和端口关系。",
@@ -77,13 +77,13 @@ export const SCENARIO_CONFIGS: Record<ScenarioConfigId, ScenarioConfig> = {
   },
   "aerospace-onboard": {
     id: "aerospace-onboard",
-    displayName: "箭载/舰载 TSN 典型场景",
-    exampleIntent: "双平面双跳冗余拓扑（图 4-5），4 个端系统、4 个交换机（A/B 平面物理隔离、端系统双归属）",
+    displayName: "箭载 TSN 典型场景",
+    exampleIntent: "双平面双跳冗余拓扑，4 个端系统、4 个交换机（A/B 平面物理隔离、端系统双归属）",
     stageLabels: {
-      topology: "载荷网络拓扑",
-      "time-sync": "统一时钟",
-      "flow-template": "关键流量规划",
-      "planning-export": "模拟仿真",
+      topology: "拓扑生成",
+      "time-sync": "时间同步",
+      "flow-template": "流量规划",
+      "planning-export": "配置下发",
     },
     defaults: {
       timeSyncSummary: "默认采用全网统一时钟假设，优先保留 GM 选择、同步域和从端口关系的后续扩展位置。",
@@ -135,14 +135,6 @@ export function resolveScenarioConfig(configId?: string): ScenarioConfigResoluti
 
 export function getScenarioConfig(configId?: string): ScenarioConfig {
   return resolveScenarioConfig(configId).config;
-}
-
-/** 进门场景选择控件的选项（U11）：id + 显示名，顺序同 SCENARIO_CONFIGS 声明序。 */
-export function listScenarioOptions(): Array<{ id: ScenarioConfigId; displayName: string }> {
-  return (Object.keys(SCENARIO_CONFIGS) as ScenarioConfigId[]).map((id) => ({
-    id,
-    displayName: SCENARIO_CONFIGS[id].displayName,
-  }));
 }
 
 function isScenarioConfigId(value: string): value is ScenarioConfigId {

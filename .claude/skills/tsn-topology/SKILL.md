@@ -7,7 +7,7 @@ description: TSN Agent 拓扑阶段主索引。承载场景无关的领域语义
 
 # TSN 拓扑 Skill 主索引
 
-这是拓扑阶段**可编辑指引**的主索引，只放开工前必须知道的场景无关内容：领域语义、操作流程、场景路由。各场景的模板怎么选、参数推荐多少、规范图 preset，在 `references/<场景id>.md` 里按场景分开放。
+这是拓扑阶段**可编辑指引**的主索引，只放开工前必须知道的场景无关内容：领域语义、操作流程、场景路由。各场景的模板怎么选、参数推荐多少，在 `references/<场景id>.md` 里按场景分开放。
 
 ## 参数从哪来
 
@@ -22,10 +22,10 @@ description: TSN Agent 拓扑阶段主索引。承载场景无关的领域语义
 | `scenarioConfigId` | 场景 | reference 文件 |
 |---|---|---|
 | `generic-tsn` | 通用 TSN | `references/generic-tsn.md` |
-| `aerospace-onboard` | 箭载/舰载 TSN | `references/aerospace-onboard.md` |
+| `aerospace-onboard` | 箭载 TSN | `references/aerospace-onboard.md` |
 | 未知 / 缺失 | 按通用处理 | `references/generic-tsn.md` |
 
-调 `topology_describe_templates` 时带上 `scenario` 参数（值 = 当前 `scenarioConfigId`），拿到的是该场景的模板候选集。用户需求超出当前场景的模板集时，先去掉 `scenario` 重查全量再回答。
+调 `topology_describe_templates` 时带上 `scenario` 参数（值 = 用户需求对应场景的 `scenarioConfigId`），拿到的是该场景的模板候选集。用户需求超出当前场景的模板集时，先去掉 `scenario` 重查全量再回答。
 
 ## 领域语义
 
@@ -33,12 +33,11 @@ description: TSN Agent 拓扑阶段主索引。承载场景无关的领域语义
 
 | 领域概念 | 库值 `node_type` | 前缀 | 说明 |
 |---|---|---|---|
-| 交换机 | `switch` | `SW` | |
-| 端系统 | `endSystem` | `ES` | 用户说的"端系统""端""网卡8/网卡9"都指端系统节点（"网卡"是口头叫法，**不是**交换机端口或物理网卡）。inspect 的 rows 和构造 op 时照抄这个库值原文 |
+| 交换机 | `switch` | `SW` | TSN 交换机 |
+| 端系统 | `endSystem` | `ES` | TSN 端系统 |
 | 控制器 | `server` | — | 当前模板不生成 server；画布对非 switch 一律按端系统显示 |
 
-- 首期**不做** `T10` 类型。
-- **显示名怎么定**（显示名的唯一权威规则）：画布显示名**优先用节点的 `name`**（initialize 落库的逻辑名，如 `SW-1`/`ES-1`）；没有 `name` 才回退成 前缀+`syncName`。用户提到 `SW-N`/`ES-N` 时，先拿 rows 的 `name` 精确匹配，匹配不到再用 前缀+`syncName` 的派生名匹配——**不要**按列表顺序或"第 N 台"去折算。
+- **显示名怎么定**（显示名的唯一权威规则）：画布显示名**优先用节点的 `name`**（initialize 落库的逻辑名，如 `SW-1`/`ES-1`）；没有 `name` 才回退成 前缀+`syncName`。用户提到 `SW-N`/`ES-N` 时，先拿 `topology_inspect` 返回里节点的 `name` 精确匹配，匹配不到再用 前缀+`syncName` 的派生名匹配——**不要**按列表顺序或"第 N 台"去折算。
 
 ### 链路速率
 
@@ -46,9 +45,9 @@ description: TSN Agent 拓扑阶段主索引。承载场景无关的领域语义
 
 ## 从零初始化（当前 project 还没有拓扑）
 
-1. 从用户需求和当前场景 reference 的「推荐参数默认」提取结构化参数。**关键参数（规模——交换机 / 端系统数量、拓扑形态、要不要冗余）缺失或不明确时，先用中文编号选项问用户**（把场景推荐默认值列为其中一个选项、标「推荐」），用户选定后再生成——别默默套默认值就直接把拓扑摆出来。用户已经说清规模和形态时直接生成、不必多问。
+1. 从用户需求和当前场景 reference 的「推荐参数默认」提取结构化参数。**关键参数（规模——交换机 / 端系统数量、拓扑形态、要不要冗余）缺失或不明确时，先用中文编号选项问用户**（把场景推荐默认值列为其中一个选项、标「推荐」），用户选定后再生成——别默默套默认值就直接把拓扑摆出来。**用户只报了拓扑名或组网名（如「双平面双跳」「五跳线性」「创建箭载拓扑」）也一样**：preset 表替他补上的规模 / 特征 / 冗余是你做的假设，不算他已说清——先把这些隐含值用中文列出来确认，再 initialize。只有用户把规模、形态、冗余都显式说全了，才直接生成、不必多问。
 2. 调 `mcp__tsn_topology__topology_describe_templates`（带 `scenario`），拿模板目录和参数 schema（字段名和**合法域**以这个返回为准）。
-3. 按场景 reference 的「模板选择」和「规范图 preset 表」定下 `templateId` 和参数，**显式**传给 `mcp__tsn_topology__topology_initialize`；它直接写工程数据库、返回 `mutationId`（右侧据此落图），并替换该会话已有的拓扑。
+3. 按场景 reference 的「按类型选模板」表定下 `templateId` 和参数（双平面的完整参数结构照 `describe_templates` 返回的 `example` 抄），**显式**传给 `mcp__tsn_topology__topology_initialize`；它直接写工程数据库、返回 `mutationId`（右侧据此落图），并替换该会话已有的拓扑。
 4. 用 `mcp__tsn_topology__topology_inspect` 看落库结果。
 5. 用中文讲一下当前拓扑摘要，等用户确认。（`initialize` 已经校验并落库，不用再 `validate` 复检。）
 

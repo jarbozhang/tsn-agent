@@ -2,12 +2,11 @@ import { Fragment, type RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage } from "../../../sessions/session-repository";
-import type { ScenarioConfig, ScenarioConfigId } from "../../../domain/scenario-config";
+import type { ScenarioConfig } from "../../../domain/scenario-config";
 import type { WorkflowState, WorkflowStageState, WorkflowStepStatus } from "../../../project/project-state";
 import { redactProviderNamesForDisplay } from "../../../ui/display-redaction";
 import type { AgentRunPhase } from "../../hooks/use-agent-run-controller";
 import { ToolCallCard } from "./tool-call-card";
-import { ScenarioPicker } from "../scenario-picker";
 
 const STEPPER_STEPS = ["topology", "time-sync", "flow-template", "planning-export"] as const;
 
@@ -37,7 +36,6 @@ export interface ChatPaneProps {
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   onConfirm: () => void;
-  onSelectScenario?: (id: ScenarioConfigId) => void;
 }
 
 export function ChatPane({
@@ -52,28 +50,11 @@ export function ChatPane({
   onInputChange,
   onSubmit,
   onConfirm,
-  onSelectScenario,
 }: ChatPaneProps) {
-  // 进门（会话尚无用户消息）显示场景选择控件；开始后锁定为静态徽章。
-  const hasUserInteraction = messages.some((message) => message.role === "user");
   return (
     <section className="chat-pane" aria-label="对话区">
       <div className="project-strip">
         <span className="project-name">当前规划</span>
-        {hasUserInteraction || !onSelectScenario ? (
-          <span className="env-badge mono">{scenarioConfig.displayName}</span>
-        ) : (
-          <ScenarioPicker
-            value={scenarioConfig.id}
-            onSelect={onSelectScenario}
-            disabled={isAgentRunning}
-          />
-        )}
-      </div>
-
-      {/* Phase B-α (plan v3 U9c)：流量规划暂下线告知 banner。 */}
-      <div className="phase-b-banner" role="note" aria-live="polite">
-        流量规划与规划导出在当前版本暂时下线，预计 v0.X 随 Phase B 回归。
       </div>
 
       <div className="chat-stepper" aria-label="配置步骤">

@@ -4,19 +4,28 @@ import {
   SCENARIO_CONFIGS,
   WORKFLOW_STEPS,
   getScenarioConfig,
-  listScenarioOptions,
   resolveScenarioConfig,
 } from "./scenario-config";
 
 describe("scenario config", () => {
-  it("uses the generic TSN config by default", () => {
+  it("uses the aerospace onboard config by default", () => {
     const config = getScenarioConfig();
 
+    expect(DEFAULT_SCENARIO_CONFIG_ID).toBe("aerospace-onboard");
     expect(config.id).toBe(DEFAULT_SCENARIO_CONFIG_ID);
+    expect(config.exampleIntent).toContain("双平面双跳");
+    expect(config.stageLabels.topology).toBe("拓扑生成");
+    expect(config.stageLabels["flow-template"]).toBe("流量规划");
+    expect(config.stageLabels["planning-export"]).toBe("配置下发");
+    expect(config.flowTemplates[0].name).toBe("时序控制消息-1");
+  });
+
+  it("resolves the generic TSN config by id", () => {
+    const config = getScenarioConfig("generic-tsn");
+
     expect(config.exampleIntent).toContain("交换机");
     expect(config.stageLabels.topology).toBe("拓扑");
     expect(config.stageLabels["flow-template"]).toBe("流量规划");
-    expect(config.stageLabels["planning-export"]).toBe("模拟仿真");
     expect(config.flowTemplates[0].name).toBe("控制流-1");
   });
 
@@ -31,8 +40,8 @@ describe("scenario config", () => {
 
     expect(config.displayName).toContain("箭载");
     expect(config.exampleIntent).toContain("双平面双跳");
-    expect(config.stageLabels["flow-template"]).toBe("关键流量规划");
-    expect(config.stageLabels["planning-export"]).toBe("模拟仿真");
+    expect(config.stageLabels["flow-template"]).toBe("流量规划");
+    expect(config.stageLabels["planning-export"]).toBe("配置下发");
     expect(config.flowTemplates[0].name).toBe("时序控制消息-1");
     expect(config.flowTemplates[0].periodUs).toBe(1_000);
     expect(config.flowTemplates[0].frameSizeBytes).toBe(10);
@@ -41,15 +50,8 @@ describe("scenario config", () => {
   it("falls back to the generic config for unknown ids with a warning", () => {
     const resolution = resolveScenarioConfig("missing-config");
 
-    expect(resolution.config.id).toBe("generic-tsn");
+    expect(resolution.config.id).toBe("aerospace-onboard");
     expect(resolution.fallback).toBe(true);
     expect(resolution.warning).toContain("missing-config");
-  });
-
-  it("U11: listScenarioOptions returns every scenario with its display name", () => {
-    expect(listScenarioOptions()).toEqual([
-      { id: "generic-tsn", displayName: "通用 TSN" },
-      { id: "aerospace-onboard", displayName: "箭载/舰载 TSN 典型场景" },
-    ]);
   });
 });

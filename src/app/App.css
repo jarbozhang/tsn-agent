@@ -1178,15 +1178,6 @@ textarea:focus-visible {
 }
 
 /* Phase B-α 灰态告知 banner（在 chat-stepper 之上）。 */
-.phase-b-banner {
-  flex: 0 0 auto;
-  padding: 8px 14px;
-  background: var(--accent-soft);
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
 .stepper-item.passed .si-num {
   border-color: var(--success);
   color: #ffffff;
