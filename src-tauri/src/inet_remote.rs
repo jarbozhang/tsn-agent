@@ -408,10 +408,11 @@ mod tests {
         );
         assert_eq!(argv[0], "-r");
         assert!(argv.iter().any(|a| a == "StrictHostKeyChecking=yes"));
-        assert!(argv
-            .last()
-            .unwrap()
-            .ends_with("zhang@100.104.38.106:/home/zhang/tsn-agent-runs/run-x"));
+        assert!(
+            argv.last()
+                .unwrap()
+                .ends_with("zhang@100.104.38.106:/home/zhang/tsn-agent-runs/run-x")
+        );
     }
 
     #[test]

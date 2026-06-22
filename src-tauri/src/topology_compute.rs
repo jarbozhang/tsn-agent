@@ -17,13 +17,13 @@
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::topology_intermediate::{
-    create_ports, derive_legacy_ip, derive_legacy_mac, derive_mac_address,
-    sort_links_by_numeric_id, sort_nodes_by_numeric_id, IntermediateLink, IntermediateLinkEndpoint,
+    INTERMEDIATE_TOPOLOGY_SCHEMA_VERSION, IntermediateLink, IntermediateLinkEndpoint,
     IntermediateLinkMedium, IntermediateNode, IntermediateNodeType, IntermediatePosition,
-    IntermediateTopology, IntermediateTopologyMetadata, INTERMEDIATE_TOPOLOGY_SCHEMA_VERSION,
+    IntermediateTopology, IntermediateTopologyMetadata, create_ports, derive_legacy_ip,
+    derive_legacy_mac, derive_mac_address, sort_links_by_numeric_id, sort_nodes_by_numeric_id,
 };
 
 // ============================================================================
@@ -264,12 +264,14 @@ pub fn initialize_topology(
     intent: &InitializeIntent,
 ) -> Result<(IntermediateTopology, InitializeSummary), Vec<TopologyErrorOut>> {
     if intent.template_id != "hop-linear" && intent.template_id != "dual-plane-redundant" {
-        return Err(vec![TopologyErrorOut::new(
-            "UNKNOWN_TEMPLATE_ID",
-            format!("Unknown topology templateId: {}", intent.template_id),
-            "$.templateId",
-        )
-        .requires_clarification()]);
+        return Err(vec![
+            TopologyErrorOut::new(
+                "UNKNOWN_TEMPLATE_ID",
+                format!("Unknown topology templateId: {}", intent.template_id),
+                "$.templateId",
+            )
+            .requires_clarification(),
+        ]);
     }
 
     let params_obj = if intent.params.is_object() {
@@ -347,13 +349,15 @@ fn normalize_integer_param(
 ) -> Result<i64, Vec<TopologyErrorOut>> {
     let n = match value {
         None | Some(Value::Null) => {
-            return Err(vec![TopologyErrorOut::new(
-                "INVALID_TEMPLATE_PARAM",
-                format!("{path} is required and must be an integer in [{min}, {max}]."),
-                path,
-            )
-            .with_details(json!({"minimum": min, "maximum": max, "actual": Value::Null}))
-            .requires_clarification()]);
+            return Err(vec![
+                TopologyErrorOut::new(
+                    "INVALID_TEMPLATE_PARAM",
+                    format!("{path} is required and must be an integer in [{min}, {max}]."),
+                    path,
+                )
+                .with_details(json!({"minimum": min, "maximum": max, "actual": Value::Null}))
+                .requires_clarification(),
+            ]);
         }
         Some(v) => v
             .as_i64()
@@ -367,23 +371,27 @@ fn normalize_integer_param(
                 })
             })
             .ok_or_else(|| {
-                vec![TopologyErrorOut::new(
-                    "INVALID_TEMPLATE_PARAM",
-                    format!("{path} must be an integer in [{min}, {max}]."),
-                    path,
-                )
-                .with_details(json!({"minimum": min, "maximum": max, "actual": v.to_string()}))
-                .requires_clarification()]
+                vec![
+                    TopologyErrorOut::new(
+                        "INVALID_TEMPLATE_PARAM",
+                        format!("{path} must be an integer in [{min}, {max}]."),
+                        path,
+                    )
+                    .with_details(json!({"minimum": min, "maximum": max, "actual": v.to_string()}))
+                    .requires_clarification(),
+                ]
             })?,
     };
     if n < min || n > max {
-        return Err(vec![TopologyErrorOut::new(
-            "INVALID_TEMPLATE_PARAM",
-            format!("{path} must be an integer in [{min}, {max}]."),
-            path,
-        )
-        .with_details(json!({"minimum": min, "maximum": max, "actual": n.to_string()}))
-        .requires_clarification()]);
+        return Err(vec![
+            TopologyErrorOut::new(
+                "INVALID_TEMPLATE_PARAM",
+                format!("{path} must be an integer in [{min}, {max}]."),
+                path,
+            )
+            .with_details(json!({"minimum": min, "maximum": max, "actual": n.to_string()}))
+            .requires_clarification(),
+        ]);
     }
     Ok(n)
 }
@@ -416,29 +424,33 @@ fn normalize_data_rate(value: Option<&Value>) -> Result<i64, Vec<TopologyErrorOu
                 })
             })
             .ok_or_else(|| {
-                vec![TopologyErrorOut::new(
-                    "INVALID_TEMPLATE_PARAM",
-                    format!("$.params.dataRateMbps must be one of {SUPPORTED_DATA_RATES:?}."),
-                    "$.params.dataRateMbps",
-                )
-                .with_details(json!({
-                    "allowed": SUPPORTED_DATA_RATES,
-                    "actual": v.to_string()
-                }))
-                .requires_clarification()]
+                vec![
+                    TopologyErrorOut::new(
+                        "INVALID_TEMPLATE_PARAM",
+                        format!("$.params.dataRateMbps must be one of {SUPPORTED_DATA_RATES:?}."),
+                        "$.params.dataRateMbps",
+                    )
+                    .with_details(json!({
+                        "allowed": SUPPORTED_DATA_RATES,
+                        "actual": v.to_string()
+                    }))
+                    .requires_clarification(),
+                ]
             })?,
     };
     if !SUPPORTED_DATA_RATES.contains(&n) {
-        return Err(vec![TopologyErrorOut::new(
-            "INVALID_TEMPLATE_PARAM",
-            format!("$.params.dataRateMbps must be one of {SUPPORTED_DATA_RATES:?}."),
-            "$.params.dataRateMbps",
-        )
-        .with_details(json!({
-            "allowed": SUPPORTED_DATA_RATES,
-            "actual": n.to_string()
-        }))
-        .requires_clarification()]);
+        return Err(vec![
+            TopologyErrorOut::new(
+                "INVALID_TEMPLATE_PARAM",
+                format!("$.params.dataRateMbps must be one of {SUPPORTED_DATA_RATES:?}."),
+                "$.params.dataRateMbps",
+            )
+            .with_details(json!({
+                "allowed": SUPPORTED_DATA_RATES,
+                "actual": n.to_string()
+            }))
+            .requires_clarification(),
+        ]);
     }
     Ok(n)
 }
@@ -2290,17 +2302,19 @@ fn build_legacy_data_server(topology: &IntermediateTopology) -> Value {
             item.insert("queue_num".into(), json!(3));
             item.insert(
                 "mac_address".into(),
-                json!(node
-                    .mac_address
-                    .clone()
-                    .unwrap_or_else(|| derive_legacy_mac(node.numeric_id))),
+                json!(
+                    node.mac_address
+                        .clone()
+                        .unwrap_or_else(|| derive_legacy_mac(node.numeric_id))
+                ),
             );
             item.insert(
                 "ip".into(),
-                json!(node
-                    .ip_address
-                    .clone()
-                    .unwrap_or_else(|| derive_legacy_ip(node.numeric_id))),
+                json!(
+                    node.ip_address
+                        .clone()
+                        .unwrap_or_else(|| derive_legacy_ip(node.numeric_id))
+                ),
             );
             item.insert("port_count".into(), json!(node.ports.len()));
         }
@@ -3126,10 +3140,11 @@ mod tests {
         assert_eq!(backbone_a.role.as_deref(), Some("backbone"));
 
         let line = build_minimal_hop_linear();
-        assert!(line
-            .links
-            .iter()
-            .all(|l| l.plane.is_none() && l.role.is_none()));
+        assert!(
+            line.links
+                .iter()
+                .all(|l| l.plane.is_none() && l.role.is_none())
+        );
     }
 
     #[test]
@@ -3634,9 +3649,11 @@ mod tests {
             params,
         })
         .unwrap_err();
-        assert!(err
-            .iter()
-            .any(|e| e.code == "UNSUPPORTED_TEMPLATE_PARAM" && e.path.contains("crossPlaneLinks")));
+        assert!(
+            err.iter()
+                .any(|e| e.code == "UNSUPPORTED_TEMPLATE_PARAM"
+                    && e.path.contains("crossPlaneLinks"))
+        );
     }
 
     #[test]
@@ -3649,9 +3666,10 @@ mod tests {
             params: unknown,
         })
         .unwrap_err();
-        assert!(err
-            .iter()
-            .any(|e| e.path.contains("primary") && e.message.contains("unknown")));
+        assert!(
+            err.iter()
+                .any(|e| e.path.contains("primary") && e.message.contains("unknown"))
+        );
 
         let mut single_plane = dual_plane_single_hop_params();
         single_plane["switchGroups"][0]["planeSwitches"]["B"] = json!("sw1");
@@ -3754,9 +3772,10 @@ mod tests {
             params: unknown_mode,
         })
         .unwrap_err();
-        assert!(err
-            .iter()
-            .any(|e| e.code == "INVALID_TEMPLATE_PARAM" && e.path.contains("backbone.mode")));
+        assert!(
+            err.iter()
+                .any(|e| e.code == "INVALID_TEMPLATE_PARAM" && e.path.contains("backbone.mode"))
+        );
 
         // dataRateMbps 缺省 → 结构化错误。
         let mut no_rate = dual_plane_single_hop_params();
@@ -3979,10 +3998,11 @@ mod tests {
         // R5：全模板 P0 起编——节点端口与链路标签同源一致。
         let line = build_minimal_hop_linear();
         assert_eq!(line.nodes[0].ports[0].id, "P0");
-        assert!(line
-            .links
-            .iter()
-            .all(|l| l.source.port_id.starts_with('P') && l.target.port_id.starts_with('P')));
+        assert!(
+            line.links
+                .iter()
+                .all(|l| l.source.port_id.starts_with('P') && l.target.port_id.starts_with('P'))
+        );
         assert!(line.links.iter().any(|l| l.source.port_id == "P0"));
 
         let (dual, _) = initialize_topology(&InitializeIntent {
@@ -3991,10 +4011,11 @@ mod tests {
         })
         .unwrap();
         assert!(dual.nodes.iter().all(|n| n.ports[0].id == "P0"));
-        assert!(dual
-            .links
-            .iter()
-            .all(|l| l.source.port_id.starts_with('P') && l.target.port_id.starts_with('P')));
+        assert!(
+            dual.links
+                .iter()
+                .all(|l| l.source.port_id.starts_with('P') && l.target.port_id.starts_with('P'))
+        );
     }
 
     #[test]
@@ -4007,10 +4028,12 @@ mod tests {
         });
         let report = validate_intermediate_topology(&raw);
         assert!(!report.ok);
-        assert!(report
-            .errors
-            .iter()
-            .any(|e| e.code == "UNSUPPORTED_SCHEMA_VERSION"));
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|e| e.code == "UNSUPPORTED_SCHEMA_VERSION")
+        );
     }
 
     #[test]
@@ -4072,14 +4095,18 @@ mod tests {
         });
         let report = validate_topology_artifacts(&bad);
         assert!(!report.ok);
-        assert!(report
-            .errors
-            .iter()
-            .any(|e| e.path.contains("topo_feature")));
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|e| e.path.contains("topo_feature"))
+        );
         assert!(report.errors.iter().any(|e| e.path.contains("data-server")));
-        assert!(report
-            .errors
-            .iter()
-            .any(|e| e.path.contains("mac-forwarding-table")));
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|e| e.path.contains("mac-forwarding-table"))
+        );
     }
 }

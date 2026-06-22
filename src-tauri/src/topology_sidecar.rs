@@ -17,17 +17,17 @@ use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
+use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::Router;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use rand::rngs::OsRng;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -272,9 +272,11 @@ mod tests {
         let t = mint_token();
         let exposed = t.expose();
         assert_eq!(exposed.len(), 43);
-        assert!(exposed
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'));
+        assert!(
+            exposed
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        );
     }
 
     #[test]
@@ -989,19 +991,27 @@ mod tests {
             assert_eq!(after["nodeCount"], 7);
             assert_eq!(after["linkCount"], 6);
             let after_nodes = after["nodes"].as_array().unwrap();
-            assert!(after_nodes
-                .iter()
-                .any(|n| n["syncName"].as_str() == Some(new_sync.as_str())));
+            assert!(
+                after_nodes
+                    .iter()
+                    .any(|n| n["syncName"].as_str() == Some(new_sync.as_str()))
+            );
             let after_links = after["links"].as_array().unwrap();
-            assert!(after_links
-                .iter()
-                .any(|l| l["linkSeq"].as_i64() == Some(new_seq)));
-            assert!(after_links
-                .iter()
-                .any(|l| l["linkSeq"].as_i64() == Some(new_seq + 1)));
-            assert!(!after_links
-                .iter()
-                .any(|l| l["linkSeq"].as_i64() == Some(backbone_seq)));
+            assert!(
+                after_links
+                    .iter()
+                    .any(|l| l["linkSeq"].as_i64() == Some(new_seq))
+            );
+            assert!(
+                after_links
+                    .iter()
+                    .any(|l| l["linkSeq"].as_i64() == Some(new_seq + 1))
+            );
+            assert!(
+                !after_links
+                    .iter()
+                    .any(|l| l["linkSeq"].as_i64() == Some(backbone_seq))
+            );
 
             // 原有 6 节点的 syncName 逐一保持不变（轮 5 整表重建破坏的性质）。
             for sync_name in &original_identity {

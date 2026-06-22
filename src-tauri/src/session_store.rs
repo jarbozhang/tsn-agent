@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{
-    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
     Pool, Row, Sqlite,
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
 };
 use std::path::PathBuf;
 use tauri::Manager;
@@ -332,7 +332,7 @@ fn db_error(error: sqlx::Error) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{upsert_session, SessionPayload};
+    use super::{SessionPayload, upsert_session};
     use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::{Pool, Row, Sqlite};
 

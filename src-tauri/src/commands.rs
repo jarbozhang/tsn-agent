@@ -7,7 +7,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
-use tauri::{path::BaseDirectory, Emitter, Manager};
+use tauri::{Emitter, Manager, path::BaseDirectory};
 
 const MAX_PROMPT_CHARS: usize = 4_000;
 const MAX_CONTEXT_CHARS: usize = 12_000;
@@ -302,7 +302,7 @@ fn run_claude_agent_blocking(
                 return Err(format!(
                     "智能助手运行时状态检查失败：{}",
                     redact_error(&error.to_string())
-                ))
+                ));
             }
         }
     }
@@ -768,11 +768,7 @@ fn repo_root_from_worker(worker_path: &Path) -> PathBuf {
 }
 
 fn first_non_empty<'a>(left: &'a str, right: &'a str) -> &'a str {
-    if left.trim().is_empty() {
-        right
-    } else {
-        left
-    }
+    if left.trim().is_empty() { right } else { left }
 }
 
 // `redact_error` / `redact_token_like_word` 实现 plan v3 U2b 已统一到
@@ -928,16 +924,22 @@ mod tests {
         }
 
         // package.json 已出厂移除（R1a），磁盘上不得回潮。
-        assert!(!repo_root
-            .join(".claude/skills/tsn-topology/package.json")
-            .exists());
+        assert!(
+            !repo_root
+                .join(".claude/skills/tsn-topology/package.json")
+                .exists()
+        );
         // 场景 reference 必须真实存在，目录映射才有内容可打包。
-        assert!(repo_root
-            .join(".claude/skills/tsn-topology/references/generic-tsn.md")
-            .exists());
-        assert!(repo_root
-            .join(".claude/skills/tsn-topology/references/aerospace-onboard.md")
-            .exists());
+        assert!(
+            repo_root
+                .join(".claude/skills/tsn-topology/references/generic-tsn.md")
+                .exists()
+        );
+        assert!(
+            repo_root
+                .join(".claude/skills/tsn-topology/references/aerospace-onboard.md")
+                .exists()
+        );
         // 拓扑 MCP server 随 app 打包（98fe8ab）：资源映射须包含它，打到 src-node/ 下。
         assert_eq!(
             resources

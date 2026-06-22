@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tauri::{path::BaseDirectory, Manager};
+use tauri::{Manager, path::BaseDirectory};
 
 const MAX_TEXT_FILE_BYTES: u64 = 256 * 1024;
 const PROJECT_SKILL_ROOT: &str = ".claude/skills";
@@ -1365,10 +1365,12 @@ mod tests {
         assert!(!app_data.join("tsn-topology/package.json").exists());
         // manifest 落点不在 per-skill 目录内，且记录用户态。
         let manifest = read_manifest(&app_data);
-        assert!(manifest
-            .modified
-            .iter()
-            .any(|p| p == "tsn-topology/SKILL.md"));
+        assert!(
+            manifest
+                .modified
+                .iter()
+                .any(|p| p == "tsn-topology/SKILL.md")
+        );
         assert_eq!(
             manifest
                 .files
@@ -1517,10 +1519,12 @@ mod tests {
         assert_eq!(read(&app_data, "tsn-topology/SKILL.md"), "topo-v2");
         assert_eq!(read(&app_data, "tsn-flow-planning/SKILL.md"), old_topo);
         let manifest = read_manifest(&app_data);
-        assert!(manifest
-            .modified
-            .iter()
-            .any(|p| p == "tsn-flow-planning/SKILL.md"));
+        assert!(
+            manifest
+                .modified
+                .iter()
+                .any(|p| p == "tsn-flow-planning/SKILL.md")
+        );
 
         cleanup(resource);
         cleanup(app_data);
@@ -1544,10 +1548,12 @@ mod tests {
         assert!(!app_data.join(".DS_Store").exists());
         assert!(!app_data.join("tsn-topology/SKILL.tmp-123-456-0").exists());
         let manifest = read_manifest(&app_data);
-        assert!(!manifest
-            .files
-            .keys()
-            .any(|k| k.contains(".DS_Store") || k.contains(".tmp-")));
+        assert!(
+            !manifest
+                .files
+                .keys()
+                .any(|k| k.contains(".DS_Store") || k.contains(".tmp-"))
+        );
 
         cleanup(resource);
         cleanup(app_data);
@@ -1594,9 +1600,11 @@ mod tests {
 
         assert!(!app_data.join("tsn-topology/references/old.md").exists());
         let manifest = read_manifest(&app_data);
-        assert!(!manifest
-            .files
-            .contains_key("tsn-topology/references/old.md"));
+        assert!(
+            !manifest
+                .files
+                .contains_key("tsn-topology/references/old.md")
+        );
 
         cleanup(resource);
         cleanup(app_data);

@@ -16,7 +16,7 @@ use crate::inet_bundle::build_inet_bundle;
 use crate::inet_remote::{RemoteConfig, RemoteError, RemoteRunner, SshRunner};
 use crate::session_store::SessionStore;
 use crate::topology_verify::{
-    VerifyError, VerifyLink, VerifyNode, VerifyResult, CALIBER_LOADABILITY_ONLY,
+    CALIBER_LOADABILITY_ONLY, VerifyError, VerifyLink, VerifyNode, VerifyResult,
 };
 
 /// 纯编排：序列化 → 远端跑 → 判定。不读库、不碰 Tauri，便于注入 runner 单测。
@@ -36,7 +36,7 @@ pub fn run_inet_verification(
                 ok: false,
                 caliber: CALIBER_LOADABILITY_ONLY,
                 errors,
-            }
+            };
         }
     };
 

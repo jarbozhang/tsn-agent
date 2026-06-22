@@ -9,25 +9,25 @@
 //! 所有路由都先做 `require_session(sessionId)`，再进 compute 模块，保证 sidecar
 //! 仍是单写者 + per-session 隔离的事实源边界（即便算法本身是 pure compute）。
 
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::topology_backfill::legacy_node_type;
 use crate::topology_compute::{
-    build_topology_artifacts, describe_topology_artifacts,
+    InitializeIntent, build_topology_artifacts, describe_topology_artifacts,
     initialize_topology as compute_initialize, validate_intermediate_topology,
-    validate_topology_artifacts, InitializeIntent,
+    validate_topology_artifacts,
 };
 use crate::topology_intermediate::{IntermediateNodeType, IntermediateTopology};
 use crate::topology_mutation_buffer::{MutationRecord, TopologyMutationBuffer};
-use crate::topology_ops::{apply_op, TopologyOp};
+use crate::topology_ops::{TopologyOp, apply_op};
 use crate::topology_query_command::{TopologyLinkRow, TopologyNodeRow};
 
 /// 闭包形式的 mutation 发射器：生产用 Tauri AppHandle wrap，测试用 no-op。
@@ -370,7 +370,7 @@ pub async fn inspect(
                 "DATABASE_ERROR",
                 &e.to_string(),
                 true,
-            )
+            );
         }
     };
     let node_rows = sqlx::query(
@@ -390,7 +390,7 @@ pub async fn inspect(
                 "DATABASE_ERROR",
                 &e.to_string(),
                 true,
-            )
+            );
         }
     };
     let link_rows = sqlx::query(
@@ -410,7 +410,7 @@ pub async fn inspect(
                 "DATABASE_ERROR",
                 &e.to_string(),
                 true,
-            )
+            );
         }
     };
     // 只读事务，commit 仅释放快照。
@@ -617,7 +617,7 @@ pub async fn apply_operations(
                     rejection.body_text()
                 ),
                 false,
-            )
+            );
         }
     };
     let req: ApplyOpsRequest = match serde_json::from_value(raw) {
@@ -630,7 +630,7 @@ pub async fn apply_operations(
                     "{e} | 合法 op: node_add/node_update/node_delete/link_add/link_delete，字段见 apply_operations 工具 schema"
                 ),
                 false,
-            )
+            );
         }
     };
     if let Err(resp) = require_session(&state.pool, &req.session_id).await {
@@ -667,7 +667,7 @@ pub async fn apply_operations(
                 "BEGIN_FAILED",
                 &e.to_string(),
                 true,
-            )
+            );
         }
     };
 
@@ -758,7 +758,7 @@ async fn require_session(
                 "DATABASE_ERROR",
                 &e.to_string(),
                 true,
-            ))
+            ));
         }
     };
     if count == 0 {
@@ -774,8 +774,8 @@ async fn require_session(
 
 #[cfg(test)]
 mod tests {
-    use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::Row;
+    use sqlx::sqlite::SqlitePoolOptions;
 
     /// 逻辑节点名（agent 传入的 SW-1/ES-1）必须随 initialize 落库——丢弃会导致
     /// 聊天命名与画布派生名（前缀+全局序号）错位（ce-debug 2026-06-10）。

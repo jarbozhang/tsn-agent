@@ -3,7 +3,7 @@ name = "tsn-agent"
 version = "0.7.1"
 description = "TSN Agent desktop application"
 authors = ["TSN Agent contributors"]
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "tsn_agent"

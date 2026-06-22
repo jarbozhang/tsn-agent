@@ -203,15 +203,17 @@ mod tests {
         let b = build_inet_bundle(&nodes, &links, "s1", 7).unwrap();
         assert!(b.network_ned.contains("package tsnagent.generated;"));
         assert!(b.network_ned.contains("import inet.node.tsn.TsnSwitch;"));
-        assert!(b
-            .network_ned
-            .contains("network TsnAgentNetwork extends TsnNetworkBase"));
+        assert!(
+            b.network_ned
+                .contains("network TsnAgentNetwork extends TsnNetworkBase")
+        );
         assert!(b.network_ned.contains("sw1: TsnSwitch;"));
         assert!(b.network_ned.contains("es1: TsnDevice;"));
         assert!(b.network_ned.contains("es2: TsnDevice;"));
-        assert!(b
-            .network_ned
-            .contains("EthernetLink { datarate = 1000Mbps; }"));
+        assert!(
+            b.network_ned
+                .contains("EthernetLink { datarate = 1000Mbps; }")
+        );
     }
 
     /// 类型映射：switch→TsnSwitch、endSystem/server→TsnDevice。
@@ -242,17 +244,19 @@ mod tests {
         assert!(b.network_ned.contains("sw1: TsnSwitch;"));
         assert!(b.network_ned.contains("sw2: TsnSwitch;"));
         assert!(b.network_ned.contains("es1: TsnDevice;"));
-        assert!(b
-            .network_ned
-            .contains("*.eth[*].bitrate = default(1000Mbps);"));
+        assert!(
+            b.network_ned
+                .contains("*.eth[*].bitrate = default(1000Mbps);")
+        );
         assert!(b.network_ned.contains("connections allowunconnected:"));
         // omnetpp.ini 不含 bitrate（真机：bitrate 在 NED parameters）。
         assert!(!b.omnetpp_ini.contains("bitrate"));
         assert!(b.omnetpp_ini.contains("cmdenv-interactive = false"));
         assert!(b.omnetpp_ini.contains("cmdenv-express-mode = true"));
-        assert!(b
-            .omnetpp_ini
-            .contains("network = tsnagent.generated.TsnAgentNetwork"));
+        assert!(
+            b.omnetpp_ini
+                .contains("network = tsnagent.generated.TsnAgentNetwork")
+        );
     }
 
     /// 双平面：端系统同时连两个交换机 → 正常产 NED、命名唯一、不判 unmappable。
