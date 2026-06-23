@@ -1903,7 +1903,6 @@ textarea:focus-visible {
 /* 节点类型视觉系统：交换机钢蓝、端系统橙、控制器紫——
    与边的平面配色（A 蓝 --plane-a / B 红 --plane-b）保持区分。 */
 .tsn-node.switch {
-  min-width: 118px;
   border-color: rgba(51, 65, 85, 0.55);
   background: #f3f6fa;
 }

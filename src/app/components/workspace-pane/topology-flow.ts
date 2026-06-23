@@ -56,9 +56,12 @@ export function planeClassName(plane: LinkStyleMeta["plane"]): string {
 export interface TsnEdgeData {
   leftLabel?: string;
   rightLabel?: string;
-  /** 同节点同方位的边序数：端口标签沿出射方向分层外推，防相邻交点标签重叠。 */
+  /** 同节点同方位的端口标签序数；渲染层沿连线向内分层，避免标签重叠。 */
   leftOrd?: number;
   rightOrd?: number;
+  /** 同一对节点之间多条边的等分序号；渲染层据此把端点均匀分布在节点边上。 */
+  parallelIndex?: number;
+  parallelCount?: number;
   /** React Flow Edge.data 的结构性要求；不影响已命名字段的类型推断。 */
   [key: string]: unknown;
 }
@@ -75,6 +78,10 @@ function roughSide(from: { x: number; y: number }, to: { x: number; y: number })
     return nx >= 0 ? "right" : "left";
   }
   return ny >= 0 ? "bottom" : "top";
+}
+
+function pairKey(a: string, b: string): string {
+  return a <= b ? `${a}::${b}` : `${b}::${a}`;
 }
 
 export type TsnNodeKind = "switch" | "endSystem" | "controller";
@@ -94,7 +101,7 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): {
   nodes: Node[];
   edges: Edge[];
 } {
-  // 标签防撞序数：按 DB 初始坐标统计每个节点每个方位的边数（linkSeq 序确定性）。
+  // 端口标签序数：按 DB 初始坐标统计每个节点每个方位的边数（linkSeq 序确定性）。
   const centers = new Map(
     snapshot.nodes.map((node) => [
       node.syncName,
@@ -102,6 +109,8 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): {
     ]),
   );
   const sideCounter = new Map<string, number>();
+  const pairCounts = new Map<string, number>();
+  const pairCounter = new Map<string, number>();
   const takeOrd = (syncName: string, otherSyncName: string): number => {
     const from = centers.get(syncName);
     const to = centers.get(otherSyncName);
@@ -113,6 +122,18 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): {
     sideCounter.set(key, ord + 1);
     return ord;
   };
+  const takeParallelSlot = (source: string, target: string): { index: number; count: number } => {
+    const key = pairKey(source, target);
+    const count = pairCounts.get(key) ?? 1;
+    const index = pairCounter.get(key) ?? 0;
+    pairCounter.set(key, index + 1);
+    return { index, count };
+  };
+
+  for (const link of snapshot.links) {
+    const key = pairKey(link.srcSyncName, link.dstSyncName);
+    pairCounts.set(key, (pairCounts.get(key) ?? 0) + 1);
+  }
 
   return {
     nodes: snapshot.nodes.map((node) => ({
@@ -127,12 +148,15 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): {
     })),
     edges: snapshot.links.map((link) => {
       const meta = parseLinkStyles(link.stylesJson);
+      const parallelSlot = takeParallelSlot(link.srcSyncName, link.dstSyncName);
       const data: TsnEdgeData = {
         leftLabel: meta.leftLabel,
         rightLabel: meta.rightLabel,
         // 仅有标签的端点占用层级槽位，无标签端不推远后续标签。
         leftOrd: meta.leftLabel ? takeOrd(link.srcSyncName, link.dstSyncName) : 0,
         rightOrd: meta.rightLabel ? takeOrd(link.dstSyncName, link.srcSyncName) : 0,
+        parallelIndex: parallelSlot.index,
+        parallelCount: parallelSlot.count,
       };
       return {
         id: linkRowId(link),
