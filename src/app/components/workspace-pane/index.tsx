@@ -202,6 +202,9 @@ export function WorkspacePane({
   const [undoNotice, setUndoNotice] = useState<string | undefined>(undefined);
   const undoNoticeTimerRef = useRef<number | undefined>(undefined);
   const [undoBusy, setUndoBusy] = useState(false);
+  // U8：撤销无 redo、且会回滚拖拽布局——按钮加内联两步确认（点一下进确认态、再点才执行）。
+  const [undoConfirming, setUndoConfirming] = useState(false);
+  const undoConfirmTimerRef = useRef<number | undefined>(undefined);
   const flowInstanceRef = useRef<ReactFlowInstance<Node, Edge> | undefined>(undefined);
   const [flowInstanceVersion, setFlowInstanceVersion] = useState(0);
   const lastViewportResetKeyRef = useRef<string | undefined>(undefined);
@@ -308,6 +311,9 @@ export function WorkspacePane({
       if (undoNoticeTimerRef.current !== undefined) {
         window.clearTimeout(undoNoticeTimerRef.current);
       }
+      if (undoConfirmTimerRef.current !== undefined) {
+        window.clearTimeout(undoConfirmTimerRef.current);
+      }
     },
     [],
   );
@@ -328,7 +334,15 @@ export function WorkspacePane({
     undoNoticeTimerRef.current = window.setTimeout(() => setUndoNotice(undefined), 3000);
   }, []);
 
-  const handleUndo = useCallback(async () => {
+  const cancelUndoConfirm = useCallback(() => {
+    setUndoConfirming(false);
+    if (undoConfirmTimerRef.current !== undefined) {
+      window.clearTimeout(undoConfirmTimerRef.current);
+      undoConfirmTimerRef.current = undefined;
+    }
+  }, []);
+
+  const runUndo = useCallback(async () => {
     const sessionId = topologySnapshot?.sessionId;
     if (!sessionId || undoBusy) {
       return;
@@ -357,6 +371,23 @@ export function WorkspacePane({
     onUndone,
     showUndoNotice,
   ]);
+
+  // 内联两步：第一次点击进入「确认撤销?」态（几秒后或失焦自动取消），第二次点击才真正执行。
+  const handleUndo = useCallback(() => {
+    if (undoBusy) {
+      return;
+    }
+    if (!undoConfirming) {
+      setUndoConfirming(true);
+      if (undoConfirmTimerRef.current !== undefined) {
+        window.clearTimeout(undoConfirmTimerRef.current);
+      }
+      undoConfirmTimerRef.current = window.setTimeout(() => setUndoConfirming(false), 3000);
+      return;
+    }
+    cancelUndoConfirm();
+    void runUndo();
+  }, [undoBusy, undoConfirming, cancelUndoConfirm, runUndo]);
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     setFlowNodes((nodes) => applyNodeChanges(changes, nodes));
@@ -500,12 +531,13 @@ export function WorkspacePane({
           <Stat label="链路" value={linkCount} />
           <button
             type="button"
-            className="topology-undo-button"
+            className={undoConfirming ? "topology-undo-button confirming" : "topology-undo-button"}
             aria-label="撤销上一次结构改动"
             disabled={!hasTopology || undoBusy}
-            onClick={() => void handleUndo()}
+            onClick={handleUndo}
+            onBlur={cancelUndoConfirm}
           >
-            撤销
+            {undoConfirming ? "确认撤销?" : "撤销"}
           </button>
         </div>
         {saveFailed && (

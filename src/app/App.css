@@ -1792,6 +1792,13 @@ textarea:focus-visible {
   opacity: 0.35;
 }
 
+/* 内联两步确认态：醒目提示「再点一次才执行」。 */
+.topology-undo-button.confirming {
+  color: #b42318;
+  border-color: #b42318;
+  background: rgba(180, 35, 24, 0.08);
+}
+
 .topology-canvas {
   position: absolute;
   inset: 0;

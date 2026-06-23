@@ -531,7 +531,9 @@ describe("App", () => {
       expect(screen.getByText("3 nodes / 2 edges")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "撤销上一次结构改动" }));
+    const undoButton = screen.getByRole("button", { name: "撤销上一次结构改动" });
+    await user.click(undoButton); // 第一步：确认态
+    await user.click(undoButton); // 第二步：执行
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith(
         "undo_topology",
