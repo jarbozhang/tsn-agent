@@ -626,7 +626,38 @@ describe("claude-agent-worker", () => {
       const result = await undoLastChangeTool.handler({}, {});
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const payload = JSON.parse(result.content[0].text);
-      expect(payload).toEqual({ ok: true, status: 200, body: sidecarBody });
+      // 解包后大模型看到的是干净的 body（{ok,undone,summary}），不是 fetchSidecar 信封。
+      expect(payload).toEqual(sidecarBody);
+    } finally {
+      globalThis.fetch = previousFetch;
+      restoreEnv("TSN_AGENT_DB_RPC_URL", previousEnv.url);
+      restoreEnv("TSN_AGENT_DB_RPC_TOKEN", previousEnv.token);
+      restoreEnv("TSN_AGENT_SESSION_ID", previousEnv.sessionId);
+    }
+  });
+
+  it("U6: undo tool maps a sidecar failure to a structured errors[] result (not the raw envelope)", async () => {
+    const previousEnv = {
+      url: process.env.TSN_AGENT_DB_RPC_URL,
+      token: process.env.TSN_AGENT_DB_RPC_TOKEN,
+      sessionId: process.env.TSN_AGENT_SESSION_ID,
+    };
+    process.env.TSN_AGENT_DB_RPC_URL = "http://127.0.0.1:65535";
+    process.env.TSN_AGENT_DB_RPC_TOKEN = "test-token";
+    process.env.TSN_AGENT_SESSION_ID = "session-undo";
+
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ code: "DATABASE_ERROR", message: "boom" }), { status: 500 }),
+    );
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+
+    try {
+      const result = await undoLastChangeTool.handler({}, {});
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.ok).toBe(false);
+      expect(payload.errors).toEqual([{ code: "DATABASE_ERROR", message: "boom" }]);
     } finally {
       globalThis.fetch = previousFetch;
       restoreEnv("TSN_AGENT_DB_RPC_URL", previousEnv.url);

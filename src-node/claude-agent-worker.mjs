@@ -60,11 +60,16 @@ export const undoLastChangeTool = tool(
   {},
   async () => {
     const result = await fetchSidecar("/db/topology/undo", {});
+    // 解包 fetchSidecar 信封，对齐其它 sidecar 工具的契约：成功直接给 body（{ok,undone,summary}），
+    // 失败给 {ok:false,errors:[...]}，而不是把 {ok,status,body} 整个信封丢给大模型（弱模型易误读）。
+    const payload = result.ok
+      ? result.body
+      : { ok: false, errors: [{ code: result.code, message: result.message }] };
     return {
       content: [
         {
           type: "text",
-          text: JSON.stringify(result),
+          text: JSON.stringify(payload),
         },
       ],
     };

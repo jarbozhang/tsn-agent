@@ -166,8 +166,10 @@ export async function runTsnAgent(
     });
 
     // 无「带原话」标记 → 纯确定性确认（推进 / time-sync 自动生成 / 无操作），直接返回（静默推进）。
+    // 清掉一次性回退通知：确认推进了阶段，若按钮撤销的标志还挂着，会在后续别的阶段晚一轮
+    // 发出「拓扑已撤销，先 inspect」的陈旧通知。这条路径不跑大模型、不注入，标志在此消费即弃。
     if (!confirmResult.carryIntent) {
-      return confirmResult;
+      return { ...confirmResult, workflow: clearPendingUndoNotice(confirmResult.workflow) };
     }
 
     // 回退带着原话：切阶段已完成（确定性），下面用原话在切换后的阶段继续走大模型。
