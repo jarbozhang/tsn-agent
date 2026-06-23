@@ -247,6 +247,7 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
     use axum::http::Request;
+    use sqlx::Row;
     use sqlx::sqlite::SqlitePoolOptions;
     use tower::ServiceExt;
 
@@ -699,6 +700,245 @@ mod tests {
                     .unwrap();
             assert_eq!(count, 0);
             assert_eq!(buf.since("s1", 0).mutations.len(), 0);
+        });
+    }
+
+    /// 读该 session 的 undo pre-image blob（无则 None）。U3 写前快照断言用。
+    async fn read_pre_image(pool: &sqlx::Pool<sqlx::Sqlite>, session_id: &str) -> Option<String> {
+        sqlx::query_scalar(
+            "SELECT blob_json FROM topology_undo_snapshots WHERE session_id = ? AND domain = 'topology'",
+        )
+        .bind(session_id)
+        .fetch_optional(pool)
+        .await
+        .unwrap()
+    }
+
+    /// 三表全图快照（节点/链路/refs），用于断言 pre-image == 写前态。
+    async fn dump_three_tables(
+        pool: &sqlx::Pool<sqlx::Sqlite>,
+        session_id: &str,
+    ) -> (Vec<(String, f64, f64)>, Vec<(i64, String, String)>, Vec<String>) {
+        let nodes = sqlx::query(
+            "SELECT sync_name, x, y FROM topology_nodes WHERE session_id = ? ORDER BY insert_order, sync_name",
+        )
+        .bind(session_id)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| (r.get::<String, _>("sync_name"), r.get::<f64, _>("x"), r.get::<f64, _>("y")))
+        .collect();
+        let links = sqlx::query(
+            "SELECT link_seq, src_sync_name, dst_sync_name FROM topology_links WHERE session_id = ? ORDER BY link_seq",
+        )
+        .bind(session_id)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| {
+            (
+                r.get::<i64, _>("link_seq"),
+                r.get::<String, _>("src_sync_name"),
+                r.get::<String, _>("dst_sync_name"),
+            )
+        })
+        .collect();
+        let refs = sqlx::query("SELECT ref_json FROM topology_refs WHERE session_id = ?")
+            .bind(session_id)
+            .fetch_all(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get::<String, _>("ref_json"))
+            .collect();
+        (nodes, links, refs)
+    }
+
+    /// U3: 非 dry-run apply_operations 后，留下一份 pre-image，
+    /// 内容等于 apply 前的三表态。
+    #[test]
+    fn apply_operations_leaves_pre_image_equal_to_pre_apply_state() {
+        tauri::async_runtime::block_on(async {
+            let (pool, buf) = test_state().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+                .execute(&pool).await.unwrap();
+            // 写前态：一节点。
+            sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, x, y, node_type, insert_order) VALUES ('s1','0',1.0,2.0,'switch',0)")
+                .execute(&pool).await.unwrap();
+            let before = dump_three_tables(&pool, "s1").await;
+
+            let (router, token) = build_test_router_with_pool(pool.clone(), buf).await;
+            let (status, parsed) = apply_ops(
+                router,
+                &token,
+                "s1",
+                serde_json::json!([
+                    { "op": "node_add", "syncName": "1", "x": 9.0, "y": 9.0, "insertOrder": 1 }
+                ]),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(parsed["ok"], true);
+
+            // pre-image 存在，且其序列化的三表态 == apply 前态。
+            let blob = read_pre_image(&pool, "s1").await.expect("非 dry-run 后留 pre-image");
+            let pre: serde_json::Value = serde_json::from_str(&blob).unwrap();
+            let pre_nodes: Vec<(String, f64, f64)> = pre["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| (n["sync_name"].as_str().unwrap().to_string(), n["x"].as_f64().unwrap(), n["y"].as_f64().unwrap()))
+                .collect();
+            assert_eq!(pre_nodes, before.0, "pre-image 节点 == 写前节点（含 x/y）");
+            assert!(pre["links"].as_array().unwrap().is_empty());
+            assert!(pre["refs"].as_array().unwrap().is_empty());
+        });
+    }
+
+    /// U3 关键（R4）：dry-run apply_operations（rollback）后不留 pre-image。
+    #[test]
+    fn apply_operations_dry_run_leaves_no_pre_image() {
+        tauri::async_runtime::block_on(async {
+            let (pool, buf) = test_state().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+                .execute(&pool).await.unwrap();
+            let (router, token) = build_test_router_with_pool(pool.clone(), buf).await;
+
+            let body = serde_json::json!({
+                "sessionId": "s1",
+                "operations": [
+                    { "op": "node_add", "syncName": "0", "x": 0.0, "y": 0.0, "insertOrder": 0 }
+                ],
+                "dryRun": true
+            })
+            .to_string();
+            let resp = router
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/db/topology/apply_operations")
+                        .header("Authorization", format!("Bearer {}", token.expose()))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+
+            // dry-run 的快照随事务 rollback 一并丢弃。
+            assert!(
+                read_pre_image(&pool, "s1").await.is_none(),
+                "dry-run rollback 后不得留 pre-image（R4）"
+            );
+        });
+    }
+
+    /// U3: 一次结构变更只产生一份 pre-image（覆盖，不累积）。
+    #[test]
+    fn apply_operations_pre_image_is_overwrite_not_accumulate() {
+        tauri::async_runtime::block_on(async {
+            let (pool, buf) = test_state().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+                .execute(&pool).await.unwrap();
+            let (router, token) = build_test_router_with_pool(pool.clone(), buf).await;
+
+            apply_ops(
+                router.clone(),
+                &token,
+                "s1",
+                serde_json::json!([{ "op": "node_add", "syncName": "0", "x": 0.0, "y": 0.0, "insertOrder": 0 }]),
+            )
+            .await;
+            apply_ops(
+                router,
+                &token,
+                "s1",
+                serde_json::json!([{ "op": "node_add", "syncName": "1", "x": 0.0, "y": 0.0, "insertOrder": 1 }]),
+            )
+            .await;
+
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM topology_undo_snapshots WHERE session_id = 's1'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(count, 1, "(session_id, domain) 主键只留一份 pre-image");
+
+            // 第二份覆盖第一份：pre-image 含第一次 apply 落下的节点 0。
+            let blob = read_pre_image(&pool, "s1").await.unwrap();
+            let pre: serde_json::Value = serde_json::from_str(&blob).unwrap();
+            let syncs: Vec<String> = pre["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n["sync_name"].as_str().unwrap().to_string())
+                .collect();
+            assert_eq!(syncs, vec!["0".to_string()], "pre-image == 第二次 apply 前态");
+        });
+    }
+
+    /// U3: initialize 后 pre-image == initialize 前整图态。
+    #[test]
+    fn initialize_leaves_pre_image_equal_to_pre_initialize_state() {
+        tauri::async_runtime::block_on(async {
+            let (pool, buf) = test_state().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+                .execute(&pool).await.unwrap();
+            let (router, token) = build_test_router_with_pool(pool.clone(), buf).await;
+
+            // 先 initialize 一次建出整图（switchCount=4）。
+            initialize_hop_linear(router.clone(), &token, "s1", 4).await;
+            let before = dump_three_tables(&pool, "s1").await;
+            assert!(!before.0.is_empty(), "首次 initialize 应已建出节点");
+
+            // 第二次 initialize：pre-image 应等于第一次的整图态。
+            initialize_hop_linear(router, &token, "s1", 2).await;
+
+            let blob = read_pre_image(&pool, "s1").await.expect("initialize 后留 pre-image");
+            let pre: serde_json::Value = serde_json::from_str(&blob).unwrap();
+            let pre_nodes: Vec<(String, f64, f64)> = pre["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| (n["sync_name"].as_str().unwrap().to_string(), n["x"].as_f64().unwrap(), n["y"].as_f64().unwrap()))
+                .collect();
+            let pre_links: Vec<(i64, String, String)> = pre["links"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|l| {
+                    (
+                        l["link_seq"].as_i64().unwrap(),
+                        l["src_sync_name"].as_str().unwrap().to_string(),
+                        l["dst_sync_name"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect();
+            assert_eq!(pre_nodes, before.0, "pre-image 节点 == initialize 前整图节点");
+            assert_eq!(pre_links, before.1, "pre-image 链路 == initialize 前整图链路");
+        });
+    }
+
+    /// U3: 首次 initialize（之前空）后 pre-image 为空三表。
+    #[test]
+    fn first_initialize_leaves_empty_tables_pre_image() {
+        tauri::async_runtime::block_on(async {
+            let (pool, buf) = test_state().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+                .execute(&pool).await.unwrap();
+            let (router, token) = build_test_router_with_pool(pool.clone(), buf).await;
+
+            initialize_hop_linear(router, &token, "s1", 2).await;
+
+            let blob = read_pre_image(&pool, "s1").await.expect("首次 initialize 也留 pre-image");
+            let pre: serde_json::Value = serde_json::from_str(&blob).unwrap();
+            assert!(pre["nodes"].as_array().unwrap().is_empty(), "首次 initialize pre-image 节点为空");
+            assert!(pre["links"].as_array().unwrap().is_empty(), "首次 initialize pre-image 链路为空");
+            assert!(pre["refs"].as_array().unwrap().is_empty(), "首次 initialize pre-image refs 为空");
         });
     }
 

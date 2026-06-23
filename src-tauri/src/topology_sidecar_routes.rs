@@ -254,6 +254,11 @@ async fn persist_initialized_topology(
         .map_err(|e| format!("begin failed: {e}"))?;
     let conn: &mut sqlx::SqliteConnection = &mut tx;
 
+    // 写前快照：在同事务、三表 DELETE 之前留 pre-image（整图重置可撤）。
+    crate::topology_undo::snapshot_pre_image(&mut *conn, session_id)
+        .await
+        .map_err(|e| format!("undo snapshot failed: {e}"))?;
+
     for table in ["topology_nodes", "topology_links", "topology_refs"] {
         sqlx::query(&format!("DELETE FROM {table} WHERE session_id = ?"))
             .bind(session_id)
@@ -670,6 +675,18 @@ pub async fn apply_operations(
             );
         }
     };
+
+    // 写前快照：在同事务、首个 apply_op 之前留 pre-image。dry-run 分支
+    // rollback 时此快照随事务一并丢弃，无需额外清理（R4）。
+    if let Err(e) = crate::topology_undo::snapshot_pre_image(&mut tx, &req.session_id).await {
+        let _ = tx.rollback().await;
+        return structured_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &e.to_string(),
+            true,
+        );
+    }
 
     let mut applied = Vec::with_capacity(req.operations.len());
     for op in &req.operations {
