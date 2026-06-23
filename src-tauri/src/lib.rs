@@ -113,10 +113,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to build TSN Agent")
         .run(|app_handle, event| {
-            if matches!(event, tauri::RunEvent::Exit) {
-                if let Some(handle) = app_handle.try_state::<topology_sidecar::SidecarHandle>() {
-                    handle.shutdown();
-                }
+            if matches!(event, tauri::RunEvent::Exit)
+                && let Some(handle) = app_handle.try_state::<topology_sidecar::SidecarHandle>()
+            {
+                handle.shutdown();
             }
         });
 }

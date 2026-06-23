@@ -76,10 +76,10 @@ pub async fn get_current_session(
             .await
             .map_err(db_error)?;
 
-    if let Some(session_id) = current_id {
-        if let Some(session) = select_session(pool, &session_id).await? {
-            return Ok(Some(session));
-        }
+    if let Some(session_id) = current_id
+        && let Some(session) = select_session(pool, &session_id).await?
+    {
+        return Ok(Some(session));
     }
 
     let latest = sqlx::query(

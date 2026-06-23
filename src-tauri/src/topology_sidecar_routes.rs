@@ -507,21 +507,21 @@ pub async fn validate(
         let current_mutation_id = state
             .mutation_buffer
             .latest_mutation_id_for_session(&req.session_id);
-        if let Ok(cache) = state.last_validated_ok.lock() {
-            if validate_cache_hit(&cache, &req.session_id, current_mutation_id) {
-                let summary = json!({
-                    "valid": true,
-                    "errors": [],
-                    "caliber": crate::topology_verify::CALIBER_STRUCTURAL_ONLY,
-                    "source": "p0_structural",
-                    "cached": true,
-                });
-                return (
-                    StatusCode::OK,
-                    Json(json!({ "ok": true, "summary": summary })),
-                )
-                    .into_response();
-            }
+        if let Ok(cache) = state.last_validated_ok.lock()
+            && validate_cache_hit(&cache, &req.session_id, current_mutation_id)
+        {
+            let summary = json!({
+                "valid": true,
+                "errors": [],
+                "caliber": crate::topology_verify::CALIBER_STRUCTURAL_ONLY,
+                "source": "p0_structural",
+                "cached": true,
+            });
+            return (
+                StatusCode::OK,
+                Json(json!({ "ok": true, "summary": summary })),
+            )
+                .into_response();
         }
         let summary = match crate::topology_query_command::load_and_verify_topology(
             &state.pool,
