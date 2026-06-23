@@ -180,6 +180,10 @@ pub fn build_router(token: SecretToken, route_state: Arc<RouteState>) -> Router 
             "/db/topology/apply_operations",
             post(topology_sidecar_routes::apply_operations),
         )
+        .route(
+            "/db/topology/undo",
+            post(topology_sidecar_routes::undo),
+        )
         .with_state(route_state)
         .route_layer(middleware::from_fn_with_state(
             token_state,
@@ -1099,6 +1103,135 @@ mod tests {
         let status = resp.status();
         let bytes = to_bytes(resp.into_body(), 65_536).await.unwrap();
         (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    /// undo 路由的 oneshot helper：POST {sessionId} 并解析响应体。
+    async fn undo_session(
+        router: axum::Router,
+        token: &SecretToken,
+        session_id: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        let body = serde_json::json!({ "sessionId": session_id }).to_string();
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/db/topology/undo")
+                    .header("Authorization", format!("Bearer {}", token.expose()))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = resp.status();
+        let bytes = to_bytes(resp.into_body(), 65_536).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    /// U4: 有 pre-image 时 undo 盖回三表 + push 一条 mutation；响应 undone=true，
+    /// 且盖回后 inspect 返回的拓扑 == 撤销前快照态。
+    #[test]
+    fn undo_restores_topology_and_pushes_mutation_when_pre_image_present() {
+        tauri::async_runtime::block_on(async {
+            let (pool, buf) = test_state().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+                .execute(&pool).await.unwrap();
+            let (router, token) = build_test_router_with_pool(pool.clone(), buf.clone()).await;
+
+            // 写前态：apply 一笔结构变更，留 pre-image（节点 0）。
+            apply_ops(
+                router.clone(),
+                &token,
+                "s1",
+                serde_json::json!([
+                    { "op": "node_add", "syncName": "0", "x": 1.0, "y": 2.0, "insertOrder": 0 }
+                ]),
+            )
+            .await;
+            let before = dump_three_tables(&pool, "s1").await;
+            assert_eq!(before.0.len(), 1, "撤销前应有一个节点");
+
+            // 第二笔结构变更：再加一个节点（覆盖式 pre-image = 第一笔后的态）。
+            apply_ops(
+                router.clone(),
+                &token,
+                "s1",
+                serde_json::json!([
+                    { "op": "node_add", "syncName": "1", "x": 3.0, "y": 4.0, "insertOrder": 1 }
+                ]),
+            )
+            .await;
+            let snapshot_state = dump_three_tables(&pool, "s1").await;
+            assert_eq!(snapshot_state.0.len(), 2, "第二笔后应有两个节点");
+            // 第二笔 apply = mutationId 2；undo 应推到 3。
+            assert_eq!(buf.since("s1", 0).latest, 2);
+
+            let (status, parsed) = undo_session(router.clone(), &token, "s1").await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(parsed["ok"], true);
+            assert_eq!(parsed["undone"], true);
+            assert_eq!(parsed["summary"]["mutationId"], 3);
+
+            // undo push 了一条 mutation。
+            assert_eq!(buf.since("s1", 0).latest, 3);
+
+            // 盖回后三表 == 第二笔 apply 前态（即 before：节点 0）。
+            let after = dump_three_tables(&pool, "s1").await;
+            assert_eq!(after, before, "undo 盖回到第二笔结构变更前的态");
+
+            // inspect 也反映回退态（一个节点）。
+            let (_, inspected) = inspect_session(router, &token, "s1").await;
+            assert_eq!(inspected["summary"]["nodeCount"], 1);
+        });
+    }
+
+    /// U4: 无 pre-image 时 undo 返回 undone=false，且不 push mutation。
+    #[test]
+    fn undo_returns_undone_false_and_does_not_push_when_no_pre_image() {
+        tauri::async_runtime::block_on(async {
+            let (pool, buf) = test_state().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+                .execute(&pool).await.unwrap();
+            let (router, token) = build_test_router_with_pool(pool, buf.clone()).await;
+
+            let (status, parsed) = undo_session(router, &token, "s1").await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(parsed["ok"], true);
+            assert_eq!(parsed["undone"], false);
+            // 不 push mutation。
+            assert_eq!(buf.since("s1", 0).latest, 0);
+        });
+    }
+
+    /// U4 (R11): 撤销后 pre-image 已清除，再次 undo 返回 undone=false、不 push。
+    #[test]
+    fn second_undo_returns_undone_false() {
+        tauri::async_runtime::block_on(async {
+            let (pool, buf) = test_state().await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+                .execute(&pool).await.unwrap();
+            let (router, token) = build_test_router_with_pool(pool, buf.clone()).await;
+
+            apply_ops(
+                router.clone(),
+                &token,
+                "s1",
+                serde_json::json!([
+                    { "op": "node_add", "syncName": "0", "x": 0.0, "y": 0.0, "insertOrder": 0 }
+                ]),
+            )
+            .await;
+
+            let (_, first) = undo_session(router.clone(), &token, "s1").await;
+            assert_eq!(first["undone"], true);
+            let after_first = buf.since("s1", 0).latest;
+
+            let (_, second) = undo_session(router, &token, "s1").await;
+            assert_eq!(second["undone"], false, "撤销后无可再撤（R11）");
+            // 第二次不 push。
+            assert_eq!(buf.since("s1", 0).latest, after_first);
+        });
     }
 
     /// initialize 路由的 oneshot helper（hop-linear，switchCount 跳）。

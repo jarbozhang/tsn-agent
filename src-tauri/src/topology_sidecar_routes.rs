@@ -757,6 +757,59 @@ pub async fn apply_operations(
         .into_response()
 }
 
+// ---------- undo ----------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UndoRequest {
+    session_id: String,
+}
+
+/// 单步撤销：调撤销核心 `restore_pre_image`，有快照则盖回三表 + push + emit；
+/// 无快照回结构化「无可撤销」（ok=true, undone=false）。两入口共用核心，
+/// push/emit 留在调用点（KTD2/KTD4）；前端经 emit 信号全量 refetch（KTD5）。
+pub async fn undo(State(state): State<Arc<RouteState>>, Json(req): Json<UndoRequest>) -> Response {
+    if let Err(resp) = require_session(&state.pool, &req.session_id).await {
+        return resp;
+    }
+
+    match crate::topology_undo::restore_pre_image(&state.pool, &req.session_id).await {
+        Ok(true) => {
+            let record = state
+                .mutation_buffer
+                .push(req.session_id.clone(), "topology".to_string());
+            (state.emit)(record.clone());
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "ok": true,
+                    "undone": true,
+                    "summary": {
+                        "sessionId": req.session_id,
+                        "mutationId": record.mutation_id,
+                    },
+                })),
+            )
+                .into_response()
+        }
+        Ok(false) => (
+            StatusCode::OK,
+            Json(json!({
+                "ok": true,
+                "undone": false,
+                "summary": { "sessionId": req.session_id },
+            })),
+        )
+            .into_response(),
+        Err(e) => structured_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &e.to_string(),
+            true,
+        ),
+    }
+}
+
 // ---------- helpers ----------
 
 async fn require_session(
