@@ -32,9 +32,13 @@ async fn apply_undo(
     buffer: &TopologyMutationBuffer,
     request: &UndoTopologyRequest,
 ) -> Result<Option<crate::topology_mutation_buffer::MutationRecord>, String> {
-    let restored = crate::topology_undo::restore_pre_image(pool, &request.session_id)
-        .await
-        .map_err(|e| format!("undo topology failed: {e}"))?;
+    let restored = crate::topology_undo::restore_pre_image(
+        pool,
+        &request.session_id,
+        crate::topology_undo::TOPOLOGY_DOMAIN,
+    )
+    .await
+    .map_err(|e| format!("undo topology failed: {e}"))?;
 
     if !restored {
         return Ok(None);
@@ -100,9 +104,13 @@ mod tests {
         .await
         .unwrap();
         let mut tx = pool.begin().await.unwrap();
-        crate::topology_undo::snapshot_pre_image(&mut tx, "s1")
-            .await
-            .unwrap();
+        crate::topology_undo::snapshot_pre_image(
+            &mut tx,
+            "s1",
+            crate::topology_undo::TOPOLOGY_DOMAIN,
+        )
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
     }
 

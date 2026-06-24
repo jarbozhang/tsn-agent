@@ -257,6 +257,22 @@ async fn recompute_and_persist(
             );
         }
     };
+    // 写前快照：在同事务、全量覆盖两表之前留 pre-image（单步撤销 domain="timesync"）。
+    if let Err(e) = crate::topology_undo::snapshot_pre_image(
+        &mut tx,
+        session_id,
+        crate::topology_undo::TIMESYNC_DOMAIN,
+    )
+    .await
+    {
+        let _ = tx.rollback().await;
+        return structured_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &e.to_string(),
+            true,
+        );
+    }
     if let Err(e) =
         persist_domain_and_nodes(&mut tx, session_id, &domain, &per_node, &existing_params).await
     {
@@ -415,6 +431,23 @@ pub async fn set_params(
         }
     };
 
+    // 写前快照：在同事务、UPDATE 之前留 pre-image（单步撤销 domain="timesync"）。
+    if let Err(e) = crate::topology_undo::snapshot_pre_image(
+        &mut tx,
+        &req.session_id,
+        crate::topology_undo::TIMESYNC_DOMAIN,
+    )
+    .await
+    {
+        let _ = tx.rollback().await;
+        return structured_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &e.to_string(),
+            true,
+        );
+    }
+
     // COALESCE 只在提供字段时更新，端口角色列不动。mid 省略 → 作用全部节点。
     let result = sqlx::query(
         r#"UPDATE timesync_nodes SET
@@ -545,6 +578,43 @@ pub async fn inspect(
         "nodeCount": nodes.len(),
         "nodes": nodes,
     }))
+}
+
+// ---------- undo ----------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UndoRequest {
+    session_id: String,
+}
+
+/// 单步撤销 timesync 写：复用撤销核心 `restore_pre_image` 传 domain="timesync"，
+/// 有快照则盖回 timesync 两表 + push(domain="timesync") + emit；无快照回
+/// 「无可撤销」（ok=true, undone=false）。盖回严格只碰 timesync 表，不动 topology。
+pub async fn undo(State(state): State<Arc<RouteState>>, Json(req): Json<UndoRequest>) -> Response {
+    if let Err(resp) = require_session(&state.pool, &req.session_id).await {
+        return resp;
+    }
+
+    match crate::topology_undo::restore_pre_image(
+        &state.pool,
+        &req.session_id,
+        crate::topology_undo::TIMESYNC_DOMAIN,
+    )
+    .await
+    {
+        Ok(true) => push_and_summary(&state, &req.session_id, json!({ "undone": true })),
+        Ok(false) => ok_summary(json!({
+            "sessionId": req.session_id,
+            "undone": false,
+        })),
+        Err(e) => structured_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &e.to_string(),
+            true,
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -961,6 +1031,100 @@ mod tests {
             .await;
             assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
             assert_eq!(parsed["code"], "FORBIDDEN_OPERATION");
+        });
+    }
+
+    /// set_gm(写前快照) → 再 set_gm 改 GM → undo 盖回前一态、topology 两表不动。
+    #[test]
+    fn undo_restores_prior_timesync_state_without_touching_topology() {
+        tauri::async_runtime::block_on(async {
+            let (pool, buf) = test_state().await;
+            seed_linear(&pool).await;
+
+            // 拓扑两表的当前态（撤销后必须一行不动）。
+            let topo_nodes: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            let topo_links: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_links WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+
+            // 第一次 set_gm=0（建立 timesync 落库）。
+            let (router, token) = build_test_router_with_pool(pool.clone(), buf.clone()).await;
+            let (status, _) = post(
+                router,
+                &token,
+                "/db/timesync/set_gm",
+                json!({ "sessionId": "s1", "gmMid": "0" }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+
+            // 第二次 set_gm=2（pre-image 留 GM=0 态）→ 落库变 GM=2。
+            let (router, token) = build_test_router_with_pool(pool.clone(), buf.clone()).await;
+            let (status, _) = post(
+                router,
+                &token,
+                "/db/timesync/set_gm",
+                json!({ "sessionId": "s1", "gmMid": "2" }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            let gm: Option<String> =
+                sqlx::query_scalar("SELECT gm_mid FROM timesync_domain WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(gm.as_deref(), Some("2"), "第二次写后 GM=2");
+
+            // undo → 盖回 GM=0 态。
+            let (router, token) = build_test_router_with_pool(pool.clone(), buf.clone()).await;
+            let (status, parsed) = post(
+                router,
+                &token,
+                "/db/timesync/undo",
+                json!({ "sessionId": "s1" }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(parsed["ok"], true);
+            assert_eq!(parsed["summary"]["undone"], true);
+            let gm: Option<String> =
+                sqlx::query_scalar("SELECT gm_mid FROM timesync_domain WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(gm.as_deref(), Some("0"), "undo 盖回 GM=0 前态");
+
+            // topology 两表一行不动。
+            let topo_nodes_after: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_nodes WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            let topo_links_after: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM topology_links WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(topo_nodes_after, topo_nodes, "undo 不碰 topology_nodes");
+            assert_eq!(topo_links_after, topo_links, "undo 不碰 topology_links");
+
+            // 再 undo 返 undone=false（R11）。
+            let (router, token) = build_test_router_with_pool(pool.clone(), buf.clone()).await;
+            let (status, parsed) = post(
+                router,
+                &token,
+                "/db/timesync/undo",
+                json!({ "sessionId": "s1" }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(parsed["summary"]["undone"], false, "再撤无可撤");
         });
     }
 }

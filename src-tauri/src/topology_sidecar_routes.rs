@@ -270,9 +270,13 @@ async fn persist_initialized_topology(
     let conn: &mut sqlx::SqliteConnection = &mut tx;
 
     // 写前快照：在同事务、三表 DELETE 之前留 pre-image（整图重置可撤）。
-    crate::topology_undo::snapshot_pre_image(&mut *conn, session_id)
-        .await
-        .map_err(|e| format!("undo snapshot failed: {e}"))?;
+    crate::topology_undo::snapshot_pre_image(
+        &mut *conn,
+        session_id,
+        crate::topology_undo::TOPOLOGY_DOMAIN,
+    )
+    .await
+    .map_err(|e| format!("undo snapshot failed: {e}"))?;
 
     for table in ["topology_nodes", "topology_links"] {
         sqlx::query(&format!("DELETE FROM {table} WHERE session_id = ?"))
@@ -698,7 +702,13 @@ pub async fn apply_operations(
 
     // 写前快照：在同事务、首个 apply_op 之前留 pre-image。dry-run 分支
     // rollback 时此快照随事务一并丢弃，无需额外清理（R4）。
-    if let Err(e) = crate::topology_undo::snapshot_pre_image(&mut tx, &req.session_id).await {
+    if let Err(e) = crate::topology_undo::snapshot_pre_image(
+        &mut tx,
+        &req.session_id,
+        crate::topology_undo::TOPOLOGY_DOMAIN,
+    )
+    .await
+    {
         let _ = tx.rollback().await;
         return structured_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -793,7 +803,13 @@ pub async fn undo(State(state): State<Arc<RouteState>>, Json(req): Json<UndoRequ
         return resp;
     }
 
-    match crate::topology_undo::restore_pre_image(&state.pool, &req.session_id).await {
+    match crate::topology_undo::restore_pre_image(
+        &state.pool,
+        &req.session_id,
+        crate::topology_undo::TOPOLOGY_DOMAIN,
+    )
+    .await
+    {
         Ok(true) => {
             let record = state
                 .mutation_buffer

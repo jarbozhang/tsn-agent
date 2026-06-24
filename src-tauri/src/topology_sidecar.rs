@@ -197,6 +197,10 @@ pub fn build_router(token: SecretToken, route_state: Arc<RouteState>) -> Router 
             "/db/timesync/inspect",
             post(crate::timesync_sidecar_routes::inspect),
         )
+        .route(
+            "/db/timesync/undo",
+            post(crate::timesync_sidecar_routes::undo),
+        )
         .with_state(route_state)
         .route_layer(middleware::from_fn_with_state(
             token_state,
