@@ -11,6 +11,7 @@ mod session_import;
 mod session_store;
 mod skill_factory_hashes;
 mod skill_files;
+mod timesync_tree;
 mod topology_compute;
 mod topology_intermediate;
 mod topology_mutation_buffer;
