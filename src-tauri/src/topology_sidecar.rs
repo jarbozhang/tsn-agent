@@ -142,8 +142,8 @@ fn unauthorized_response() -> Response {
         .into_response()
 }
 
-/// 构建 8 route router + Bearer middleware。U4a-2 后 build_artifacts /
-/// validate_artifacts / describe_* 占位会被替换为 Rust 端 artifacts 实现。
+/// 构建 8 route router + Bearer middleware。build_artifacts / validate_artifacts /
+/// describe_* 均已是 Rust 端实现（见 topology_sidecar_routes.rs）。
 pub fn build_router(token: SecretToken, route_state: Arc<RouteState>) -> Router {
     let token_state = Arc::new(token);
     Router::new()
