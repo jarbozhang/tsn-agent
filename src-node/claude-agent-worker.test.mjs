@@ -444,8 +444,8 @@ describe("claude-agent-worker", () => {
     // 机制层 AE3：agent 在 assistantText 里输出整份拓扑 JSON、不调任何 MCP 工具，
     // trusted-signal 提取器只认 MCP tool_result 的 mutationId → 返回空。
     const topologyJson = JSON.stringify({
-      nodes: [{ syncName: "1", nodeType: "switch" }],
-      links: [{ linkSeq: 1, srcSyncName: "0", dstSyncName: "1" }],
+      nodes: [{ mid: "1", nodeType: "switch" }],
+      links: [{ linkSeq: 1, srcNode: "0", dstNode: "1" }],
     });
     const extracted = extractTopologyWorkflowStageResults(
       {
@@ -1434,8 +1434,8 @@ describe("claude-agent-worker", () => {
     // 默认互联公式（N*M+(N-1)）。
     expect(prompt).not.toContain("N*M");
     expect(prompt).not.toContain("交换机线型互联链路");
-    // 显示名映射规则（SW-N/ES-N 按 syncName）。
-    expect(prompt).not.toContain("按 syncName 精确等于");
+    // 显示名映射规则（SW-N/ES-N 按 mid）。
+    expect(prompt).not.toContain("按 mid 精确等于");
     expect(prompt).not.toContain("不要按列表顺序或第 N 台折算");
     // "skill 仅作 MCP 使用指引"措辞。
     expect(prompt).not.toContain("只能作为 MCP 使用指引");

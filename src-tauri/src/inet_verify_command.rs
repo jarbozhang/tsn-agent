@@ -92,14 +92,14 @@ async fn load_topology_rows(
     session_id: &str,
 ) -> Result<(Vec<VerifyNode>, Vec<VerifyLink>), String> {
     let node_rows = sqlx::query(
-        "SELECT sync_name, name, node_type FROM topology_nodes WHERE session_id = ? ORDER BY insert_order, sync_name",
+        "SELECT mid, name, node_type FROM topology_nodes WHERE session_id = ? ORDER BY insert_order, mid",
     )
     .bind(session_id)
     .fetch_all(pool)
     .await
     .map_err(|e| format!("查询节点失败：{e}"))?;
     let link_rows = sqlx::query(
-        "SELECT link_seq, src_sync_name, dst_sync_name, styles_json FROM topology_links WHERE session_id = ? ORDER BY link_seq",
+        "SELECT link_seq, src_node, dst_node, styles_json FROM topology_links WHERE session_id = ? ORDER BY link_seq",
     )
     .bind(session_id)
     .fetch_all(pool)
@@ -109,7 +109,7 @@ async fn load_topology_rows(
     let nodes = node_rows
         .into_iter()
         .map(|r| VerifyNode {
-            sync_name: r.get("sync_name"),
+            mid: r.get("mid"),
             name: r.get("name"),
             node_type: r.get("node_type"),
         })
@@ -118,8 +118,8 @@ async fn load_topology_rows(
         .into_iter()
         .map(|r| VerifyLink {
             link_seq: r.get("link_seq"),
-            src_sync_name: r.get("src_sync_name"),
-            dst_sync_name: r.get("dst_sync_name"),
+            src_node: r.get("src_node"),
+            dst_node: r.get("dst_node"),
             styles_json: r.get("styles_json"),
         })
         .collect();
@@ -164,7 +164,7 @@ mod tests {
 
     fn node(sync: &str, ty: &str) -> VerifyNode {
         VerifyNode {
-            sync_name: sync.into(),
+            mid: sync.into(),
             name: None,
             node_type: Some(ty.into()),
         }
@@ -172,8 +172,8 @@ mod tests {
     fn link(seq: i64, src: &str, dst: &str) -> VerifyLink {
         VerifyLink {
             link_seq: seq,
-            src_sync_name: src.into(),
-            dst_sync_name: dst.into(),
+            src_node: src.into(),
+            dst_node: dst.into(),
             styles_json: r#"{"speed":1000}"#.into(),
         }
     }
@@ -237,7 +237,7 @@ mod tests {
         let nodes = vec![
             node("0", "switch"),
             VerifyNode {
-                sync_name: "1".into(),
+                mid: "1".into(),
                 name: None,
                 node_type: None,
             },

@@ -131,13 +131,13 @@ function sampleTopologyRows(sessionId: string) {
   return {
     sessionId,
     nodes: [
-      { syncName: "0", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
-      { syncName: "1", name: null, x: 160, y: 0, nodeType: "switch", insertOrder: 1 },
-      { syncName: "2", name: null, x: 0, y: 120, nodeType: null, insertOrder: 2 },
+      { mid: "0", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
+      { mid: "1", name: null, x: 160, y: 0, nodeType: "switch", insertOrder: 1 },
+      { mid: "2", name: null, x: 0, y: 120, nodeType: null, insertOrder: 2 },
     ],
     links: [
-      { linkSeq: 0, name: null, srcSyncName: "0", dstSyncName: "1", stylesJson: "{}" },
-      { linkSeq: 1, name: "uplink", srcSyncName: "0", dstSyncName: "2", stylesJson: "{}" },
+      { linkSeq: 0, name: null, srcNode: "0", dstNode: "1", stylesJson: "{}" },
+      { linkSeq: 1, name: "uplink", srcNode: "0", dstNode: "2", stylesJson: "{}" },
     ],
   };
 }

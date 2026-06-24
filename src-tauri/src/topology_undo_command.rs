@@ -93,7 +93,7 @@ mod tests {
     /// 写一行节点并对当前态做一次写前快照（pre-image 存在）。
     async fn seed_with_snapshot(pool: &SqlitePool) {
         sqlx::query(
-            "INSERT INTO topology_nodes (session_id, sync_name, name, x, y, node_type, insert_order) \
+            "INSERT INTO topology_nodes (session_id, mid, name, x, y, node_type, insert_order) \
              VALUES ('s1', '0', 'ES-1', 10.0, 20.0, 'endSystem', 0)",
         )
         .execute(pool)
@@ -133,7 +133,7 @@ mod tests {
             assert_eq!(record.domain, "topology");
 
             let x: f64 = sqlx::query_scalar(
-                "SELECT x FROM topology_nodes WHERE session_id='s1' AND sync_name='0'",
+                "SELECT x FROM topology_nodes WHERE session_id='s1' AND mid='0'",
             )
             .fetch_one(&pool)
             .await

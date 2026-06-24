@@ -175,7 +175,7 @@ describe("topology MCP tool registry", () => {
           sessionId: "test-session-id",
           nodeCount: 1,
           linkCount: 0,
-          nodes: [{ syncName: "0", nodeType: "switch", x: 0, y: 0, insertOrder: 0 }],
+          nodes: [{ mid: "0", nodeType: "switch", x: 0, y: 0, insertOrder: 0 }],
           links: [],
         },
       },
@@ -189,7 +189,7 @@ describe("topology MCP tool registry", () => {
     expect(body).toEqual({});
     expect(payload).toMatchObject({
       ok: true,
-      summary: { nodeCount: 1, nodes: [{ syncName: "0" }] },
+      summary: { nodeCount: 1, nodes: [{ mid: "0" }] },
     });
   });
 
@@ -283,9 +283,7 @@ describe("topology MCP tool registry", () => {
 
     const payload = await parseToolText(
       runTopologyTool("topology.apply_operations", {
-        operations: [
-          { op: "node_add", syncName: "0", x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
-        ],
+        operations: [{ op: "node_add", mid: "0", x: 0, y: 0, nodeType: "switch", insertOrder: 0 }],
         dryRun: false,
       }),
     );
@@ -321,7 +319,7 @@ describe("topology MCP tool registry", () => {
     const payload = await parseToolText(
       runTopologyTool("topology.apply_operations", {
         operations: [
-          { op: "node_add", syncName: "2", x: 0, y: 0, nodeType: "endSystem", insertOrder: 2 },
+          { op: "node_add", mid: "2", x: 0, y: 0, nodeType: "endSystem", insertOrder: 2 },
         ],
         dryRun: false,
       }),
@@ -353,7 +351,7 @@ describe("topology MCP tool registry", () => {
 
     const payload = await parseToolText(
       runTopologyTool("topology.apply_operations", {
-        operations: [{ op: "node_update", syncName: "0", x: 1, y: 1 }],
+        operations: [{ op: "node_update", mid: "0", x: 1, y: 1 }],
         dryRun: false,
       }),
     );
@@ -371,7 +369,7 @@ describe("topology MCP tool registry", () => {
 
     const payload = await parseToolText(
       runTopologyTool("topology.apply_operations", {
-        operations: [{ op: "node_delete", syncName: "3" }],
+        operations: [{ op: "node_delete", mid: "3" }],
         dryRun: true,
       }),
     );
@@ -385,20 +383,18 @@ describe("topology MCP tool registry", () => {
     fetchSidecarMock.mockResolvedValueOnce({
       ok: true as const,
       status: 200,
-      body: { ok: false, errors: [{ code: "SYNC_NAME_TAKEN", message: "syncName 0 已被占用" }] },
+      body: { ok: false, errors: [{ code: "MID_TAKEN", message: "mid 0 已被占用" }] },
     });
 
     const payload = await parseToolText(
       runTopologyTool("topology.apply_operations", {
-        operations: [
-          { op: "node_add", syncName: "0", x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
-        ],
+        operations: [{ op: "node_add", mid: "0", x: 0, y: 0, nodeType: "switch", insertOrder: 0 }],
         dryRun: false,
       }),
     );
 
     expect(fetchSidecarMock).toHaveBeenCalledTimes(1);
-    expect(payload).toMatchObject({ ok: false, errors: [{ code: "SYNC_NAME_TAKEN" }] });
+    expect(payload).toMatchObject({ ok: false, errors: [{ code: "MID_TAKEN" }] });
   });
 
   it("U5: validate 追调失败不掩盖 apply 成功（validation.ran=false）", async () => {
@@ -419,9 +415,7 @@ describe("topology MCP tool registry", () => {
 
     const payload = await parseToolText(
       runTopologyTool("topology.apply_operations", {
-        operations: [
-          { op: "node_add", syncName: "1", x: 0, y: 0, nodeType: "switch", insertOrder: 1 },
-        ],
+        operations: [{ op: "node_add", mid: "1", x: 0, y: 0, nodeType: "switch", insertOrder: 1 }],
         dryRun: false,
       }),
     );
@@ -644,19 +638,19 @@ describe("applyOperationsInputSchema", () => {
   const insertSwitchBatch = {
     operations: [
       { op: "link_delete", linkSeq: 0 },
-      { op: "node_add", syncName: "24", x: 150, y: 40, nodeType: "switch", insertOrder: 24 },
+      { op: "node_add", mid: "24", x: 150, y: 40, nodeType: "switch", insertOrder: 24 },
       {
         op: "link_add",
         linkSeq: 23,
-        srcSyncName: "0",
-        dstSyncName: "24",
+        srcNode: "0",
+        dstNode: "24",
         stylesJson: '{"leftLabel":"P1","rightLabel":"P1","speed":1000}',
       },
       {
         op: "link_add",
         linkSeq: 24,
-        srcSyncName: "24",
-        dstSyncName: "1",
+        srcNode: "24",
+        dstNode: "1",
         stylesJson: '{"leftLabel":"P2","rightLabel":"P1","speed":1000}',
       },
     ],
@@ -672,7 +666,7 @@ describe("applyOperationsInputSchema", () => {
       operations: [
         {
           op: "node_add",
-          syncName: "5",
+          mid: "5",
           name: "SW-5",
           x: 0,
           y: 0,
@@ -683,9 +677,7 @@ describe("applyOperationsInputSchema", () => {
     });
     expect(withName.success).toBe(true);
     const noName = schema.safeParse({
-      operations: [
-        { op: "node_add", syncName: "6", x: 0, y: 0, nodeType: "switch", insertOrder: 6 },
-      ],
+      operations: [{ op: "node_add", mid: "6", x: 0, y: 0, nodeType: "switch", insertOrder: 6 }],
     });
     expect(noName.success).toBe(true);
   });
@@ -697,7 +689,7 @@ describe("applyOperationsInputSchema", () => {
         operations: [
           {
             op: "node_add",
-            syncName: "5",
+            mid: "5",
             name: "",
             x: 0,
             y: 0,
@@ -708,12 +700,11 @@ describe("applyOperationsInputSchema", () => {
       }).success,
     ).toBe(false);
     expect(
-      schema.safeParse({ operations: [{ op: "node_update", syncName: "5", name: "" }] }).success,
+      schema.safeParse({ operations: [{ op: "node_update", mid: "5", name: "" }] }).success,
     ).toBe(false);
     // node_update 接受非空 name（改名闭环）。
     expect(
-      schema.safeParse({ operations: [{ op: "node_update", syncName: "5", name: "SW-9" }] })
-        .success,
+      schema.safeParse({ operations: [{ op: "node_update", mid: "5", name: "SW-9" }] }).success,
     ).toBe(true);
   });
 
@@ -727,16 +718,16 @@ describe("applyOperationsInputSchema", () => {
   it("accepts node_update with partial fields and node_delete", () => {
     const result = schema.safeParse({
       operations: [
-        { op: "node_update", syncName: "0", x: 300, y: 50 },
-        { op: "node_delete", syncName: "1" },
+        { op: "node_update", mid: "0", x: 300, y: 50 },
+        { op: "node_delete", mid: "1" },
       ],
     });
     expect(result.success).toBe(true);
   });
 
-  it("rejects node_add missing required fields (syncName / nodeType)", () => {
-    const base = { op: "node_add", syncName: "0", x: 0, y: 0, nodeType: "switch", insertOrder: 0 };
-    for (const missing of ["syncName", "nodeType"]) {
+  it("rejects node_add missing required fields (mid / nodeType)", () => {
+    const base = { op: "node_add", mid: "0", x: 0, y: 0, nodeType: "switch", insertOrder: 0 };
+    for (const missing of ["mid", "nodeType"]) {
       const { [missing]: _omitted, ...incomplete } = base as Record<string, unknown>;
       const result = schema.safeParse({ operations: [incomplete] });
       expect(result.success, `node_add without ${missing} must be rejected`).toBe(false);
@@ -746,7 +737,7 @@ describe("applyOperationsInputSchema", () => {
   it("rejects 33 operations via max(32)", () => {
     const operations = Array.from({ length: 33 }, (_, index) => ({
       op: "node_delete",
-      syncName: index.toString(),
+      mid: index.toString(),
     }));
     const result = schema.safeParse({ operations });
     expect(result.success).toBe(false);

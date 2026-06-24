@@ -58,7 +58,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       allowedToolName: "mcp__tsn_topology__topology_inspect",
       title: "Inspect topology",
       description:
-        "Return the session's full persisted topology rows: nodes (syncName/name/nodeType/x/y/insertOrder) and links (linkSeq/name/srcSyncName/dstSyncName/stylesJson). No parameters. Call this first to locate existing syncName/linkSeq values before building apply_operations batches. 节点身份是 syncName（逻辑序号），连线两端 srcSyncName/dstSyncName 引用节点 syncName。name 列是节点显示名（与对话命名一致）；定位用户说的 SW-N/ES-N 时优先按 name 精确匹配，勿按列表顺序/第 N 台折算（完整显示名规则见 skill 指引）。links 的 stylesJson 是 JSON 串：plane（A/B）控制画布链路配色（A=蓝、B=红，错值会误导用户）、role（access/backbone）为链路角色、leftLabel/rightLabel 作为端口号渲染在连线两端。",
+        "Return the session's full persisted topology rows: nodes (mid/name/nodeType/x/y/insertOrder) and links (linkSeq/name/srcNode/dstNode/stylesJson). No parameters. Call this first to locate existing mid/linkSeq values before building apply_operations batches. 节点身份是 mid（逻辑序号），连线两端 srcNode/dstNode 引用节点 mid。name 列是节点显示名（与对话命名一致）；定位用户说的 SW-N/ES-N 时优先按 name 精确匹配，勿按列表顺序/第 N 台折算（完整显示名规则见 skill 指引）。links 的 stylesJson 是 JSON 串：plane（A/B）控制画布链路配色（A=蓝、B=红，错值会误导用户）、role（access/backbone）为链路角色、leftLabel/rightLabel 作为端口号渲染在连线两端。",
       inputSchema: {},
       handler: async (args) => callSidecarTool("/db/topology/inspect", args, {}),
     },
@@ -124,7 +124,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       allowedToolName: "mcp__tsn_topology__topology_apply_operations",
       title: "Apply topology operations",
       description:
-        "Apply atomic topology operations (node_add / node_update / node_delete / link_add / link_delete) to the session's persisted topology. Returns summary.mutationId on commit. Call topology.inspect first to locate existing syncName/linkSeq values; retries must resend the exact same batch (same syncName/linkSeq), never re-allocate keys. On a committed (non-dryRun) apply the response carries a `validation` field with the post-apply structural check (errors in Chinese) — relay any problems to the user. validation.ran=false means the structural-check call itself failed (infra issue, NOT a structure problem); only when ran=true judge by valid/errors.",
+        "Apply atomic topology operations (node_add / node_update / node_delete / link_add / link_delete) to the session's persisted topology. Returns summary.mutationId on commit. Call topology.inspect first to locate existing mid/linkSeq values; retries must resend the exact same batch (same mid/linkSeq), never re-allocate keys. On a committed (non-dryRun) apply the response carries a `validation` field with the post-apply structural check (errors in Chinese) — relay any problems to the user. validation.ran=false means the structural-check call itself failed (infra issue, NOT a structure problem); only when ran=true judge by valid/errors.",
       inputSchema: applyOperationsInputSchema(),
       handler: async (args) => applyOperationsWithValidation(args),
     },
@@ -347,17 +347,17 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
   const nodeAddSchema = z
     .object({
       op: z.literal("node_add"),
-      syncName: z
+      mid: z
         .string()
         .describe(
-          '新节点 key（逻辑序号，如 "5"）；必须避开已占用 syncName（先 inspect）。修改已有节点属性用 node_update，node_add 仅用于新增节点',
+          '新节点 key（逻辑序号，如 "5"）；必须避开已占用 mid（先 inspect）。修改已有节点属性用 node_update，node_add 仅用于新增节点',
         ),
       name: z
         .string()
         .min(1)
         .optional()
         .describe(
-          "新节点显示名（交换机 SW-N、端系统 ES-N、服务器 SRV-N；省略则展示层按前缀+syncName 派生）",
+          "新节点显示名（交换机 SW-N、端系统 ES-N、服务器 SRV-N；省略则展示层按前缀+mid 派生）",
         ),
       x: z.number(),
       y: z.number(),
@@ -370,9 +370,9 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
   const nodeUpdateSchema = z
     .object({
       op: z.literal("node_update"),
-      syncName: z
+      mid: z
         .string()
-        .describe("目标节点的既有 syncName（先 inspect）；只更新提供的字段，syncName 本身不可改"),
+        .describe("目标节点的既有 mid（先 inspect）；只更新提供的字段，mid 本身不可改"),
       name: z
         .string()
         .min(1)
@@ -386,9 +386,7 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
   const nodeDeleteSchema = z
     .object({
       op: z.literal("node_delete"),
-      syncName: z
-        .string()
-        .describe("目标节点的既有 syncName；仍被链路引用时会被拒绝（先 link_delete）"),
+      mid: z.string().describe("目标节点的既有 mid；仍被链路引用时会被拒绝（先 link_delete）"),
     })
     .strict();
   const linkAddSchema = z
@@ -396,8 +394,8 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
       op: z.literal("link_add"),
       linkSeq: z.number().int().describe("新链路 key；必须避开已占用 linkSeq（先 inspect）"),
       name: z.string().optional(),
-      srcSyncName: z.string(),
-      dstSyncName: z.string(),
+      srcNode: z.string(),
+      dstNode: z.string(),
       stylesJson: z
         .string()
         .describe(
@@ -426,7 +424,7 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
       .min(1)
       .max(32)
       .describe(
-        "原子操作 batch（1-32）。增量修改先 inspect 再构造；重试必须复用同一 batch 的 syncName/linkSeq",
+        "原子操作 batch（1-32）。增量修改先 inspect 再构造；重试必须复用同一 batch 的 mid/linkSeq",
       ),
     dryRun: z.boolean().optional(),
   };

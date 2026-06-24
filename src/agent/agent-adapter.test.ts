@@ -478,7 +478,7 @@ describe("runTsnAgent", () => {
         caliber: "structural_only",
         errors: [
           { code: "ISOLATED_NODE", messageZh: "ES-7 没连任何线，是个孤立节点。", nodeRef: "7" },
-          { code: "DUP_SYNC_NAME", messageZh: "syncName 3 被两个节点占用。", nodeRef: "3" },
+          { code: "DUP_MID", messageZh: "mid 3 被两个节点占用。", nodeRef: "3" },
         ],
       },
     });
@@ -492,7 +492,7 @@ describe("runTsnAgent", () => {
 
     // 逐条文案直接来自 Rust messageZh（节点专属串 TS 无从硬编码 → 证明透传，不另写）。
     expect(result.assistantText).toContain("ES-7 没连任何线，是个孤立节点。");
-    expect(result.assistantText).toContain("syncName 3 被两个节点占用。");
+    expect(result.assistantText).toContain("mid 3 被两个节点占用。");
     // 展示框架（可修复语气 + CTA）保留，但走的是结构分支、不是 INET 分支文案。
     expect(result.assistantText).toContain("先修好再继续");
     expect(result.assistantText).toContain("确认并继续");
@@ -1005,10 +1005,10 @@ describe("runTsnAgent", () => {
       topology: {
         sessionId: "session-1",
         nodes: [
-          { syncName: "0", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
-          { syncName: "1", name: null, x: 1, y: 0, nodeType: null, insertOrder: 1 },
+          { mid: "0", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
+          { mid: "1", name: null, x: 1, y: 0, nodeType: null, insertOrder: 1 },
         ],
-        links: [{ linkSeq: 0, name: null, srcSyncName: "0", dstSyncName: "1", stylesJson: "{}" }],
+        links: [{ linkSeq: 0, name: null, srcNode: "0", dstNode: "1", stylesJson: "{}" }],
       },
     });
     const { runTsnAgent } = await import("./agent-adapter");

@@ -2175,7 +2175,7 @@ fn build_legacy_topology_json(topology: &IntermediateTopology) -> Value {
             let imac = *imac_by_node_id.get(&node.id).unwrap_or(&100);
             json!({
                 "imac": imac,
-                "sync_name": node.numeric_id.to_string(),
+                "mid": node.numeric_id.to_string(),
                 "x": node.position.x.round() as i64,
                 "y": node.position.y.round() as i64,
                 "sync_type": { "_classPath": legacy_class_path(node.node_type) },
@@ -2650,7 +2650,7 @@ pub fn validate_topology_artifacts(artifacts_value: &Value) -> ValidateArtifacts
         let node_ids: HashSet<i64> = nodes_arr
             .iter()
             .filter_map(|n| {
-                n.get("sync_name")
+                n.get("mid")
                     .and_then(Value::as_str)
                     .and_then(|s| s.parse::<i64>().ok())
             })
@@ -2685,7 +2685,7 @@ pub fn validate_topology_artifacts(artifacts_value: &Value) -> ValidateArtifacts
         let node_ids: HashSet<i64> = nodes_arr
             .iter()
             .filter_map(|n| {
-                n.get("sync_name")
+                n.get("mid")
                     .and_then(Value::as_str)
                     .and_then(|s| s.parse::<i64>().ok())
             })

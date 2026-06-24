@@ -57,7 +57,7 @@ const edgeTypes = {
 
 export interface CommitNodePositionArgs {
   sessionId: string;
-  syncName: string;
+  mid: string;
   x: number;
   y: number;
   expectedMutationId: number;
@@ -124,12 +124,10 @@ function topologyViewportResetKey(
     return undefined;
   }
   const nodeKey = snapshot.nodes
-    .map(
-      (node) => `${node.syncName}:${node.x}:${node.y}:${node.nodeType ?? ""}:${node.insertOrder}`,
-    )
+    .map((node) => `${node.mid}:${node.x}:${node.y}:${node.nodeType ?? ""}:${node.insertOrder}`)
     .join(",");
   const linkKey = snapshot.links
-    .map((link) => `${link.linkSeq}:${link.srcSyncName}:${link.dstSyncName}`)
+    .map((link) => `${link.linkSeq}:${link.srcNode}:${link.dstNode}`)
     .join(",");
   return `${snapshot.sessionId}:${lastMutationId}:${nodeKey}:${linkKey}`;
 }
@@ -225,8 +223,8 @@ export function WorkspacePane({
     setPendingPositions(next);
   }, []);
 
-  // session 切换：overlay/拖动/缓存/基准全部重置——overlay 按 syncName 键控，
-  // 不重置会污染另一 session 同 syncName 节点；拖动中切换时 dragStop 不再触发，
+  // session 切换：overlay/拖动/缓存/基准全部重置——overlay 按 mid 键控，
+  // 不重置会污染另一 session 同 mid 节点；拖动中切换时 dragStop 不再触发，
   // draggingRef 也在此回正，防快照永久滞留缓存。
   useEffect(() => {
     const sessionId = topologySnapshot?.sessionId;
@@ -458,7 +456,7 @@ export function WorkspacePane({
 
       void commitNodePosition({
         sessionId,
-        syncName: node.id,
+        mid: node.id,
         x,
         y,
         expectedMutationId: dragStartMutationIdRef.current,
@@ -502,12 +500,12 @@ export function WorkspacePane({
   const linkCount = topologySnapshot?.links.length ?? 0;
   const selectedNodeRow =
     selectedTopologyItem?.kind === "node"
-      ? topologySnapshot?.nodes.find((node) => node.syncName === selectedTopologyItem.id)
+      ? topologySnapshot?.nodes.find((node) => node.mid === selectedTopologyItem.id)
       : undefined;
   // 详情面板坐标优先读 overlay（R9：拖毕即显示新坐标，无确认窗口跳变）。
   const selectedNode = selectedNodeRow
     ? (() => {
-        const pending = pendingPositions.get(selectedNodeRow.syncName);
+        const pending = pendingPositions.get(selectedNodeRow.mid);
         return pending ? { ...selectedNodeRow, x: pending.x, y: pending.y } : selectedNodeRow;
       })()
     : undefined;
@@ -516,10 +514,10 @@ export function WorkspacePane({
       ? topologySnapshot?.links.find((link) => linkRowId(link) === selectedTopologyItem.id)
       : undefined;
   const selectedLinkSourceNode = selectedLink
-    ? topologySnapshot?.nodes.find((node) => node.syncName === selectedLink.srcSyncName)
+    ? topologySnapshot?.nodes.find((node) => node.mid === selectedLink.srcNode)
     : undefined;
   const selectedLinkTargetNode = selectedLink
-    ? topologySnapshot?.nodes.find((node) => node.syncName === selectedLink.dstSyncName)
+    ? topologySnapshot?.nodes.find((node) => node.mid === selectedLink.dstNode)
     : undefined;
 
   return (
@@ -648,7 +646,7 @@ export function WorkspacePane({
                 {selectedNode ? (
                   <div className="detail-grid">
                     <DetailRow label="名称" value={selectedNode.name ?? "无"} />
-                    <DetailRow label="节点号" value={selectedNode.syncName} />
+                    <DetailRow label="节点号" value={selectedNode.mid} />
                     <DetailRow
                       label="类型"
                       value={NODE_KIND_NAME[nodeTypeToken(selectedNode.nodeType)]}
@@ -686,7 +684,7 @@ export function WorkspacePane({
                       value={
                         selectedLinkSourceNode
                           ? nodeRowLabel(selectedLinkSourceNode)
-                          : `节点 ${selectedLink.srcSyncName}`
+                          : `节点 ${selectedLink.srcNode}`
                       }
                     />
                     <DetailRow
@@ -694,7 +692,7 @@ export function WorkspacePane({
                       value={
                         selectedLinkTargetNode
                           ? nodeRowLabel(selectedLinkTargetNode)
-                          : `节点 ${selectedLink.dstSyncName}`
+                          : `节点 ${selectedLink.dstNode}`
                       }
                     />
                   </div>
@@ -726,7 +724,7 @@ function TsnTopologyNode({ data }: NodeProps) {
   const nodeData = data as {
     label?: string;
     nodeType?: TsnNodeKind;
-    syncName?: string;
+    mid?: string;
   };
   const nodeType = nodeData.nodeType ?? "endSystem";
 
@@ -737,7 +735,7 @@ function TsnTopologyNode({ data }: NodeProps) {
       <Handle id="t" type="target" position={Position.Top} />
       <span className="tsn-node-type mono">{NODE_KIND_BADGE[nodeType]}</span>
       <strong>{nodeData.label}</strong>
-      <small className="mono">节点 {nodeData.syncName}</small>
+      <small className="mono">节点 {nodeData.mid}</small>
     </div>
   );
 }

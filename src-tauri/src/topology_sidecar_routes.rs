@@ -251,7 +251,7 @@ fn legacy_node_type(canonical: &str) -> &'static str {
 }
 
 /// 把 initialize 计算出的 IntermediateTopology 重建到该 session 的 P0 表。
-/// 节点键 sync_name = numericId；连线两端引用 sync_name。Qunee 专有的 imac/sync_type
+/// 节点键 mid = numericId；连线两端引用 mid。Qunee 专有的 imac/sync_type
 /// 不再落库，需要时由 build_artifacts 从节点+node_type 现导。
 async fn persist_initialized_topology(
     pool: &sqlx::Pool<sqlx::Sqlite>,
@@ -281,10 +281,10 @@ async fn persist_initialized_topology(
         topology.nodes.iter().collect();
     sorted_nodes.sort_by_key(|node| node.numeric_id);
 
-    let mut sync_name_by_node_id: std::collections::HashMap<&str, String> =
+    let mut mid_by_node_id: std::collections::HashMap<&str, String> =
         std::collections::HashMap::new();
     for (index, node) in sorted_nodes.iter().enumerate() {
-        let sync_name = node.numeric_id.to_string();
+        let mid = node.numeric_id.to_string();
         let type_str = match node.node_type {
             IntermediateNodeType::Switch => "switch",
             IntermediateNodeType::EndSystem => "endSystem",
@@ -292,11 +292,11 @@ async fn persist_initialized_topology(
         };
         sqlx::query(
             r#"INSERT INTO topology_nodes
-               (session_id, sync_name, name, x, y, node_type, insert_order)
+               (session_id, mid, name, x, y, node_type, insert_order)
                VALUES (?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(session_id)
-        .bind(&sync_name)
+        .bind(&mid)
         .bind(&node.name)
         .bind(node.position.x)
         .bind(node.position.y)
@@ -305,7 +305,7 @@ async fn persist_initialized_topology(
         .execute(&mut *conn)
         .await
         .map_err(|e| format!("topology_nodes insert failed: {e}"))?;
-        sync_name_by_node_id.insert(node.id.as_str(), sync_name);
+        mid_by_node_id.insert(node.id.as_str(), mid);
     }
 
     let mut sorted_links: Vec<&crate::topology_intermediate::IntermediateLink> =
@@ -313,11 +313,11 @@ async fn persist_initialized_topology(
     sorted_links.sort_by_key(|link| link.numeric_id);
 
     for (index, link) in sorted_links.iter().enumerate() {
-        let src_sync_name = sync_name_by_node_id
+        let src_node = mid_by_node_id
             .get(link.source.node_id.as_str())
             .ok_or_else(|| format!("link {} references unknown source node", link.id))?
             .clone();
-        let dst_sync_name = sync_name_by_node_id
+        let dst_node = mid_by_node_id
             .get(link.target.node_id.as_str())
             .ok_or_else(|| format!("link {} references unknown target node", link.id))?
             .clone();
@@ -336,14 +336,14 @@ async fn persist_initialized_topology(
         let styles_json = styles.to_string();
         sqlx::query(
             r#"INSERT INTO topology_links
-               (session_id, link_seq, name, src_sync_name, dst_sync_name, styles_json)
+               (session_id, link_seq, name, src_node, dst_node, styles_json)
                VALUES (?, ?, ?, ?, ?, ?)"#,
         )
         .bind(session_id)
         .bind(index as i64)
         .bind(&link.id)
-        .bind(&src_sync_name)
-        .bind(&dst_sync_name)
+        .bind(&src_node)
+        .bind(&dst_node)
         .bind(&styles_json)
         .execute(&mut *conn)
         .await
@@ -362,7 +362,7 @@ pub struct InspectRequest {
 }
 
 /// DB-backed 全量 rows：agent 一次 inspect 拿到构造 ops batch 所需的全部细节
-/// （syncName/linkSeq/stylesJson 原文）。无 selector —— 模型直接在 rows 里按 syncName，
+/// （mid/linkSeq/stylesJson 原文）。无 selector —— 模型直接在 rows 里按 mid，
 /// 模型直接在 rows 里定位目标。出向规模有界：数据只能经 initialize（compute 校验
 /// ≤200 节点）与 apply_operations（单批 ≤32 op）进入。
 /// SQL 与排序镜像 `topology_query_command.rs`（UI 读路径），行 shape 直接复用其
@@ -389,10 +389,10 @@ pub async fn inspect(
         }
     };
     let node_rows = sqlx::query(
-        r#"SELECT sync_name, name, x, y, node_type, insert_order
+        r#"SELECT mid, name, x, y, node_type, insert_order
            FROM topology_nodes
            WHERE session_id = ?
-           ORDER BY insert_order, sync_name"#,
+           ORDER BY insert_order, mid"#,
     )
     .bind(&req.session_id)
     .fetch_all(&mut *tx)
@@ -409,7 +409,7 @@ pub async fn inspect(
         }
     };
     let link_rows = sqlx::query(
-        r#"SELECT link_seq, name, src_sync_name, dst_sync_name, styles_json
+        r#"SELECT link_seq, name, src_node, dst_node, styles_json
            FROM topology_links
            WHERE session_id = ?
            ORDER BY link_seq"#,
@@ -434,7 +434,7 @@ pub async fn inspect(
     let nodes: Vec<TopologyNodeRow> = node_rows
         .into_iter()
         .map(|r| TopologyNodeRow {
-            sync_name: r.get("sync_name"),
+            mid: r.get("mid"),
             name: r.get("name"),
             x: r.get("x"),
             y: r.get("y"),
@@ -447,8 +447,8 @@ pub async fn inspect(
         .map(|r| TopologyLinkRow {
             link_seq: r.get("link_seq"),
             name: r.get("name"),
-            src_sync_name: r.get("src_sync_name"),
-            dst_sync_name: r.get("dst_sync_name"),
+            src_node: r.get("src_node"),
+            dst_node: r.get("dst_node"),
             styles_json: r.get("styles_json"),
         })
         .collect();

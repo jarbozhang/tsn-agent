@@ -15,7 +15,7 @@ use crate::topology_mutation_buffer::TopologyMutationBuffer;
 #[serde(rename_all = "camelCase")]
 pub struct UpdateNodePositionRequest {
     session_id: String,
-    sync_name: String,
+    mid: String,
     /// 整数坐标契约：前端 Math.round 后提交。x/y 列为 REAL，但整数值的 f64
     /// 表示无损；前端 overlay 写入确认依赖快照坐标与提交值严格相等，
     /// 放开小数坐标前必须同步改前端比对逻辑。
@@ -57,21 +57,20 @@ async fn apply_position_update(
         ));
     }
 
-    let result = sqlx::query(
-        "UPDATE topology_nodes SET x = ?, y = ? WHERE session_id = ? AND sync_name = ?",
-    )
-    .bind(request.x)
-    .bind(request.y)
-    .bind(&request.session_id)
-    .bind(&request.sync_name)
-    .execute(pool)
-    .await
-    .map_err(|e| format!("update node position failed: {e}"))?;
+    let result =
+        sqlx::query("UPDATE topology_nodes SET x = ?, y = ? WHERE session_id = ? AND mid = ?")
+            .bind(request.x)
+            .bind(request.y)
+            .bind(&request.session_id)
+            .bind(&request.mid)
+            .execute(pool)
+            .await
+            .map_err(|e| format!("update node position failed: {e}"))?;
 
     if result.rows_affected() == 0 {
         return Err(format!(
-            "node syncName {} not found in session {}",
-            request.sync_name, request.session_id
+            "node mid {} not found in session {}",
+            request.mid, request.session_id
         ));
     }
 
@@ -135,7 +134,7 @@ mod tests {
         .await
         .unwrap();
         sqlx::query(
-            "INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) VALUES ('s1', '1', 120, 300, 0)",
+            "INSERT INTO topology_nodes (session_id, mid, x, y, insert_order) VALUES ('s1', '1', 120, 300, 0)",
         )
         .execute(&pool)
         .await
@@ -146,7 +145,7 @@ mod tests {
     fn request(expected: u64) -> UpdateNodePositionRequest {
         UpdateNodePositionRequest {
             session_id: "s1".into(),
-            sync_name: "1".into(),
+            mid: "1".into(),
             x: 480,
             y: 96,
             expected_mutation_id: expected,
@@ -166,7 +165,7 @@ mod tests {
             assert_eq!(record.domain, "topology");
 
             let row: (f64, f64) = sqlx::query_as(
-                "SELECT x, y FROM topology_nodes WHERE session_id = 's1' AND sync_name = '1'",
+                "SELECT x, y FROM topology_nodes WHERE session_id = 's1' AND mid = '1'",
             )
             .fetch_one(&pool)
             .await
@@ -189,7 +188,7 @@ mod tests {
                 .unwrap_err();
             assert!(err.contains("stale"), "expected stale error, got: {err}");
             let row: (f64, f64) = sqlx::query_as(
-                "SELECT x, y FROM topology_nodes WHERE session_id = 's1' AND sync_name = '1'",
+                "SELECT x, y FROM topology_nodes WHERE session_id = 's1' AND mid = '1'",
             )
             .fetch_one(&pool)
             .await
@@ -218,12 +217,12 @@ mod tests {
     }
 
     #[test]
-    fn unknown_sync_name_returns_error_without_pushing_mutation() {
+    fn unknown_mid_returns_error_without_pushing_mutation() {
         tauri::async_runtime::block_on(async {
             let pool = test_pool_with_node().await;
             let buffer = TopologyMutationBuffer::default();
             let mut req = request(0);
-            req.sync_name = "999".into();
+            req.mid = "999".into();
 
             let err = apply_position_update(&pool, &buffer, &req)
                 .await

@@ -5,7 +5,7 @@
 //! - `*.eth[*].bitrate` 写在 NED `parameters` 段（**非** omnetpp.ini）。
 //! - `connections` 段用 `allowunconnected`（容忍未连端口、避免 NED 编译失败）。
 //! - manifest 字段名 `schemaVersion`（v0），顶层加 `caliber`/`sourceMutationId` 不破坏既有消费。
-//! - 节点命名用纯数字全局序号 `sw{N}`/`es{N}`（不混 sync_name/name 原文 → 天然安全标识符，KTD8）；
+//! - 节点命名用纯数字全局序号 `sw{N}`/`es{N}`（不混 mid/name 原文 → 天然安全标识符，KTD8）；
 //!   多挂（双平面）端系统照常唯一命名、不判 unmappable（boss 已定本批支持）。
 
 use crate::topology_verify::{VerifyError, VerifyLink, VerifyNode};
@@ -74,7 +74,7 @@ pub fn build_inet_bundle(
             Some("TsnSwitch") => {
                 sw_seq += 1;
                 mapped.insert(
-                    node.sync_name.as_str(),
+                    node.mid.as_str(),
                     MappedNode {
                         ned_name: format!("sw{sw_seq}"),
                         ned_type: "TsnSwitch",
@@ -84,7 +84,7 @@ pub fn build_inet_bundle(
             Some(ned_type) => {
                 es_seq += 1;
                 mapped.insert(
-                    node.sync_name.as_str(),
+                    node.mid.as_str(),
                     MappedNode {
                         ned_name: format!("es{es_seq}"),
                         ned_type,
@@ -95,9 +95,9 @@ pub fn build_inet_bundle(
                 code: "unmappable_node_type".to_string(),
                 message_zh: format!(
                     "节点 {} 的类型无法映射到 INET 模块（不是交换机/端系统/服务器）。",
-                    node.sync_name
+                    node.mid
                 ),
-                node_ref: Some(node.sync_name.clone()),
+                node_ref: Some(node.mid.clone()),
             }),
         }
     }
@@ -108,18 +108,18 @@ pub fn build_inet_bundle(
     // submodules：按入参顺序输出 `<ned_name>: <ned_type>;`。
     let mut submodules = String::new();
     for node in nodes {
-        if let Some(m) = mapped.get(node.sync_name.as_str()) {
+        if let Some(m) = mapped.get(node.mid.as_str()) {
             submodules.push_str(&format!("        {}: {};\n", m.ned_name, m.ned_type));
         }
     }
 
-    // connections：每条 link 两端 sync_name → ned_name；`ethg++` 门按发出顺序分配（门号唯一真源）。
+    // connections：每条 link 两端 mid → ned_name；`ethg++` 门按发出顺序分配（门号唯一真源）。
     // 端点不在 mapped（悬空，结构校验已拦）则跳过，配合 allowunconnected 容忍。
     let mut connections = String::new();
     for link in links {
         let (Some(src), Some(dst)) = (
-            mapped.get(link.src_sync_name.as_str()),
-            mapped.get(link.dst_sync_name.as_str()),
+            mapped.get(link.src_node.as_str()),
+            mapped.get(link.dst_node.as_str()),
         ) else {
             continue;
         };
@@ -177,7 +177,7 @@ mod tests {
 
     fn node(sync: &str, ty: &str) -> VerifyNode {
         VerifyNode {
-            sync_name: sync.into(),
+            mid: sync.into(),
             name: None,
             node_type: Some(ty.into()),
         }
@@ -185,8 +185,8 @@ mod tests {
     fn link(seq: i64, src: &str, dst: &str) -> VerifyLink {
         VerifyLink {
             link_seq: seq,
-            src_sync_name: src.into(),
-            dst_sync_name: dst.into(),
+            src_node: src.into(),
+            dst_node: dst.into(),
             styles_json: r#"{"leftLabel":"0","rightLabel":"0","speed":1000}"#.into(),
         }
     }
@@ -282,8 +282,8 @@ mod tests {
         let nodes = vec![node("0", "switch"), node("1", "endSystem")];
         let bad = VerifyLink {
             link_seq: 0,
-            src_sync_name: "0".into(),
-            dst_sync_name: "1".into(),
+            src_node: "0".into(),
+            dst_node: "1".into(),
             styles_json: r#"{"speed":"0; import evil"}"#.into(),
         };
         let b = build_inet_bundle(&nodes, &[bad], "s1", 1).unwrap();
@@ -299,7 +299,7 @@ mod tests {
     fn unmappable_node_type_errors() {
         let mut nodes = vec![node("0", "switch")];
         nodes.push(VerifyNode {
-            sync_name: "1".into(),
+            mid: "1".into(),
             name: None,
             node_type: None,
         });

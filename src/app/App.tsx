@@ -100,7 +100,7 @@ export function App() {
 
     const stillExists =
       selectedTopologyItem.kind === "node"
-        ? topologySnapshot.nodes.some((node) => node.syncName === selectedTopologyItem.id)
+        ? topologySnapshot.nodes.some((node) => node.mid === selectedTopologyItem.id)
         : topologySnapshot.links.some((link) => `link-${link.linkSeq}` === selectedTopologyItem.id);
 
     if (!stillExists) {

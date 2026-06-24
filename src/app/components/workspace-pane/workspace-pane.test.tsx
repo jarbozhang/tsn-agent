@@ -142,10 +142,10 @@ function sampleSnapshot(): TopologyRowSnapshot {
   return {
     sessionId: "s1",
     nodes: [
-      { syncName: "1", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
-      { syncName: "2", name: null, x: 160, y: 0, nodeType: null, insertOrder: 1 },
+      { mid: "1", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
+      { mid: "2", name: null, x: 160, y: 0, nodeType: null, insertOrder: 1 },
     ],
-    links: [{ linkSeq: 0, name: "uplink", srcSyncName: "1", dstSyncName: "2", stylesJson: "{}" }],
+    links: [{ linkSeq: 0, name: "uplink", srcNode: "1", dstNode: "2", stylesJson: "{}" }],
   };
 }
 
@@ -278,7 +278,7 @@ describe("WorkspacePane 拖动持久化（U4）", () => {
     await waitFor(() => expect(commitNodePosition).toHaveBeenCalledTimes(1));
     expect(commitNodePosition).toHaveBeenCalledWith({
       sessionId: "s1",
-      syncName: "2",
+      mid: "2",
       x: 480,
       y: 96,
       expectedMutationId: 7,
@@ -579,7 +579,7 @@ describe("WorkspacePane 画布配置与视口（R9/R12）", () => {
 describe("nodeRowLabel", () => {
   function nodeRow(overrides: Partial<TopologyNodeRow> = {}): TopologyNodeRow {
     return {
-      syncName: "2",
+      mid: "2",
       name: null,
       x: 0,
       y: 0,
@@ -591,13 +591,13 @@ describe("nodeRowLabel", () => {
 
   it("画布标签优先用逻辑名，与 agent 对话命名一致", () => {
     expect(nodeRowLabel(nodeRow({ name: "ES-1" }))).toBe("ES-1");
-    expect(nodeRowLabel(nodeRow({ name: "SW-1", nodeType: "switch", syncName: "0" }))).toBe("SW-1");
+    expect(nodeRowLabel(nodeRow({ name: "SW-1", nodeType: "switch", mid: "0" }))).toBe("SW-1");
   });
 
   it("逻辑名缺失（增量节点/历史数据）回退「前缀-同步名」派生", () => {
     expect(nodeRowLabel(nodeRow())).toBe("ES-2");
-    expect(nodeRowLabel(nodeRow({ nodeType: "switch", syncName: "0" }))).toBe("SW-0");
-    expect(nodeRowLabel(nodeRow({ nodeType: "controller", syncName: "9" }))).toBe("CTRL-9");
+    expect(nodeRowLabel(nodeRow({ nodeType: "switch", mid: "0" }))).toBe("SW-0");
+    expect(nodeRowLabel(nodeRow({ nodeType: "controller", mid: "9" }))).toBe("CTRL-9");
   });
 });
 
@@ -654,7 +654,7 @@ describe("planeClassName（R3）", () => {
 describe("topologySnapshotToReactFlow（U3 映射）", () => {
   function node(id: number, x: number, y: number): TopologyNodeRow {
     return {
-      syncName: String(id),
+      mid: String(id),
       name: null,
       x,
       y,
@@ -671,18 +671,18 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
         {
           linkSeq: 0,
           name: null,
-          srcSyncName: "10",
-          dstSyncName: "1",
+          srcNode: "10",
+          dstNode: "1",
           stylesJson: '{"plane":"A","leftLabel":"P0","rightLabel":"P0"}',
         },
         {
           linkSeq: 1,
           name: null,
-          srcSyncName: "10",
-          dstSyncName: "1",
+          srcNode: "10",
+          dstNode: "1",
           stylesJson: '{"leftLabel":"p1","rightLabel":"p2"}',
         },
-        { linkSeq: 2, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: "broken" },
+        { linkSeq: 2, name: null, srcNode: "10", dstNode: "1", stylesJson: "broken" },
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
@@ -704,18 +704,18 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
         {
           linkSeq: 0,
           name: null,
-          srcSyncName: "10",
-          dstSyncName: "1",
+          srcNode: "10",
+          dstNode: "1",
           stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}',
         },
         {
           linkSeq: 1,
           name: null,
-          srcSyncName: "10",
-          dstSyncName: "1",
+          srcNode: "10",
+          dstNode: "1",
           stylesJson: '{"leftLabel":"P1","rightLabel":"P1"}',
         },
-        { linkSeq: 2, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: "broken" },
+        { linkSeq: 2, name: null, srcNode: "10", dstNode: "1", stylesJson: "broken" },
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
@@ -733,22 +733,22 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
         {
           linkSeq: 0,
           name: null,
-          srcSyncName: "10",
-          dstSyncName: "1",
+          srcNode: "10",
+          dstNode: "1",
           stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}',
         },
         {
           linkSeq: 1,
           name: null,
-          srcSyncName: "10",
-          dstSyncName: "1",
+          srcNode: "10",
+          dstNode: "1",
           stylesJson: '{"leftLabel":"P1","rightLabel":"P1"}',
         },
         {
           linkSeq: 2,
           name: null,
-          srcSyncName: "2",
-          dstSyncName: "3",
+          srcNode: "2",
+          dstNode: "3",
           stylesJson: "{}",
         },
       ],
@@ -765,8 +765,8 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
       sessionId: "s1",
       nodes: [node(1, 120, 300), node(10, 90, 60)],
       links: [
-        { linkSeq: 0, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: "{}" },
-        { linkSeq: 1, name: null, srcSyncName: "1", dstSyncName: "10", stylesJson: "{}" },
+        { linkSeq: 0, name: null, srcNode: "10", dstNode: "1", stylesJson: "{}" },
+        { linkSeq: 1, name: null, srcNode: "1", dstNode: "10", stylesJson: "{}" },
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);

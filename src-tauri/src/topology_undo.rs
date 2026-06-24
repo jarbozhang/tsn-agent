@@ -23,11 +23,20 @@ struct TopologyPreImage {
 #[derive(Debug, Serialize, Deserialize)]
 struct NodeRow {
     session_id: String,
-    sync_name: String,
+    mid: String,
     name: Option<String>,
     x: f64,
     y: f64,
     node_type: Option<String>,
+    // U1 新增列：旧 blob 缺这些键时 serde default（mac/ip=None、port/queue=0）。
+    #[serde(default)]
+    mac: Option<String>,
+    #[serde(default)]
+    ip: Option<String>,
+    #[serde(default)]
+    port_count: i64,
+    #[serde(default)]
+    queue_count: i64,
     insert_order: i64,
 }
 
@@ -36,8 +45,15 @@ struct LinkRow {
     session_id: String,
     link_seq: i64,
     name: Option<String>,
-    src_sync_name: String,
-    dst_sync_name: String,
+    src_node: String,
+    dst_node: String,
+    // U2 新增列：旧 blob 缺这些键时 serde default（None）。
+    #[serde(default)]
+    src_port: Option<i64>,
+    #[serde(default)]
+    dst_port: Option<i64>,
+    #[serde(default)]
+    speed: Option<i64>,
     styles_json: String,
 }
 
@@ -64,14 +80,14 @@ pub async fn snapshot_pre_image(
     session_id: &str,
 ) -> Result<(), sqlx::Error> {
     let node_rows = sqlx::query(
-        r#"SELECT session_id, sync_name, name, x, y, node_type, insert_order
-           FROM topology_nodes WHERE session_id = ? ORDER BY insert_order, sync_name"#,
+        r#"SELECT session_id, mid, name, x, y, node_type, mac, ip, port_count, queue_count, insert_order
+           FROM topology_nodes WHERE session_id = ? ORDER BY insert_order, mid"#,
     )
     .bind(session_id)
     .fetch_all(&mut *conn)
     .await?;
     let link_rows = sqlx::query(
-        r#"SELECT session_id, link_seq, name, src_sync_name, dst_sync_name, styles_json
+        r#"SELECT session_id, link_seq, name, src_node, dst_node, src_port, dst_port, speed, styles_json
            FROM topology_links WHERE session_id = ? ORDER BY link_seq"#,
     )
     .bind(session_id)
@@ -83,11 +99,15 @@ pub async fn snapshot_pre_image(
             .into_iter()
             .map(|r| NodeRow {
                 session_id: r.get("session_id"),
-                sync_name: r.get("sync_name"),
+                mid: r.get("mid"),
                 name: r.get("name"),
                 x: r.get("x"),
                 y: r.get("y"),
                 node_type: r.get("node_type"),
+                mac: r.get("mac"),
+                ip: r.get("ip"),
+                port_count: r.get("port_count"),
+                queue_count: r.get("queue_count"),
                 insert_order: r.get("insert_order"),
             })
             .collect(),
@@ -97,8 +117,11 @@ pub async fn snapshot_pre_image(
                 session_id: r.get("session_id"),
                 link_seq: r.get("link_seq"),
                 name: r.get("name"),
-                src_sync_name: r.get("src_sync_name"),
-                dst_sync_name: r.get("dst_sync_name"),
+                src_node: r.get("src_node"),
+                dst_node: r.get("dst_node"),
+                src_port: r.get("src_port"),
+                dst_port: r.get("dst_port"),
+                speed: r.get("speed"),
                 styles_json: r.get("styles_json"),
             })
             .collect(),
@@ -153,15 +176,19 @@ pub async fn restore_pre_image(pool: &Pool<Sqlite>, session_id: &str) -> Result<
     for node in &pre_image.nodes {
         sqlx::query(
             r#"INSERT INTO topology_nodes
-               (session_id, sync_name, name, x, y, node_type, insert_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+               (session_id, mid, name, x, y, node_type, mac, ip, port_count, queue_count, insert_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(&node.session_id)
-        .bind(&node.sync_name)
+        .bind(&node.mid)
         .bind(&node.name)
         .bind(node.x)
         .bind(node.y)
         .bind(&node.node_type)
+        .bind(&node.mac)
+        .bind(&node.ip)
+        .bind(node.port_count)
+        .bind(node.queue_count)
         .bind(node.insert_order)
         .execute(&mut *tx)
         .await?;
@@ -170,14 +197,17 @@ pub async fn restore_pre_image(pool: &Pool<Sqlite>, session_id: &str) -> Result<
     for link in &pre_image.links {
         sqlx::query(
             r#"INSERT INTO topology_links
-               (session_id, link_seq, name, src_sync_name, dst_sync_name, styles_json)
-               VALUES (?, ?, ?, ?, ?, ?)"#,
+               (session_id, link_seq, name, src_node, dst_node, src_port, dst_port, speed, styles_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(&link.session_id)
         .bind(link.link_seq)
         .bind(&link.name)
-        .bind(&link.src_sync_name)
-        .bind(&link.dst_sync_name)
+        .bind(&link.src_node)
+        .bind(&link.dst_node)
+        .bind(link.src_port)
+        .bind(link.dst_port)
+        .bind(link.speed)
         .bind(&link.styles_json)
         .execute(&mut *tx)
         .await?;
@@ -222,31 +252,43 @@ mod tests {
         pool
     }
 
-    /// 写一套含 x/y、styles_json 的两表样本。
+    /// 写一套含 x/y、mac/ip/port_count、styles_json、端口列的两表样本。
     async fn seed_topology(pool: &Pool<Sqlite>) {
         sqlx::query(
-            "INSERT INTO topology_nodes (session_id, sync_name, name, x, y, node_type, insert_order) \
-             VALUES ('s1', '0', 'ES-1', 10.5, 20.25, 'endSystem', 0), \
-                    ('s1', '1', NULL, 30.0, 40.0, 'switch', 1)",
+            "INSERT INTO topology_nodes (session_id, mid, name, x, y, node_type, mac, ip, port_count, queue_count, insert_order) \
+             VALUES ('s1', '0', 'ES-1', 10.5, 20.25, 'endSystem', '02:00:00:00:00:01', '10.0.0.1', 8, 8, 0), \
+                    ('s1', '1', NULL, 30.0, 40.0, 'switch', NULL, NULL, 16, 8, 1)",
         )
         .execute(pool)
         .await
         .unwrap();
         sqlx::query(
-            "INSERT INTO topology_links (session_id, link_seq, name, src_sync_name, dst_sync_name, styles_json) \
-             VALUES ('s1', 0, 'l0', '0', '1', '{\"leftLabel\":\"0\",\"rightLabel\":\"1\"}')",
+            "INSERT INTO topology_links (session_id, link_seq, name, src_node, dst_node, src_port, dst_port, speed, styles_json) \
+             VALUES ('s1', 0, 'l0', '0', '1', 0, 1, 1000, '{\"leftLabel\":\"0\",\"rightLabel\":\"1\"}')",
         )
         .execute(pool)
         .await
         .unwrap();
     }
 
+    #[allow(clippy::type_complexity)]
     async fn dump_nodes(
         pool: &Pool<Sqlite>,
-    ) -> Vec<(String, Option<String>, f64, f64, Option<String>, i64)> {
+    ) -> Vec<(
+        String,
+        Option<String>,
+        f64,
+        f64,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i64,
+        i64,
+        i64,
+    )> {
         sqlx::query(
-            "SELECT sync_name, name, x, y, node_type, insert_order FROM topology_nodes \
-             WHERE session_id='s1' ORDER BY insert_order, sync_name",
+            "SELECT mid, name, x, y, node_type, mac, ip, port_count, queue_count, insert_order FROM topology_nodes \
+             WHERE session_id='s1' ORDER BY insert_order, mid",
         )
         .fetch_all(pool)
         .await
@@ -254,20 +296,36 @@ mod tests {
         .into_iter()
         .map(|r| {
             (
-                r.get("sync_name"),
+                r.get("mid"),
                 r.get("name"),
                 r.get("x"),
                 r.get("y"),
                 r.get("node_type"),
+                r.get("mac"),
+                r.get("ip"),
+                r.get("port_count"),
+                r.get("queue_count"),
                 r.get("insert_order"),
             )
         })
         .collect()
     }
 
-    async fn dump_links(pool: &Pool<Sqlite>) -> Vec<(i64, Option<String>, String, String, String)> {
+    #[allow(clippy::type_complexity)]
+    async fn dump_links(
+        pool: &Pool<Sqlite>,
+    ) -> Vec<(
+        i64,
+        Option<String>,
+        String,
+        String,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        String,
+    )> {
         sqlx::query(
-            "SELECT link_seq, name, src_sync_name, dst_sync_name, styles_json FROM topology_links \
+            "SELECT link_seq, name, src_node, dst_node, src_port, dst_port, speed, styles_json FROM topology_links \
              WHERE session_id='s1' ORDER BY link_seq",
         )
         .fetch_all(pool)
@@ -278,8 +336,11 @@ mod tests {
             (
                 r.get("link_seq"),
                 r.get("name"),
-                r.get("src_sync_name"),
-                r.get("dst_sync_name"),
+                r.get("src_node"),
+                r.get("dst_node"),
+                r.get("src_port"),
+                r.get("dst_port"),
+                r.get("speed"),
                 r.get("styles_json"),
             )
         })
@@ -389,7 +450,7 @@ mod tests {
             assert_eq!(snap_count, 1, "(session_id, domain) 主键只留一份");
 
             // 还乱动一下三表，restore 应盖回「第二次快照」态（无链路）。
-            sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) VALUES ('s1', 7, '0', '1', '{}')")
+            sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_node, dst_node, styles_json) VALUES ('s1', 7, '0', '1', '{}')")
                 .execute(&pool)
                 .await
                 .unwrap();
