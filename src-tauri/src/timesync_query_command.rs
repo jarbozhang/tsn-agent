@@ -136,7 +136,10 @@ mod tests {
         pool
     }
 
-    async fn read_query(pool: &sqlx::Pool<sqlx::Sqlite>, session_id: &str) -> QueryTimesyncResponse {
+    async fn read_query(
+        pool: &sqlx::Pool<sqlx::Sqlite>,
+        session_id: &str,
+    ) -> QueryTimesyncResponse {
         let domain_row = sqlx::query(
             "SELECT gm_mid, one_step_mode, fre_switch, disabled_link_seqs FROM timesync_domain WHERE session_id = ?",
         )

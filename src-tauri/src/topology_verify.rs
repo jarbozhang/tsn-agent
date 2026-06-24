@@ -4,8 +4,7 @@
 //!
 //! 口径恒 `structural_only`：只验结构连通/可达，不代表时延或可调度性（INET 验证是第二批）。
 //!
-//! MAC 可达性说明：转发表由"无向图最短路 BFS 取首跳"派生（见 topology_compute
-//! build_legacy_mac_forwarding_table / find_first_egress_port），按构造即无环、
+//! MAC 可达性说明：转发表由"无向图最短路 BFS 取首跳"派生，按构造即无环、
 //! 每目的唯一出端口。因此 MAC 现算现验在本模块归结为一条**连通性**判定：全图单连通
 //! ⇔ 每个端系统对其它节点全可达 ⇔ 转发表可派生。两条 BFS 跑同一条无向边集，可达性
 //! 结论按构造一致（见测试 reachability_matches_connectivity）。

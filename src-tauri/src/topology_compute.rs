@@ -4,17 +4,17 @@
 //! 由 sidecar 8 routes 在 axum handler 中调用。
 //!
 //! 范围（与 U4a-2 plan section 一致）：
-//! - `describe_templates`：静态 3-template catalog
-//! - `build_artifacts`：4 件套构建（topology.json / topo_feature.json / data-server.json /
-//!   mac-forwarding-table.json，含 BFS）
+//! - `describe_templates`：静态 template catalog
+//! - `build_artifacts`：U12 去 Qunee 后只产一个干净 `topology.json`
+//!   （mid/mac/ip/port，见 docs/topology-export-contract.md），不再产 Qunee 四件套
 //! - `describe_artifacts`：summary
-//! - `validate_artifacts`：4 件套结构校验
+//! - `validate_artifacts`：`topology.json` 结构 + 连线引用校验
 //!
 //! `initialize` 支持 hop-linear 与 dual-plane-redundant 两个模板。
 //! - `inspect` / `validate` 实现核心校验 + selector 解析，与 TS 保持 byte-equal
 //!   summary。adjacency / portUsage 在 full 模式仍输出，但 sidecar 默认 summary。
 
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -22,8 +22,8 @@ use serde_json::{Value, json};
 use crate::topology_intermediate::{
     INTERMEDIATE_TOPOLOGY_SCHEMA_VERSION, IntermediateLink, IntermediateLinkEndpoint,
     IntermediateLinkMedium, IntermediateNode, IntermediateNodeType, IntermediatePosition,
-    IntermediateTopology, IntermediateTopologyMetadata, create_ports, derive_legacy_ip,
-    derive_legacy_mac, derive_mac_address, sort_links_by_numeric_id, sort_nodes_by_numeric_id,
+    IntermediateTopology, IntermediateTopologyMetadata, assign_ip, assign_mac, create_ports,
+    derive_mac_address, sort_links_by_numeric_id, sort_nodes_by_numeric_id,
 };
 
 // ============================================================================
@@ -35,6 +35,9 @@ pub const MAX_LINKS: usize = 600;
 pub const MAX_PORTS_PER_NODE: usize = 64;
 pub const MAX_INGRESS_PAYLOAD_BYTES: usize = 512_000;
 pub const MAX_ARTIFACT_BYTES: usize = 2_000_000;
+
+/// U12 导出：每节点 TSN 队列数（沿用 Qunee 时代 `queue_num` 常量 3）。
+const EXPORT_QUEUE_COUNT: i64 = 3;
 
 // ============================================================================
 // Errors / Result envelope（与 src/topology/tool-result.ts 同步，summary-only）
@@ -2001,7 +2004,7 @@ fn finalize_validation(
 }
 
 // ============================================================================
-// build_artifacts (artifacts.ts 4 件套，含 BFS)
+// build_artifacts（U12 去 Qunee：唯一干净 topology.json）
 // ============================================================================
 
 #[derive(Debug, Serialize)]
@@ -2012,7 +2015,6 @@ pub struct ArtifactsSummary {
     pub total_bytes: usize,
     pub topology_node_count: usize,
     pub topology_link_count: usize,
-    pub mac_entry_count: usize,
     pub contains_html: bool,
 }
 
@@ -2039,22 +2041,13 @@ pub fn build_topology_artifacts(
             )]
         })?;
 
-    let topology_json = build_legacy_topology_json(&topology);
-    let topo_feature = build_legacy_topo_feature(&topology);
-    let data_server = build_legacy_data_server(&topology);
-    let mac_table = build_legacy_mac_forwarding_table(&topology);
+    let topology_json = build_topology_json(&topology);
 
     let artifacts = json!({
         "topology.json": wrap_artifact("topology.json", &topology_json),
-        "topo_feature.json": wrap_artifact("topo_feature.json", &topo_feature),
-        "data-server.json": wrap_artifact("data-server.json", &data_server),
-        "mac-forwarding-table.json": wrap_artifact("mac-forwarding-table.json", &mac_table),
     });
 
-    let total_bytes = artifact_byte_length(&topology_json)
-        + artifact_byte_length(&topo_feature)
-        + artifact_byte_length(&data_server)
-        + artifact_byte_length(&mac_table);
+    let total_bytes = artifact_byte_length(&topology_json);
 
     if total_bytes > MAX_ARTIFACT_BYTES {
         return Err(vec![limit_error(
@@ -2065,19 +2058,12 @@ pub fn build_topology_artifacts(
     }
 
     let topology_nodes_count = topology_json
-        .get("node")
-        .and_then(|n| n.get("nodes"))
+        .get("nodes")
         .and_then(Value::as_array)
         .map(|a| a.len())
         .unwrap_or(0);
     let topology_links_count = topology_json
-        .get("node")
-        .and_then(|n| n.get("links"))
-        .and_then(Value::as_array)
-        .map(|a| a.len())
-        .unwrap_or(0);
-    let mac_entry_count = mac_table
-        .get("entries")
+        .get("links")
         .and_then(Value::as_array)
         .map(|a| a.len())
         .unwrap_or(0);
@@ -2085,17 +2071,11 @@ pub fn build_topology_artifacts(
     Ok(BuildArtifactsResult {
         artifacts,
         summary: ArtifactsSummary {
-            artifact_count: 4,
-            artifact_names: vec![
-                "topology.json".into(),
-                "topo_feature.json".into(),
-                "data-server.json".into(),
-                "mac-forwarding-table.json".into(),
-            ],
+            artifact_count: 1,
+            artifact_names: vec!["topology.json".into()],
             total_bytes,
             topology_node_count: topology_nodes_count,
             topology_link_count: topology_links_count,
-            mac_entry_count,
             contains_html: false,
         },
         warnings: report.warnings,
@@ -2121,15 +2101,8 @@ fn artifact_byte_length(value: &Value) -> usize {
     serde_json::to_string(value).map(|s| s.len()).unwrap_or(0)
 }
 
-fn imac_by_node_id_map(sorted_nodes: &[IntermediateNode]) -> HashMap<String, i64> {
-    sorted_nodes
-        .iter()
-        .enumerate()
-        .map(|(i, n)| (n.id.clone(), 100 + i as i64))
-        .collect()
-}
-
-fn legacy_node_type(t: IntermediateNodeType) -> &'static str {
+/// canonical 节点类型字符串（switch/endSystem/server），导出与持久层共用同一口径。
+fn canonical_node_type(t: IntermediateNodeType) -> &'static str {
     match t {
         IntermediateNodeType::Switch => "switch",
         IntermediateNodeType::EndSystem => "endSystem",
@@ -2137,15 +2110,7 @@ fn legacy_node_type(t: IntermediateNodeType) -> &'static str {
     }
 }
 
-fn legacy_class_path(t: IntermediateNodeType) -> &'static str {
-    match t {
-        IntermediateNodeType::Switch => "Q.Graphs.exchanger2",
-        IntermediateNodeType::Server => "Q.Graphs.server",
-        IntermediateNodeType::EndSystem => "Q.Graphs.node",
-    }
-}
-
-fn legacy_port_number(node: &IntermediateNode, port_id: &str) -> Result<i64, String> {
+fn port_number_for(node: &IntermediateNode, port_id: &str) -> Result<i64, String> {
     node.ports
         .iter()
         .find(|p| p.id == port_id)
@@ -2164,22 +2129,31 @@ fn node_by_id<'a>(
         .ok_or_else(|| format!("Node {node_id} does not exist."))
 }
 
-fn build_legacy_topology_json(topology: &IntermediateTopology) -> Value {
+/// U12（去 Qunee）：导出唯一干净格式 `topology.json`。读内存 IntermediateTopology
+/// （build_topology_artifacts 吃 sidecar 透传的内存对象、不读库），产
+/// `{ nodes: [{ mid, name, mac, ip, portCount, queueCount, nodeType }],
+///    links: [{ srcNode, dstNode, srcPort, dstPort, speed }] }`。
+/// 不再产 imac / _classPath / sync_type / topo_feature / data-server / mac-forwarding
+/// 等 Qunee 结构。mac/ip 用 U3 的 `assign_mac`/`assign_ip`（02: + 10.x 新方案）从
+/// numericId 确定性派生，与 `persist_initialized_topology` 落库的 mac/ip 列同源；
+/// 不读内存 `mac_address`/`ip_address`（模板填的是旧 00:1B:44 派生、且只端系统有）。
+/// mid = numericId 字符串、port = 端口 index 整数、speed = dataRateMbps。
+/// ⚠️ 外部规划器（独立工具）须同步改吃此格式——见 docs/topology-export-contract.md。
+fn build_topology_json(topology: &IntermediateTopology) -> Value {
     let sorted_nodes = sort_nodes_by_numeric_id(&topology.nodes);
-    let imac_by_node_id = imac_by_node_id_map(&sorted_nodes);
     let sorted_links = sort_links_by_numeric_id(&topology.links);
 
     let nodes_out: Vec<Value> = sorted_nodes
         .iter()
         .map(|node| {
-            let imac = *imac_by_node_id.get(&node.id).unwrap_or(&100);
             json!({
-                "imac": imac,
                 "mid": node.numeric_id.to_string(),
-                "x": node.position.x.round() as i64,
-                "y": node.position.y.round() as i64,
-                "sync_type": { "_classPath": legacy_class_path(node.node_type) },
-                "node_type": legacy_node_type(node.node_type),
+                "name": node.name,
+                "mac": assign_mac(node.numeric_id),
+                "ip": assign_ip(node.numeric_id),
+                "portCount": node.ports.len(),
+                "queueCount": EXPORT_QUEUE_COUNT,
+                "nodeType": canonical_node_type(node.node_type),
             })
         })
         .collect();
@@ -2191,294 +2165,22 @@ fn build_legacy_topology_json(topology: &IntermediateTopology) -> Value {
                 node_by_id(topology, &link.source.node_id).unwrap_or_else(|_| &topology.nodes[0]);
             let target_node =
                 node_by_id(topology, &link.target.node_id).unwrap_or_else(|_| &topology.nodes[0]);
-            let source_port = legacy_port_number(source_node, &link.source.port_id).unwrap_or(0);
-            let target_port = legacy_port_number(target_node, &link.target.port_id).unwrap_or(0);
+            let source_port = port_number_for(source_node, &link.source.port_id).unwrap_or(0);
+            let target_port = port_number_for(target_node, &link.target.port_id).unwrap_or(0);
             json!({
-                "name": format!(
-                    "{}:{}-{}:{}",
-                    source_node.numeric_id, source_port, target_node.numeric_id, target_port
-                ),
-                "styles": {
-                    "leftLabel": source_port.to_string(),
-                    "rightLabel": target_port.to_string(),
-                    "speed": link.data_rate_mbps,
-                },
-                "imac": *imac_by_node_id.get(&source_node.id).unwrap_or(&100),
-                "addr": *imac_by_node_id.get(&target_node.id).unwrap_or(&100),
+                "srcNode": source_node.numeric_id.to_string(),
+                "dstNode": target_node.numeric_id.to_string(),
+                "srcPort": source_port,
+                "dstPort": target_port,
+                "speed": link.data_rate_mbps,
             })
         })
         .collect();
 
     json!({
-        "node": { "nodes": nodes_out, "links": links_out },
-        "refs": {},
+        "nodes": nodes_out,
+        "links": links_out,
     })
-}
-
-fn build_legacy_topo_feature(topology: &IntermediateTopology) -> Value {
-    let node_types_by_id: HashMap<String, IntermediateNodeType> = topology
-        .nodes
-        .iter()
-        .map(|n| (n.id.clone(), n.node_type))
-        .collect();
-    let mut entries: Vec<Value> = Vec::new();
-    let mut link_id: i64 = 0;
-    for link in sort_links_by_numeric_id(&topology.links) {
-        let source = match node_by_id(topology, &link.source.node_id) {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-        let target = match node_by_id(topology, &link.target.node_id) {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-        let src_is_server = node_types_by_id.get(&source.id) == Some(&IntermediateNodeType::Server);
-        let dst_is_server = node_types_by_id.get(&target.id) == Some(&IntermediateNodeType::Server);
-        if src_is_server || dst_is_server {
-            continue;
-        }
-        let source_port = legacy_port_number(source, &link.source.port_id).unwrap_or(0);
-        let target_port = legacy_port_number(target, &link.target.port_id).unwrap_or(0);
-        entries.push(json!({
-            "link_id": link_id,
-            "src_node": source.numeric_id,
-            "src_port": source_port,
-            "dst_node": target.numeric_id,
-            "dst_port": target_port,
-            "speed": link.data_rate_mbps,
-            "st_queues": 3,
-        }));
-        link_id += 1;
-        entries.push(json!({
-            "link_id": link_id,
-            "src_node": target.numeric_id,
-            "src_port": target_port,
-            "dst_node": source.numeric_id,
-            "dst_port": source_port,
-            "speed": link.data_rate_mbps,
-            "st_queues": 3,
-        }));
-        link_id += 1;
-    }
-    Value::Array(entries)
-}
-
-fn build_legacy_data_server(topology: &IntermediateTopology) -> Value {
-    let sorted_nodes = sort_nodes_by_numeric_id(&topology.nodes);
-    let imac_by_node_id = imac_by_node_id_map(&sorted_nodes);
-    let mut datas: Vec<Value> = Vec::new();
-
-    for node in &sorted_nodes {
-        let legacy_type = legacy_node_type(node.node_type);
-        let imac = *imac_by_node_id.get(&node.id).unwrap_or(&100);
-        let mut item = serde_json::Map::new();
-        item.insert("_className".into(), json!("Q.Node"));
-        item.insert(
-            "json".into(),
-            json!({
-                "name": node.numeric_id.to_string(),
-                "location": {
-                    "_className": "Q.Point",
-                    "json": {
-                        "x": node.position.x.round() as i64,
-                        "y": node.position.y.round() as i64,
-                        "rotate": 0,
-                    }
-                },
-                "image": { "_classPath": legacy_class_path(node.node_type) }
-            }),
-        );
-        item.insert("id".into(), json!(imac));
-        item.insert("src_imac".into(), json!(imac));
-        item.insert("display_name".into(), json!(node.name));
-        item.insert("node_type".into(), json!(legacy_type));
-
-        if legacy_type != "server" {
-            item.insert("buffer_num".into(), json!(8));
-            item.insert("queue_num".into(), json!(3));
-            item.insert(
-                "mac_address".into(),
-                json!(
-                    node.mac_address
-                        .clone()
-                        .unwrap_or_else(|| derive_legacy_mac(node.numeric_id))
-                ),
-            );
-            item.insert(
-                "ip".into(),
-                json!(
-                    node.ip_address
-                        .clone()
-                        .unwrap_or_else(|| derive_legacy_ip(node.numeric_id))
-                ),
-            );
-            item.insert("port_count".into(), json!(node.ports.len()));
-        }
-
-        datas.push(Value::Object(item));
-    }
-
-    let mut edge_id = 100 + sorted_nodes.len() as i64;
-    for link in sort_links_by_numeric_id(&topology.links) {
-        let source = match node_by_id(topology, &link.source.node_id) {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-        let target = match node_by_id(topology, &link.target.node_id) {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-        let source_port = legacy_port_number(source, &link.source.port_id).unwrap_or(0);
-        let target_port = legacy_port_number(target, &link.target.port_id).unwrap_or(0);
-        datas.push(json!({
-            "_className": "Q.Edge",
-            "json": {
-                "name": format!(
-                    "{}:{}-{}:{}",
-                    source.numeric_id, source_port, target.numeric_id, target_port
-                ),
-                "from": { "_ref": *imac_by_node_id.get(&source.id).unwrap_or(&100) },
-                "to": { "_ref": *imac_by_node_id.get(&target.id).unwrap_or(&100) },
-                "styles": {
-                    "leftLabel": source_port.to_string(),
-                    "rightLabel": target_port.to_string(),
-                    "speed": link.data_rate_mbps,
-                }
-            },
-            "id": edge_id,
-            "bindingUIs": [],
-        }));
-        edge_id += 1;
-    }
-
-    json!({
-        "version": "2.0",
-        "refs": {},
-        "datas": datas,
-        "scale": 1,
-    })
-}
-
-fn build_legacy_mac_forwarding_table(topology: &IntermediateTopology) -> Value {
-    let sorted_nodes = sort_nodes_by_numeric_id(&topology.nodes);
-    let imac_by_id = imac_by_node_id_map(&sorted_nodes);
-    let adjacency = build_adjacency(topology);
-    let mut entries: Vec<Value> = Vec::new();
-
-    for sw in sorted_nodes
-        .iter()
-        .filter(|n| n.node_type == IntermediateNodeType::Switch)
-    {
-        for dst in &sorted_nodes {
-            if dst.id == sw.id {
-                continue;
-            }
-            let Some(egress_port) = find_first_egress_port(&sw.id, &dst.id, &adjacency) else {
-                continue;
-            };
-            entries.push(json!({
-                "switch_node": sw.numeric_id,
-                "switch_imac": *imac_by_id.get(&sw.id).unwrap_or(&100),
-                "switch_name": sw.name,
-                "destination_node": dst.numeric_id,
-                "destination_imac": *imac_by_id.get(&dst.id).unwrap_or(&100),
-                "destination_mac": dst
-                    .mac_address
-                    .clone()
-                    .unwrap_or_else(|| derive_legacy_mac(dst.numeric_id)),
-                "destination_name": dst.name,
-                "egress_port": egress_port,
-            }));
-        }
-    }
-
-    json!({
-        "version": "1.0",
-        "entries": entries,
-    })
-}
-
-#[derive(Debug, Clone)]
-struct AdjacencyEdge {
-    node_id: String,
-    out_port: i64,
-}
-
-fn build_adjacency(topology: &IntermediateTopology) -> HashMap<String, Vec<AdjacencyEdge>> {
-    let mut adjacency: HashMap<String, Vec<AdjacencyEdge>> = topology
-        .nodes
-        .iter()
-        .map(|n| (n.id.clone(), Vec::new()))
-        .collect();
-
-    for link in &topology.links {
-        let source = match node_by_id(topology, &link.source.node_id) {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-        let target = match node_by_id(topology, &link.target.node_id) {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-        let s_port = legacy_port_number(source, &link.source.port_id).unwrap_or(0);
-        let t_port = legacy_port_number(target, &link.target.port_id).unwrap_or(0);
-
-        adjacency
-            .entry(link.source.node_id.clone())
-            .or_default()
-            .push(AdjacencyEdge {
-                node_id: link.target.node_id.clone(),
-                out_port: s_port,
-            });
-        adjacency
-            .entry(link.target.node_id.clone())
-            .or_default()
-            .push(AdjacencyEdge {
-                node_id: link.source.node_id.clone(),
-                out_port: t_port,
-            });
-    }
-
-    for edges in adjacency.values_mut() {
-        edges.sort_by(|a, b| match a.node_id.cmp(&b.node_id) {
-            std::cmp::Ordering::Equal => a.out_port.cmp(&b.out_port),
-            other => other,
-        });
-    }
-
-    adjacency
-}
-
-fn find_first_egress_port(
-    start_node_id: &str,
-    destination_node_id: &str,
-    adjacency: &HashMap<String, Vec<AdjacencyEdge>>,
-) -> Option<i64> {
-    let mut seen: HashSet<String> = HashSet::new();
-    seen.insert(start_node_id.to_string());
-    let mut queue: VecDeque<(String, Option<i64>)> = VecDeque::new();
-    queue.push_back((start_node_id.to_string(), None));
-
-    while let Some((current_node, first_port)) = queue.pop_front() {
-        if let Some(edges) = adjacency.get(&current_node) {
-            for edge in edges {
-                if seen.contains(&edge.node_id) {
-                    continue;
-                }
-                let next_first = if current_node == start_node_id {
-                    Some(edge.out_port)
-                } else {
-                    first_port
-                };
-                if edge.node_id == destination_node_id {
-                    return next_first;
-                }
-                seen.insert(edge.node_id.clone());
-                queue.push_back((edge.node_id.clone(), next_first));
-            }
-        }
-    }
-    None
 }
 
 // ============================================================================
@@ -2491,57 +2193,34 @@ pub fn describe_topology_artifacts(artifacts_value: &Value) -> Value {
         .and_then(|t| t.get("data"))
         .cloned()
         .unwrap_or(Value::Null);
-    let mac = artifacts_value
-        .get("mac-forwarding-table.json")
-        .and_then(|t| t.get("data"))
-        .cloned()
-        .unwrap_or(Value::Null);
 
     let mut total_bytes: usize = 0;
     let mut names: Vec<String> = Vec::new();
-    for name in [
-        "topology.json",
-        "topo_feature.json",
-        "data-server.json",
-        "mac-forwarding-table.json",
-    ] {
-        if let Some(art) = artifacts_value.get(name) {
-            names.push(name.into());
-            total_bytes += art
-                .get("byteLength")
-                .and_then(Value::as_u64)
-                .map(|n| n as usize)
-                .unwrap_or_else(|| art.get("data").map(artifact_byte_length).unwrap_or(0));
-        }
+    if let Some(art) = artifacts_value.get("topology.json") {
+        names.push("topology.json".into());
+        total_bytes += art
+            .get("byteLength")
+            .and_then(Value::as_u64)
+            .map(|n| n as usize)
+            .unwrap_or_else(|| art.get("data").map(artifact_byte_length).unwrap_or(0));
     }
     let node_count = topo
-        .get("node")
-        .and_then(|n| n.get("nodes"))
+        .get("nodes")
         .and_then(Value::as_array)
         .map(|a| a.len())
         .unwrap_or(0);
     let link_count = topo
-        .get("node")
-        .and_then(|n| n.get("links"))
-        .and_then(Value::as_array)
-        .map(|a| a.len())
-        .unwrap_or(0);
-    let mac_entry_count = mac
-        .get("entries")
+        .get("links")
         .and_then(Value::as_array)
         .map(|a| a.len())
         .unwrap_or(0);
 
     json!({
         "artifactCount": names.len(),
-        "artifactNames": [
-            "topology.json", "topo_feature.json",
-            "data-server.json", "mac-forwarding-table.json",
-        ],
+        "artifactNames": ["topology.json"],
         "totalBytes": total_bytes,
         "topologyNodeCount": node_count,
         "topologyLinkCount": link_count,
-        "macEntryCount": mac_entry_count,
         "containsHtml": false,
     })
 }
@@ -2552,6 +2231,9 @@ pub struct ValidateArtifactsReport {
     pub artifact_names: Vec<String>,
 }
 
+/// U12（去 Qunee）：校验唯一干净格式 `topology.json`——nodes/links 为数组，
+/// 每个 link 的 srcNode/dstNode 引用现存节点 mid。不再校验 topo_feature /
+/// data-server / mac-forwarding 等 Qunee 结构（已不产出）。
 pub fn validate_topology_artifacts(artifacts_value: &Value) -> ValidateArtifactsReport {
     let mut errors: Vec<TopologyErrorOut> = Vec::new();
     let topology_data = artifacts_value.get("topology.json").and_then(|v| {
@@ -2562,144 +2244,39 @@ pub fn validate_topology_artifacts(artifacts_value: &Value) -> ValidateArtifacts
             Some(v.clone())
         }
     });
-    let topo_feature = artifacts_value.get("topo_feature.json").and_then(|v| {
-        if v.is_object() && v.get("data").is_some() {
-            v.get("data").cloned()
-        } else {
-            Some(v.clone())
-        }
-    });
-    let data_server = artifacts_value.get("data-server.json").and_then(|v| {
-        if v.is_object() && v.get("data").is_some() {
-            v.get("data").cloned()
-        } else {
-            Some(v.clone())
-        }
-    });
-    let mac_table = artifacts_value
-        .get("mac-forwarding-table.json")
-        .and_then(|v| {
-            if v.is_object() && v.get("data").is_some() {
-                v.get("data").cloned()
-            } else {
-                Some(v.clone())
-            }
-        });
 
-    let topology_ok = topology_data
+    let nodes_arr = topology_data
         .as_ref()
-        .and_then(|t| t.get("node"))
-        .map(|n| {
-            n.get("nodes").and_then(Value::as_array).is_some()
-                && n.get("links").and_then(Value::as_array).is_some()
-        })
-        .unwrap_or(false);
-    if !topology_ok {
+        .and_then(|t| t.get("nodes"))
+        .and_then(Value::as_array);
+    let links_arr = topology_data
+        .as_ref()
+        .and_then(|t| t.get("links"))
+        .and_then(Value::as_array);
+    if nodes_arr.is_none() || links_arr.is_none() {
         errors.push(TopologyErrorOut::new(
             "INVALID_ARTIFACT",
-            "topology.json must contain node.nodes and node.links arrays.",
+            "topology.json must contain nodes and links arrays.",
             "$.artifacts['topology.json']",
         ));
     }
 
-    if !topo_feature.as_ref().map(Value::is_array).unwrap_or(false) {
-        errors.push(TopologyErrorOut::new(
-            "INVALID_ARTIFACT",
-            "topo_feature.json must be an array.",
-            "$.artifacts['topo_feature.json']",
-        ));
-    }
-
-    let data_server_ok = data_server
-        .as_ref()
-        .map(|d| {
-            d.get("version").and_then(Value::as_str) == Some("2.0")
-                && d.get("datas").and_then(Value::as_array).is_some()
-        })
-        .unwrap_or(false);
-    if !data_server_ok {
-        errors.push(TopologyErrorOut::new(
-            "INVALID_ARTIFACT",
-            "data-server.json must contain version 2.0 and datas array.",
-            "$.artifacts['data-server.json']",
-        ));
-    }
-
-    let mac_table_ok = mac_table
-        .as_ref()
-        .map(|m| {
-            m.get("version").and_then(Value::as_str) == Some("1.0")
-                && m.get("entries").and_then(Value::as_array).is_some()
-        })
-        .unwrap_or(false);
-    if !mac_table_ok {
-        errors.push(TopologyErrorOut::new(
-            "INVALID_ARTIFACT",
-            "mac-forwarding-table.json must contain version 1.0 and entries array.",
-            "$.artifacts['mac-forwarding-table.json']",
-        ));
-    }
-
-    // Cross-artifact: topo_feature edges reference unknown node
-    if let (Some(topology), Some(features_value)) = (&topology_data, &topo_feature)
-        && let Some(nodes_arr) = topology
-            .get("node")
-            .and_then(|n| n.get("nodes"))
-            .and_then(Value::as_array)
-    {
-        let node_ids: HashSet<i64> = nodes_arr
+    // Cross-reference: 每条 link 的 srcNode/dstNode 必须指向现存节点 mid。
+    if let (Some(nodes), Some(links)) = (nodes_arr, links_arr) {
+        let node_ids: HashSet<String> = nodes
             .iter()
-            .filter_map(|n| {
-                n.get("mid")
-                    .and_then(Value::as_str)
-                    .and_then(|s| s.parse::<i64>().ok())
-            })
+            .filter_map(|n| n.get("mid").and_then(Value::as_str).map(String::from))
             .collect();
-        if let Some(features) = features_value.as_array() {
-            for (index, edge) in features.iter().enumerate() {
-                let src = edge.get("src_node").and_then(Value::as_i64);
-                let dst = edge.get("dst_node").and_then(Value::as_i64);
-                if !matches!(src, Some(n) if node_ids.contains(&n))
-                    || !matches!(dst, Some(n) if node_ids.contains(&n))
-                {
-                    errors.push(TopologyErrorOut::new(
-                        "ARTIFACT_REFERENCE_ERROR",
-                        "topo_feature edge references an unknown node.",
-                        &format!("$.artifacts['topo_feature.json'][{index}]"),
-                    ));
-                }
-            }
-        }
-    }
-
-    // Cross-artifact: mac-forwarding entries reference unknown nodes
-    if let (Some(topology), Some(mac)) = (&topology_data, &mac_table)
-        && let (Some(nodes_arr), Some(entries)) = (
-            topology
-                .get("node")
-                .and_then(|n| n.get("nodes"))
-                .and_then(Value::as_array),
-            mac.get("entries").and_then(Value::as_array),
-        )
-    {
-        let node_ids: HashSet<i64> = nodes_arr
-            .iter()
-            .filter_map(|n| {
-                n.get("mid")
-                    .and_then(Value::as_str)
-                    .and_then(|s| s.parse::<i64>().ok())
-            })
-            .collect();
-        for (index, entry) in entries.iter().enumerate() {
-            let sw = entry.get("switch_node").and_then(Value::as_i64);
-            let dst = entry.get("destination_node").and_then(Value::as_i64);
-            if !matches!(sw, Some(n) if node_ids.contains(&n))
-                || !matches!(dst, Some(n) if node_ids.contains(&n))
+        for (index, link) in links.iter().enumerate() {
+            let src = link.get("srcNode").and_then(Value::as_str);
+            let dst = link.get("dstNode").and_then(Value::as_str);
+            if !matches!(src, Some(n) if node_ids.contains(n))
+                || !matches!(dst, Some(n) if node_ids.contains(n))
             {
                 errors.push(TopologyErrorOut::new(
                     "ARTIFACT_REFERENCE_ERROR",
-                    "mac-forwarding-table entry references an unknown node.",
-                    &format!("$.artifacts['mac-forwarding-table.json'].entries[{index}]"),
+                    "topology.json link references an unknown node.",
+                    &format!("$.artifacts['topology.json'].links[{index}]"),
                 ));
             }
         }
@@ -4032,31 +3609,97 @@ mod tests {
     }
 
     #[test]
-    fn build_artifacts_returns_four_jsons_with_expected_counts() {
+    fn build_artifacts_returns_clean_single_topology_json() {
         let topology = build_minimal_hop_linear();
         let raw = serde_json::to_value(&topology).unwrap();
         let result = build_topology_artifacts(&raw).expect("build OK");
-        assert_eq!(result.summary.artifact_count, 4);
+        // U12：去 Qunee 后只产一个干净 topology.json。
+        assert_eq!(result.summary.artifact_count, 1);
+        assert_eq!(result.summary.artifact_names, vec!["topology.json"]);
         assert!(!result.summary.contains_html);
-        // Topology has 2 switches + 2 endSystems = 4 nodes
+        // 2 switches + 2 endSystems = 4 nodes；2 host-switch + 1 interconnect = 3 links。
         assert_eq!(result.summary.topology_node_count, 4);
-        // 2 host-switch + 1 interconnect
         assert_eq!(result.summary.topology_link_count, 3);
-        // 2 switches × (3 dst non-self) but only ones reachable count;
-        // 在最简 hop-linear(2) fixture 中，2 switches 之间每边能算到对方 + 终端系统 → 至少 ≥2
-        assert!(result.summary.mac_entry_count >= 2);
 
         let arts = &result.artifacts;
         assert!(arts.get("topology.json").is_some());
-        assert!(arts.get("topo_feature.json").is_some());
-        assert!(arts.get("data-server.json").is_some());
-        assert!(arts.get("mac-forwarding-table.json").is_some());
+        // 不再产 Qunee 三件套。
+        assert!(arts.get("topo_feature.json").is_none());
+        assert!(arts.get("data-server.json").is_none());
+        assert!(arts.get("mac-forwarding-table.json").is_none());
 
-        // topology.json node count == 4
-        let topo_nodes = arts["topology.json"]["data"]["node"]["nodes"]
-            .as_array()
-            .unwrap();
+        let data = &arts["topology.json"]["data"];
+        let topo_nodes = data["nodes"].as_array().unwrap();
         assert_eq!(topo_nodes.len(), 4);
+        let topo_links = data["links"].as_array().unwrap();
+        assert_eq!(topo_links.len(), 3);
+    }
+
+    #[test]
+    fn build_artifacts_node_and_link_shape_is_clean_mid_mac_ip_port() {
+        // U12 契约样本：节点含 mid/name/mac/ip/portCount/queueCount/nodeType、
+        // 连线含 srcNode/dstNode/srcPort/dstPort/speed；全程无 imac/_classPath/sync_type。
+        let topology = build_minimal_hop_linear();
+        let raw = serde_json::to_value(&topology).unwrap();
+        let result = build_topology_artifacts(&raw).expect("build OK");
+        let data = &result.artifacts["topology.json"]["data"];
+
+        let node = &data["nodes"].as_array().unwrap()[0];
+        for key in [
+            "mid",
+            "name",
+            "mac",
+            "ip",
+            "portCount",
+            "queueCount",
+            "nodeType",
+        ] {
+            assert!(node.get(key).is_some(), "节点缺字段 {key}: {node}");
+        }
+        assert!(node["mid"].is_string(), "mid 应为字符串");
+        assert_eq!(node["queueCount"], 3);
+        // node_type canonical 取值域。
+        let nt = node["nodeType"].as_str().unwrap();
+        assert!(
+            matches!(nt, "switch" | "endSystem" | "server"),
+            "nodeType={nt} 非 canonical"
+        );
+        // mac 为 02: locally-administered、ip 落在 10.0.0.0/8。
+        for n in data["nodes"].as_array().unwrap() {
+            assert!(
+                n["mac"].as_str().unwrap().starts_with("02:"),
+                "mac 非 02: 前缀: {}",
+                n["mac"]
+            );
+            assert!(
+                n["ip"].as_str().unwrap().starts_with("10."),
+                "ip 不在 10.x: {}",
+                n["ip"]
+            );
+        }
+
+        let link = &data["links"].as_array().unwrap()[0];
+        for key in ["srcNode", "dstNode", "srcPort", "dstPort", "speed"] {
+            assert!(link.get(key).is_some(), "连线缺字段 {key}: {link}");
+        }
+        assert!(link["srcPort"].is_i64(), "srcPort 应为整数端口");
+        assert_eq!(link["speed"], 1000);
+
+        // 全文不得出现任何 Qunee 遗留键。
+        let text = serde_json::to_string(data).unwrap();
+        for forbidden in [
+            "imac",
+            "_classPath",
+            "sync_type",
+            "st_queues",
+            "Q.Node",
+            "Q.Edge",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "导出仍含 Qunee 遗留标识 {forbidden}"
+            );
+        }
     }
 
     #[test]
@@ -4065,7 +3708,9 @@ mod tests {
         let raw = serde_json::to_value(&topology).unwrap();
         let built = build_topology_artifacts(&raw).unwrap();
         let summary = describe_topology_artifacts(&built.artifacts);
-        assert_eq!(summary["artifactCount"], 4);
+        assert_eq!(summary["artifactCount"], 1);
+        assert_eq!(summary["topologyNodeCount"], 4);
+        assert_eq!(summary["topologyLinkCount"], 3);
         assert_eq!(summary["containsHtml"], false);
         assert!(summary["totalBytes"].as_u64().unwrap() > 0);
     }
@@ -4077,31 +3722,34 @@ mod tests {
         let built = build_topology_artifacts(&raw).unwrap();
         let report = validate_topology_artifacts(&built.artifacts);
         assert!(report.ok, "errors={:?}", report.errors);
-        assert_eq!(report.artifact_names.len(), 4);
+        assert_eq!(report.artifact_names, vec!["topology.json"]);
     }
 
     #[test]
-    fn validate_artifacts_detects_bad_versions() {
-        let bad = json!({
-            "topology.json": { "data": { "node": { "nodes": [], "links": [] } } },
-            "topo_feature.json": { "data": "not-array" },
-            "data-server.json": { "data": { "version": "1.0", "datas": [] } },
-            "mac-forwarding-table.json": { "data": { "version": "2.0", "entries": [] } },
+    fn validate_artifacts_detects_missing_arrays_and_dangling_link() {
+        // 缺 nodes/links 数组 → INVALID_ARTIFACT。
+        let missing = json!({
+            "topology.json": { "data": { "nodes": [] } },
         });
-        let report = validate_topology_artifacts(&bad);
+        let report = validate_topology_artifacts(&missing);
+        assert!(!report.ok);
+        assert!(report.errors.iter().any(|e| e.code == "INVALID_ARTIFACT"));
+
+        // link 引用不存在的节点 mid → ARTIFACT_REFERENCE_ERROR。
+        let dangling = json!({
+            "topology.json": { "data": {
+                "nodes": [{ "mid": "0", "name": "SW-1", "mac": "02:00:00:00:00:00",
+                            "ip": "10.0.0.1", "portCount": 1, "queueCount": 3, "nodeType": "switch" }],
+                "links": [{ "srcNode": "0", "dstNode": "9", "srcPort": 0, "dstPort": 0, "speed": 1000 }],
+            } },
+        });
+        let report = validate_topology_artifacts(&dangling);
         assert!(!report.ok);
         assert!(
             report
                 .errors
                 .iter()
-                .any(|e| e.path.contains("topo_feature"))
-        );
-        assert!(report.errors.iter().any(|e| e.path.contains("data-server")));
-        assert!(
-            report
-                .errors
-                .iter()
-                .any(|e| e.path.contains("mac-forwarding-table"))
+                .any(|e| e.code == "ARTIFACT_REFERENCE_ERROR")
         );
     }
 }

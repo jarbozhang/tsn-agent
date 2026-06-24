@@ -194,18 +194,6 @@ pub fn assign_ip(ordinal: i64) -> String {
     format!("10.{b}.{c}.{d}")
 }
 
-pub fn derive_legacy_mac(numeric_id: i64) -> String {
-    let high = (numeric_id >> 8) & 0xff;
-    let low = numeric_id & 0xff;
-    format!("00:00:23:00:{high:02X}:{low:02X}")
-}
-
-pub fn derive_legacy_ip(numeric_id: i64) -> String {
-    let high = (numeric_id >> 8) & 0xff;
-    let low = numeric_id & 0xff;
-    format!("192.168.{high}.{low}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,13 +256,6 @@ mod tests {
         assert_eq!(p[0].index, 0);
         assert_eq!(p[2].id, "P2");
         assert_eq!(p[2].index, 2);
-    }
-
-    #[test]
-    fn derive_legacy_mac_and_ip_match_ts() {
-        assert_eq!(derive_legacy_mac(0), "00:00:23:00:00:00");
-        assert_eq!(derive_legacy_mac(258), "00:00:23:00:01:02");
-        assert_eq!(derive_legacy_ip(258), "192.168.1.2");
     }
 
     #[test]

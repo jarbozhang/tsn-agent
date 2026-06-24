@@ -104,7 +104,8 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.build_artifacts",
       allowedToolName: "mcp__tsn_topology__topology_build_artifacts",
       title: "Build topology artifacts",
-      description: "Build the four legacy JSON topology artifacts from a topology snapshot.",
+      description:
+        "Build the clean topology.json export (mid/mac/ip/port) from a topology snapshot.",
       inputSchema: {
         topology: z.unknown().optional(),
       },
@@ -117,7 +118,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.validate_artifacts",
       allowedToolName: "mcp__tsn_topology__topology_validate_artifacts",
       title: "Validate topology artifacts",
-      description: "Validate legacy JSON artifact references.",
+      description: "Validate topology.json artifact structure and link references.",
       inputSchema: {
         artifacts: z.unknown().optional(),
       },

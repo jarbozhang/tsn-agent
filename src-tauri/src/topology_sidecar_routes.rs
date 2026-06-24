@@ -244,20 +244,9 @@ pub async fn initialize(
     ok_summary(summary_value)
 }
 
-/// canonical 节点类型 → 持久层 node_type 字符串。端系统统一存 endSystem
-/// （历史上曾用 networkcard，已由 migration v5 收敛）。未知类型兜底 endSystem。
-fn legacy_node_type(canonical: &str) -> &'static str {
-    match canonical {
-        "switch" => "switch",
-        "endSystem" => "endSystem",
-        "server" => "server",
-        _ => "endSystem",
-    }
-}
-
 /// 把 initialize 计算出的 IntermediateTopology 重建到该 session 的 P0 表。
-/// 节点键 mid = numericId；连线两端引用 mid。Qunee 专有的 imac/sync_type
-/// 不再落库，需要时由 build_artifacts 从节点+node_type 现导。
+/// 节点键 mid = numericId；连线两端引用 mid。node_type 直写 canonical 字符串
+/// （switch/endSystem/server）。
 async fn persist_initialized_topology(
     pool: &sqlx::Pool<sqlx::Sqlite>,
     session_id: &str,
@@ -312,7 +301,7 @@ async fn persist_initialized_topology(
         .bind(&node.name)
         .bind(node.position.x)
         .bind(node.position.y)
-        .bind(legacy_node_type(type_str))
+        .bind(type_str)
         .bind(&mac)
         .bind(&ip)
         .bind(index as i64)
