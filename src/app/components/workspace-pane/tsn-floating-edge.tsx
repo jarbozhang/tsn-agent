@@ -31,7 +31,7 @@ export interface FloatingAnchors {
 }
 
 const VERTICAL_EDGE_SNAP_THRESHOLD = 32;
-const TSN_EDGE_INTERACTION_WIDTH = 48;
+const TSN_EDGE_INTERACTION_WIDTH = 4;
 
 /** 节点边框上朝向 target 中心的交点；退化（NaN/Infinity）时回退本节点中心。 */
 function rectIntersection(node: NodeRect, target: NodeRect): { x: number; y: number } {
@@ -152,30 +152,74 @@ export function straightFloatingEdgePath(
   return `M ${anchors.sx},${anchors.sy} L ${anchors.tx},${anchors.ty}`;
 }
 
+function parallelSlot(index: number, count: number): number {
+  const safeCount = Math.max(1, Math.floor(count));
+  const safeIndex = Math.min(Math.max(0, Math.floor(index)), safeCount - 1);
+  return (safeIndex + 0.5) / safeCount;
+}
+
+function pointOnNodeSide(
+  node: NodeRect,
+  position: Position,
+  slot: number,
+): { x: number; y: number } {
+  switch (position) {
+    case Position.Top:
+      return { x: node.x + node.width * slot, y: node.y };
+    case Position.Bottom:
+      return { x: node.x + node.width * slot, y: node.y + node.height };
+    case Position.Left:
+      return { x: node.x, y: node.y + node.height * slot };
+    default:
+      return { x: node.x + node.width, y: node.y + node.height * slot };
+  }
+}
+
+export function parallelFloatingEdgeAnchors(
+  source: NodeRect,
+  target: NodeRect,
+  index = 0,
+  count = 1,
+): FloatingAnchors {
+  const anchors = floatingEdgeAnchors(source, target);
+  if (count <= 1) {
+    return anchors;
+  }
+
+  const slot = parallelSlot(index, count);
+  const sourcePoint = pointOnNodeSide(source, anchors.sourcePosition, slot);
+  const targetPoint = pointOnNodeSide(target, anchors.targetPosition, slot);
+  return {
+    ...anchors,
+    sx: sourcePoint.x,
+    sy: sourcePoint.y,
+    tx: targetPoint.x,
+    ty: targetPoint.y,
+  };
+}
+
 /**
- * 端口标签锚点：从端点沿实际连线向内推进，保证标签中心落在连线上。
- * ord 仅保留为兼容旧 Edge.data；端口与节点距离需要稳定一致，不再按层级推远。
+ * 端口标签锚点：吸附点沿出射方向外推。
+ * 同节点同方位的多条边交点相邻，标签按序数 ord 分层外推防重叠。
  */
 export function portLabelPoint(
   x: number,
   y: number,
-  otherX: number,
-  otherY: number,
-  _ord = 0,
+  position: Position,
+  ord = 0,
 ): { x: number; y: number } {
-  const dx = otherX - x;
-  const dy = otherY - y;
-  const length = Math.hypot(dx, dy);
-  if (length === 0 || !Number.isFinite(length)) {
-    return { x, y };
+  const v = 14 + ord * 13;
+  const h = 16 + ord * 20;
+  switch (position) {
+    case Position.Top:
+      return { x, y: y - v };
+    case Position.Bottom:
+      return { x, y: y + v };
+    case Position.Left:
+      return { x: x - h, y };
+    default:
+      return { x: x + h, y };
   }
-
-  const distance = 16;
-  const t = Math.min(distance / length, 0.45);
-  return {
-    x: x + dx * t,
-    y: y + dy * t,
-  };
 }
 
 function PortLabel({
@@ -226,13 +270,15 @@ export function TsnFloatingEdge(props: EdgeProps) {
     width: targetNode.measured.width ?? 0,
     height: targetNode.measured.height ?? 0,
   };
-  const anchors = floatingEdgeAnchors(sourceRect, targetRect);
+  const parallelIndex = typeof data.parallelIndex === "number" ? data.parallelIndex : 0;
+  const parallelCount = typeof data.parallelCount === "number" ? data.parallelCount : 1;
+  const anchors = parallelFloatingEdgeAnchors(sourceRect, targetRect, parallelIndex, parallelCount);
   const path = straightFloatingEdgePath(anchors);
   const left = data.leftLabel
-    ? portLabelPoint(anchors.sx, anchors.sy, anchors.tx, anchors.ty, data.leftOrd ?? 0)
+    ? portLabelPoint(anchors.sx, anchors.sy, anchors.sourcePosition, data.leftOrd ?? 0)
     : undefined;
   const right = data.rightLabel
-    ? portLabelPoint(anchors.tx, anchors.ty, anchors.sx, anchors.sy, data.rightOrd ?? 0)
+    ? portLabelPoint(anchors.tx, anchors.ty, anchors.targetPosition, data.rightOrd ?? 0)
     : undefined;
 
   return (

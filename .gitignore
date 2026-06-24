@@ -38,6 +38,7 @@ exports/
 generated-projects/
 
 # Agent/worktree scratch
+.agents/*
 .claude/*
 !.claude/skills/
 !.claude/skills/tsn-topology/

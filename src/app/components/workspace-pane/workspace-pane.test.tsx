@@ -132,6 +132,7 @@ import {
 } from "./index";
 import {
   floatingEdgeAnchors,
+  parallelFloatingEdgeAnchors,
   portLabelPoint,
   straightFloatingEdgePath,
   TsnFloatingEdge,
@@ -723,6 +724,62 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
     expect([d1.leftOrd, d1.rightOrd]).toEqual([1, 1]);
     expect([d2.leftOrd, d2.rightOrd]).toEqual([0, 0]);
   });
+
+  it("同一对节点之间多条边记录等分序号，避免画布连线完全重合", () => {
+    const snapshot: TopologyRowSnapshot = {
+      sessionId: "s1",
+      nodes: [node(1, 120, 300), node(10, 90, 60)],
+      links: [
+        {
+          linkSeq: 0,
+          name: null,
+          srcSyncName: "10",
+          dstSyncName: "1",
+          stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}',
+        },
+        {
+          linkSeq: 1,
+          name: null,
+          srcSyncName: "10",
+          dstSyncName: "1",
+          stylesJson: '{"leftLabel":"P1","rightLabel":"P1"}',
+        },
+        {
+          linkSeq: 2,
+          name: null,
+          srcSyncName: "2",
+          dstSyncName: "3",
+          stylesJson: "{}",
+        },
+      ],
+    };
+    const { edges } = topologySnapshotToReactFlow(snapshot);
+    const [first, second, single] = edges.map((e) => e.data as TsnEdgeData);
+    expect([first.parallelIndex, first.parallelCount]).toEqual([0, 2]);
+    expect([second.parallelIndex, second.parallelCount]).toEqual([1, 2]);
+    expect([single.parallelIndex, single.parallelCount]).toEqual([0, 1]);
+  });
+
+  it("方向相反的同节点对也按同一组平行边分开", () => {
+    const snapshot: TopologyRowSnapshot = {
+      sessionId: "s1",
+      nodes: [node(1, 120, 300), node(10, 90, 60)],
+      links: [
+        { linkSeq: 0, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: "{}" },
+        { linkSeq: 1, name: null, srcSyncName: "1", dstSyncName: "10", stylesJson: "{}" },
+      ],
+    };
+    const { edges } = topologySnapshotToReactFlow(snapshot);
+    expect(
+      edges.map((e) => [
+        (e.data as TsnEdgeData).parallelIndex,
+        (e.data as TsnEdgeData).parallelCount,
+      ]),
+    ).toEqual([
+      [0, 2],
+      [1, 2],
+    ]);
+  });
 });
 
 describe("floatingEdgeAnchors（U3 交点纯函数）", () => {
@@ -788,7 +845,18 @@ describe("floatingEdgeAnchors（U3 交点纯函数）", () => {
     expect(path).toBe("M 126,28 L 400,28");
   });
 
-  it("自定义连线扩大透明点击区域，但保持视觉路径独立", () => {
+  it("平行连线端点按节点边长等分，路径仍保持直线", () => {
+    const source = rect(0, 0);
+    const target = rect(400, 0);
+    const first = parallelFloatingEdgeAnchors(source, target, 0, 2);
+    const second = parallelFloatingEdgeAnchors(source, target, 1, 2);
+    expect(first).toMatchObject({ sx: 126, sy: 14, tx: 400, ty: 14 });
+    expect(second).toMatchObject({ sx: 126, sy: 42, tx: 400, ty: 42 });
+    expect(straightFloatingEdgePath(first)).toBe("M 126,14 L 400,14");
+    expect(straightFloatingEdgePath(second)).toBe("M 126,42 L 400,42");
+  });
+
+  it("自定义连线点击区域接近视觉线宽，避免密集连线互相遮挡", () => {
     flowMocks.internalNodes.set("1", {
       internals: { positionAbsolute: { x: 0, y: 0 } },
       measured: { width: 126, height: 56 },
@@ -816,20 +884,61 @@ describe("floatingEdgeAnchors（U3 交点纯函数）", () => {
 
     const baseEdge = screen.getByTestId("base-edge-e1");
     expect(baseEdge).toHaveAttribute("data-path", "M 126,28 L 400,28");
-    expect(baseEdge).toHaveAttribute("data-interaction-width", "48");
+    expect(baseEdge).toHaveAttribute("data-interaction-width", "4");
     flowMocks.internalNodes.clear();
   });
 
-  it("portLabelPoint 沿实际连线向内放置，标签中心保持在线上", () => {
-    expect(portLabelPoint(100, 50, 200, 50)).toEqual({ x: 116, y: 50 });
-    expect(portLabelPoint(100, 50, 100, 150, 1)).toEqual({ x: 100, y: 66 });
-    expect(portLabelPoint(100, 50, 100, 150, 3)).toEqual({ x: 100, y: 66 });
+  it("平行连线使用不同直线路径渲染，起点终点不共用", () => {
+    flowMocks.internalNodes.set("1", {
+      internals: { positionAbsolute: { x: 0, y: 0 } },
+      measured: { width: 126, height: 56 },
+    });
+    flowMocks.internalNodes.set("2", {
+      internals: { positionAbsolute: { x: 400, y: 0 } },
+      measured: { width: 126, height: 56 },
+    });
 
-    const diagonal = portLabelPoint(100, 50, 200, 150);
-    expect(diagonal.x).toBeCloseTo(111.3137, 4);
-    expect(diagonal.y).toBeCloseTo(61.3137, 4);
-    expect((diagonal.y - 50) / (diagonal.x - 100)).toBeCloseTo(1, 4);
+    render(
+      <>
+        <TsnFloatingEdge
+          id="e1"
+          source="1"
+          target="2"
+          sourceX={0}
+          sourceY={0}
+          targetX={0}
+          targetY={0}
+          sourcePosition={"right" as never}
+          targetPosition={"left" as never}
+          data={{ parallelIndex: 0, parallelCount: 2 }}
+          selected={false}
+        />
+        <TsnFloatingEdge
+          id="e2"
+          source="1"
+          target="2"
+          sourceX={0}
+          sourceY={0}
+          targetX={0}
+          targetY={0}
+          sourcePosition={"right" as never}
+          targetPosition={"left" as never}
+          data={{ parallelIndex: 1, parallelCount: 2 }}
+          selected={false}
+        />
+      </>,
+    );
 
-    expect(portLabelPoint(100, 50, 100, 50)).toEqual({ x: 100, y: 50 });
+    expect(screen.getByTestId("base-edge-e1")).toHaveAttribute("data-path", "M 126,14 L 400,14");
+    expect(screen.getByTestId("base-edge-e2")).toHaveAttribute("data-path", "M 126,42 L 400,42");
+    flowMocks.internalNodes.clear();
+  });
+
+  it("portLabelPoint 沿出射方向外推，序数 ord 分层推远", () => {
+    expect(portLabelPoint(100, 50, "top" as never)).toEqual({ x: 100, y: 36 });
+    expect(portLabelPoint(100, 50, "right" as never)).toEqual({ x: 116, y: 50 });
+    expect(portLabelPoint(100, 50, "top" as never, 1)).toEqual({ x: 100, y: 23 });
+    expect(portLabelPoint(100, 50, "bottom" as never, 2)).toEqual({ x: 100, y: 90 });
+    expect(portLabelPoint(100, 50, "right" as never, 1)).toEqual({ x: 136, y: 50 });
   });
 });
