@@ -12,6 +12,7 @@ mod session_store;
 mod skill_factory_hashes;
 mod skill_files;
 mod timesync_tree;
+mod timesync_verify;
 mod topology_compute;
 mod topology_intermediate;
 mod topology_mutation_buffer;
@@ -28,6 +29,20 @@ mod topology_verify;
 #[tauri::command]
 fn app_health() -> &'static str {
     "ok"
+}
+
+/// 确认过关闸用：读库 timesync 配置跑结构校验，返回 VerifyResult（camelCase）。
+/// 仿 `topology_query_command::verify_topology` 命令包装（取 session_id、调核心）。
+#[tauri::command]
+async fn verify_time_sync(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, session_store::SessionStore>,
+    request: timesync_verify::VerifyTimeSyncRequest,
+) -> Result<timesync_verify::VerifyResult, String> {
+    let pool = store.pool(&app).await?;
+    timesync_verify::verify_time_sync(pool, &request.session_id)
+        .await
+        .map_err(|e| format!("时钟同步校验失败：{e}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -82,6 +97,7 @@ pub fn run() {
             topology_undo_command::undo_topology,
             topology_query_command::query_topology,
             topology_query_command::verify_topology,
+            verify_time_sync,
             inet_verify_command::verify_inet, // 暂未接前端：INET 验证挪到后续流量规划阶段，保留作其基础，勿当死代码删（复审触发：未随流量规划 Phase B 启用则 2026-09 重审是否归档至 docs/deferred/）
             session_store::get_current_session,
             session_store::list_sessions,

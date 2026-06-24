@@ -153,6 +153,47 @@ export async function runTsnAgent(
       // 结构通过：代码兜底放行，静默推进（不再单独弹「结构没问题」）。
     }
 
+    // 时钟同步阶段「前进确认」过关闸：与拓扑分支并列。重算时钟树校验结构（GM 悬空/
+    // 未设、端口越界拦推进），通过则静默推进。回退确认（带 pendingStageChange）不验。
+    if (sessionId && workflow.currentStep === "time-sync" && !workflow.pendingStageChange) {
+      let verdict: TopologyVerifyResult;
+      try {
+        verdict = await invoke<TopologyVerifyResult>("verify_time_sync", {
+          request: { sessionId },
+        });
+      } catch (error) {
+        // fail-closed：不推进、不冒泡到 App 通用 catch。
+        logAgent(request.diagnostics, {
+          sessionId,
+          runId,
+          message: "时钟同步校验调用失败，未推进",
+          details: { error: error instanceof Error ? error.message : String(error) },
+        });
+        return {
+          events: [],
+          workflow,
+          assistantText:
+            "时钟同步校验暂时无法运行，右侧工程保持原状态，未推进。请稍后再点「确认并继续」。",
+          mode: "local",
+        };
+      }
+      if (!verdict.ok) {
+        logAgent(request.diagnostics, {
+          sessionId,
+          runId,
+          message: "时钟同步校验未通过，拦截推进",
+          details: { errorCount: verdict.errors.length },
+        });
+        return {
+          events: [],
+          workflow,
+          assistantText: composeTimeSyncBlockText(verdict),
+          mode: "local",
+          verification: verdict,
+        };
+      }
+    }
+
     const confirmResult = runConfirmAction(workflow);
     logAgent(request.diagnostics, {
       sessionId,
@@ -331,6 +372,17 @@ function composeVerificationBlockText(verdict: TopologyVerifyResult): string {
       ? "拓扑在 INET 上还跑不起来，先修好再继续（仅能加载运行）："
       : "拓扑还差一点，先修好再继续（仅结构级）：";
   return [head, ...problems, "改好后再点「确认并继续」。"].join("\n");
+}
+
+// 时钟同步校验未通过时的对话文案：另写一份（不复用拓扑语气），列问题清单 + 可操作引导。
+function composeTimeSyncBlockText(verdict: TopologyVerifyResult): string {
+  const problems = verdict.errors
+    // 只列拦推进的 fail 级问题；告警（漂移/未覆盖/禁用悬空）不进拦截清单。
+    .filter((error) => ["GM_NOT_SET", "GM_DANGLING", "PORT_OUT_OF_RANGE"].includes(error.code))
+    .map((error) => `· ${error.messageZh}`);
+  return ["时钟同步还差一点，先理顺再继续：", ...problems, "处理好后再点「确认并继续」。"].join(
+    "\n",
+  );
 }
 
 // 确认按钮的确定性入口：先处理待确认的破坏性回退，否则普通推进。切阶段本身不走大模型；

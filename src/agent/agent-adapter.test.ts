@@ -46,6 +46,8 @@ function mockTauriCommands(
     topology?: Record<string, unknown>;
     verify?: Record<string, unknown>;
     verifyError?: unknown;
+    verifyTimeSync?: Record<string, unknown>;
+    verifyTimeSyncError?: unknown;
   } = {},
 ) {
   invokeMock.mockImplementation(async (command: string) => {
@@ -59,6 +61,14 @@ function mockTauriCommands(
       }
       // 默认通过：确认过关闸放行，既有 confirm 测试不被新闸拦。
       return options.verify ?? { ok: true, caliber: "structural_only", errors: [] };
+    }
+
+    if (command === "verify_time_sync") {
+      if (options.verifyTimeSyncError !== undefined) {
+        throw options.verifyTimeSyncError;
+      }
+      // 默认通过：time-sync 确认过关闸放行。
+      return options.verifyTimeSync ?? { ok: true, caliber: "timesync_structural", errors: [] };
     }
 
     if (command === "verify_inet") {
@@ -589,6 +599,47 @@ describe("runTsnAgent", () => {
     expect(result.verification).toBeUndefined();
   });
 
+  it("time-sync confirm calls verify_time_sync and advances when ok", async () => {
+    enableTauriRuntime();
+    mockTauriCommands(); // verify_time_sync 默认通过
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "继续",
+      action: "confirm-stage",
+      session: sessionWithWorkflow(timeSyncWaitingWorkflow()),
+    });
+
+    // 走 time-sync 过关闸（调 verify_time_sync），通过则推进。
+    expect(invokeMock.mock.calls.some(([command]) => command === "verify_time_sync")).toBe(true);
+    expect(result.workflow.stages["time-sync"].status).toBe("confirmed");
+  });
+
+  it("fail-closed: verify_time_sync verdict.ok=false does not advance", async () => {
+    enableTauriRuntime();
+    mockTauriCommands({
+      verifyTimeSync: {
+        ok: false,
+        caliber: "timesync_structural",
+        errors: [{ code: "GM_NOT_SET", messageZh: "还没有指定时钟主节点（GM）。" }],
+      },
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "继续",
+      action: "confirm-stage",
+      session: sessionWithWorkflow(timeSyncWaitingWorkflow()),
+    });
+
+    // 不放行：仍停在 time-sync 待确认。
+    expect(result.workflow.currentStep).toBe("time-sync");
+    expect(result.workflow.stages["time-sync"].status).toBe("waiting_confirmation");
+    expect(result.mode).toBe("local");
+    expect(result.verification).toMatchObject({ ok: false });
+    expect(result.assistantText).toContain("时钟同步还差一点");
+  });
+
   it("applies a validated mutationId stage result from the worker", async () => {
     enableTauriRuntime();
     mockTauriCommands({
@@ -756,6 +807,7 @@ describe("runTsnAgent", () => {
 
   it("shows the offline notice when the confirm button advances into a gray stage (U4 regression)", async () => {
     enableTauriRuntime();
+    mockTauriCommands(); // time-sync 确认现在先过 verify_time_sync 过关闸（默认通过）
     const workflow = createInitialWorkflowState();
     workflow.currentStep = "time-sync";
     workflow.stages.topology = { step: "topology", status: "confirmed" };
@@ -773,7 +825,8 @@ describe("runTsnAgent", () => {
     });
 
     expect(result.mode).toBe("local");
-    expect(invokeMock).not.toHaveBeenCalled();
+    // time-sync 前进确认现在先过校验闸（调 verify_time_sync），不再是完全 invoke-free。
+    expect(invokeMock.mock.calls.some(([command]) => command === "verify_time_sync")).toBe(true);
     expect(result.workflow.currentStep).toBe("flow-template");
     expect(result.assistantText).toContain("暂时下线");
   });

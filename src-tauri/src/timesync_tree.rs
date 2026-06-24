@@ -14,10 +14,7 @@
 //!
 //! `port_ptp_enabled` = 参与树的端口（master ∪ slave），由本函数顺带输出。
 //!
-//! 本模块的导出项（`compute_clock_tree`/`ClockTree` 等）的消费方是 U6（校验）/
-//! U7（落库）；它们落地前整模块未被引用，`#[allow(dead_code)]` 暂压 `-D warnings`。
-
-#![allow(dead_code)]
+//! 本模块的导出项（`compute_clock_tree`/`ClockTree` 等）由 U6（校验）消费。
 
 use serde::Serialize;
 use sqlx::{Pool, Row, Sqlite};
