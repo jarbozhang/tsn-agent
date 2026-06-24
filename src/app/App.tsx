@@ -50,6 +50,7 @@ export function App() {
     currentSession,
     setCurrentSession,
     sessionExists,
+    isSessionDeleted,
     updateAssistantMessage,
     updateAssistantToolCalls,
     reloadSessionsList,
@@ -115,6 +116,12 @@ export function App() {
     const trimmedInput = rawInput.trim();
 
     if (!trimmedInput || isAgentRunning) {
+      return;
+    }
+
+    // 已删 session 的残留指针不得驱动 UPSERT：否则首次 save 会把删掉的会话回写复活。
+    // 入口拦截即可——本函数到首个 save 之间无 await，删除无法在中途插入。
+    if (isSessionDeleted(currentSession.id)) {
       return;
     }
 
