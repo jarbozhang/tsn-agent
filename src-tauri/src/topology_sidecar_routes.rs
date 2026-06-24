@@ -43,7 +43,12 @@ pub struct RouteState {
     pub last_validated_ok: Arc<Mutex<HashMap<String, u64>>>,
 }
 
-fn structured_error(status: StatusCode, code: &str, message: &str, retryable: bool) -> Response {
+pub(crate) fn structured_error(
+    status: StatusCode,
+    code: &str,
+    message: &str,
+    retryable: bool,
+) -> Response {
     let body = serde_json::json!({
         "ok": false,
         "code": code,
@@ -53,7 +58,7 @@ fn structured_error(status: StatusCode, code: &str, message: &str, retryable: bo
     (status, Json(body)).into_response()
 }
 
-fn ok_summary(summary: Value) -> Response {
+pub(crate) fn ok_summary(summary: Value) -> Response {
     (
         StatusCode::OK,
         Json(serde_json::json!({ "ok": true, "summary": summary })),
@@ -827,7 +832,7 @@ pub async fn undo(State(state): State<Arc<RouteState>>, Json(req): Json<UndoRequ
 
 // ---------- helpers ----------
 
-async fn require_session(
+pub(crate) async fn require_session(
     pool: &sqlx::Pool<sqlx::Sqlite>,
     session_id: &str,
 ) -> Result<(), Response> {

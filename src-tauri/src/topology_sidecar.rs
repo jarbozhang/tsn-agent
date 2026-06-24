@@ -181,6 +181,22 @@ pub fn build_router(token: SecretToken, route_state: Arc<RouteState>) -> Router 
             post(topology_sidecar_routes::apply_operations),
         )
         .route("/db/topology/undo", post(topology_sidecar_routes::undo))
+        .route(
+            "/db/timesync/set_gm",
+            post(crate::timesync_sidecar_routes::set_gm),
+        )
+        .route(
+            "/db/timesync/set_params",
+            post(crate::timesync_sidecar_routes::set_params),
+        )
+        .route(
+            "/db/timesync/toggle_link",
+            post(crate::timesync_sidecar_routes::toggle_link),
+        )
+        .route(
+            "/db/timesync/inspect",
+            post(crate::timesync_sidecar_routes::inspect),
+        )
         .with_state(route_state)
         .route_layer(middleware::from_fn_with_state(
             token_state,
