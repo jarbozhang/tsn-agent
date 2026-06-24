@@ -119,10 +119,14 @@ pub async fn apply_op(
         TopologyOp::NodeAdd(a) => {
             // 三态写入：写决策由数据库原子完成（DO NOTHING），冲突时读回比对，
             // 无 SELECT-then-INSERT 的 TOCTOU 窗口。
+            // U3：mac/ip 确定性分配，ordinal 取 mid（逻辑序号）；非数字 mid 退 0。
+            let ordinal = a.mid.parse::<i64>().unwrap_or(0);
+            let mac = crate::topology_intermediate::assign_mac(ordinal);
+            let ip = crate::topology_intermediate::assign_ip(ordinal);
             let res = sqlx::query(
                 r#"INSERT INTO topology_nodes
-                   (session_id, mid, name, x, y, node_type, insert_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   (session_id, mid, name, x, y, node_type, mac, ip, insert_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(session_id, mid) DO NOTHING"#,
             )
             .bind(session_id)
@@ -131,6 +135,8 @@ pub async fn apply_op(
             .bind(a.x)
             .bind(a.y)
             .bind(&a.node_type)
+            .bind(&mac)
+            .bind(&ip)
             .bind(a.insert_order)
             .execute(&mut *tx)
             .await
@@ -403,6 +409,44 @@ mod tests {
                     .unwrap();
             assert_eq!(row.get::<String, _>("mid"), "0");
             assert_eq!(row.get::<i64, _>("insert_order"), 0);
+        });
+    }
+
+    #[test]
+    fn node_add_fills_mac_ip_by_mid_ordinal() {
+        // U3：apply NodeAdd 增量节点按 mid（=ordinal）确定性补 mac/ip。
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let mut tx = pool.begin().await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    mid: "7".to_string(),
+                    x: 1.0,
+                    y: 2.0,
+                    node_type: None,
+                    insert_order: 7,
+                }),
+            )
+            .await
+            .unwrap();
+            tx.commit().await.unwrap();
+
+            let row =
+                sqlx::query("SELECT mac, ip FROM topology_nodes WHERE session_id='s1' AND mid='7'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                row.get::<Option<String>, _>("mac").as_deref(),
+                Some(crate::topology_intermediate::assign_mac(7).as_str())
+            );
+            assert_eq!(
+                row.get::<Option<String>, _>("ip").as_deref(),
+                Some(crate::topology_intermediate::assign_ip(7).as_str())
+            );
         });
     }
 

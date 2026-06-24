@@ -290,10 +290,13 @@ async fn persist_initialized_topology(
             IntermediateNodeType::EndSystem => "endSystem",
             IntermediateNodeType::Server => "server",
         };
+        // U3：mac/ip 确定性分配，ordinal 取节点 numeric_id（= mid）。
+        let mac = crate::topology_intermediate::assign_mac(node.numeric_id);
+        let ip = crate::topology_intermediate::assign_ip(node.numeric_id);
         sqlx::query(
             r#"INSERT INTO topology_nodes
-               (session_id, mid, name, x, y, node_type, insert_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+               (session_id, mid, name, x, y, node_type, mac, ip, insert_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(session_id)
         .bind(&mid)
@@ -301,6 +304,8 @@ async fn persist_initialized_topology(
         .bind(node.position.x)
         .bind(node.position.y)
         .bind(legacy_node_type(type_str))
+        .bind(&mac)
+        .bind(&ip)
         .bind(index as i64)
         .execute(&mut *conn)
         .await
@@ -909,6 +914,67 @@ mod tests {
                 names,
                 vec![Some("SW-1".to_string()), Some("ES-1".to_string())]
             );
+        });
+    }
+
+    /// U3：initialize 落库后每节点 mac/ip 非空、按 numeric_id 确定性分配。
+    #[test]
+    fn persist_fills_mac_ip_columns() {
+        tauri::async_runtime::block_on(async {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql())
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1', 't', 'now', 'now', '{}')")
+                .execute(&pool)
+                .await
+                .unwrap();
+
+            let topology: crate::topology_intermediate::IntermediateTopology =
+                serde_json::from_value(serde_json::json!({
+                    "schemaVersion": "tsn-agent.topology.intermediate.v0",
+                    "metadata": { "templateId": "hop-linear", "layout": "line", "source": "template" },
+                    "nodes": [
+                        { "id": "SW-1", "numericId": 0, "name": "SW-1", "type": "switch",
+                          "ports": [], "position": { "x": 0.0, "y": 0.0 } },
+                        { "id": "ES-1", "numericId": 1, "name": "ES-1", "type": "endSystem",
+                          "ports": [], "position": { "x": 1.0, "y": 1.0 } }
+                    ],
+                    "links": [],
+                    "diagnostics": []
+                }))
+                .unwrap();
+
+            super::persist_initialized_topology(&pool, "s1", &topology)
+                .await
+                .unwrap();
+
+            let rows = sqlx::query(
+                "SELECT mid, mac, ip FROM topology_nodes WHERE session_id = 's1' ORDER BY insert_order",
+            )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+            assert_eq!(rows.len(), 2);
+            for row in &rows {
+                let mid: String = row.get("mid");
+                let mac: Option<String> = row.get("mac");
+                let ip: Option<String> = row.get("ip");
+                let ordinal = mid.parse::<i64>().unwrap();
+                assert_eq!(
+                    mac.as_deref(),
+                    Some(crate::topology_intermediate::assign_mac(ordinal).as_str())
+                );
+                assert_eq!(
+                    ip.as_deref(),
+                    Some(crate::topology_intermediate::assign_ip(ordinal).as_str())
+                );
+            }
         });
     }
 

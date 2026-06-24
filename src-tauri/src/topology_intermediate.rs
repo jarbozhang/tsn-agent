@@ -172,6 +172,28 @@ pub fn derive_mac_address(ordinal: i64) -> String {
     format!("00:1B:44:11:3A:{:02X}", ordinal & 0xff)
 }
 
+/// U3：确定性 MAC 分配器。`02:` 是 locally-administered 单播前缀，
+/// 后 3 字节为 ordinal（节点序号）低 24 位十六进制。session 内按 ordinal 唯一不重复。
+pub fn assign_mac(ordinal: i64) -> String {
+    let v = (ordinal & 0xff_ffff) as u32;
+    format!(
+        "02:00:00:{:02X}:{:02X}:{:02X}",
+        (v >> 16) & 0xff,
+        (v >> 8) & 0xff,
+        v & 0xff
+    )
+}
+
+/// U3：确定性 IP 分配器。`10.<b>.<c>.<d>`（10.0.0.0/8 私网），由 ordinal 映射。
+/// host 位 d 取 1..=254（避开 0/255），溢出进位到 c、b。session 内按 ordinal 唯一不重复。
+pub fn assign_ip(ordinal: i64) -> String {
+    let n = ordinal.max(0) as u64;
+    let d = (n % 254) + 1; // 1..=254
+    let c = (n / 254) % 256;
+    let b = (n / 254 / 256) % 256;
+    format!("10.{b}.{c}.{d}")
+}
+
 pub fn derive_legacy_mac(numeric_id: i64) -> String {
     let high = (numeric_id >> 8) & 0xff;
     let low = numeric_id & 0xff;
@@ -253,5 +275,61 @@ mod tests {
         assert_eq!(derive_legacy_mac(0), "00:00:23:00:00:00");
         assert_eq!(derive_legacy_mac(258), "00:00:23:00:01:02");
         assert_eq!(derive_legacy_ip(258), "192.168.1.2");
+    }
+
+    #[test]
+    fn assign_mac_is_locally_administered_format() {
+        assert_eq!(assign_mac(1), "02:00:00:00:00:01");
+        assert_eq!(assign_mac(0), "02:00:00:00:00:00");
+        assert_eq!(assign_mac(258), "02:00:00:00:01:02");
+        // 合法 `02:` 前缀 + 6 段两位十六进制
+        for ord in 0..1000 {
+            let m = assign_mac(ord);
+            assert!(m.starts_with("02:"), "mac {m} 缺 02: 前缀");
+            let segs: Vec<&str> = m.split(':').collect();
+            assert_eq!(segs.len(), 6);
+            for s in segs {
+                assert_eq!(s.len(), 2);
+                assert!(u8::from_str_radix(s, 16).is_ok(), "段 {s} 非十六进制");
+            }
+        }
+    }
+
+    #[test]
+    fn assign_ip_in_10_subnet_with_valid_host() {
+        assert_eq!(assign_ip(0), "10.0.0.1");
+        assert_eq!(assign_ip(1), "10.0.0.2");
+        assert_eq!(assign_ip(253), "10.0.0.254");
+        assert_eq!(assign_ip(254), "10.0.1.1");
+        for ord in 0..2000 {
+            let ip = assign_ip(ord);
+            let octets: Vec<u32> = ip.split('.').map(|s| s.parse().unwrap()).collect();
+            assert_eq!(octets.len(), 4);
+            assert_eq!(octets[0], 10, "ip {ip} 不在 10.0.0.0/8");
+            assert!(octets[1] < 256 && octets[2] < 256);
+            // 主机位非 0/255
+            assert!(
+                octets[3] >= 1 && octets[3] <= 254,
+                "ip {ip} 主机位 {} 越界",
+                octets[3]
+            );
+        }
+    }
+
+    #[test]
+    fn assign_mac_ip_deterministic_and_unique() {
+        let ordinals: Vec<i64> = vec![0, 1, 2, 5, 10, 100, 253, 254, 255, 1000];
+        // 确定性可复现
+        for &ord in &ordinals {
+            assert_eq!(assign_mac(ord), assign_mac(ord));
+            assert_eq!(assign_ip(ord), assign_ip(ord));
+        }
+        // 两两不重复
+        let mut macs = std::collections::HashSet::new();
+        let mut ips = std::collections::HashSet::new();
+        for ord in 0..5000i64 {
+            assert!(macs.insert(assign_mac(ord)), "mac 在 ordinal {ord} 重复");
+            assert!(ips.insert(assign_ip(ord)), "ip 在 ordinal {ord} 重复");
+        }
     }
 }
