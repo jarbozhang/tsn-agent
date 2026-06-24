@@ -770,7 +770,12 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
-    expect(edges.map((e) => [((e.data as TsnEdgeData).parallelIndex), ((e.data as TsnEdgeData).parallelCount)])).toEqual([
+    expect(
+      edges.map((e) => [
+        (e.data as TsnEdgeData).parallelIndex,
+        (e.data as TsnEdgeData).parallelCount,
+      ]),
+    ).toEqual([
       [0, 2],
       [1, 2],
     ]);

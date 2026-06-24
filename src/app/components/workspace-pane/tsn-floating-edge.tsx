@@ -158,7 +158,11 @@ function parallelSlot(index: number, count: number): number {
   return (safeIndex + 0.5) / safeCount;
 }
 
-function pointOnNodeSide(node: NodeRect, position: Position, slot: number): { x: number; y: number } {
+function pointOnNodeSide(
+  node: NodeRect,
+  position: Position,
+  slot: number,
+): { x: number; y: number } {
   switch (position) {
     case Position.Top:
       return { x: node.x + node.width * slot, y: node.y };
