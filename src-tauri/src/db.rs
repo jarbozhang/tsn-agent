@@ -111,6 +111,36 @@ pub const P0_DOMAIN_SCHEMA_SQL: &str = r#"
         PRIMARY KEY (session_id, domain)
     );
 
+    -- 时钟同步：单域配置（一 session 一行）。gm_mid 逻辑上引用
+    -- topology_nodes.mid，但不写跨表 FK（应用层校验，照项目惯例）；FK 只到
+    -- sessions（ON DELETE CASCADE）。disabled_link_seqs 是禁用链路 link_seq
+    -- 集的 JSON 数组串。取值域校验在 zod + Rust，DB 不写 CHECK。
+    CREATE TABLE IF NOT EXISTS timesync_domain (
+        session_id          TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        gm_mid              TEXT,
+        one_step_mode       INTEGER NOT NULL DEFAULT 0,
+        fre_switch          INTEGER NOT NULL DEFAULT 0,
+        disabled_link_seqs  TEXT    NOT NULL DEFAULT '[]',
+        PRIMARY KEY (session_id)
+    );
+
+    -- 时钟同步：每节点端口角色 + 同步参数。master_port/slave_port/
+    -- port_ptp_enabled 是端口号数组的 JSON 串（确定性衍生、全量覆盖写）。
+    -- mid 逻辑上引用 topology_nodes.mid，不写跨表 FK。
+    CREATE TABLE IF NOT EXISTS timesync_nodes (
+        session_id              TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        mid                     TEXT    NOT NULL,
+        master_port             TEXT    NOT NULL DEFAULT '[]',
+        slave_port              TEXT    NOT NULL DEFAULT '[]',
+        port_ptp_enabled        TEXT    NOT NULL DEFAULT '[]',
+        sync_period             INTEGER,
+        measure_period          INTEGER,
+        report_enable           INTEGER,
+        mean_link_delay_thresh  INTEGER,
+        offset_threshold        INTEGER,
+        PRIMARY KEY (session_id, mid)
+    );
+
     PRAGMA application_id = 1414745601;  -- 0x54534E01 ("TSN\x01")
 "#;
 
@@ -421,6 +451,31 @@ pub const SESSION_SCOPED_TABLES: &[(&str, &[&str])] = &[
             "styles_json",
         ],
     ),
+    (
+        "timesync_domain",
+        &[
+            "session_id",
+            "gm_mid",
+            "one_step_mode",
+            "fre_switch",
+            "disabled_link_seqs",
+        ],
+    ),
+    (
+        "timesync_nodes",
+        &[
+            "session_id",
+            "mid",
+            "master_port",
+            "slave_port",
+            "port_ptp_enabled",
+            "sync_period",
+            "measure_period",
+            "report_enable",
+            "mean_link_delay_thresh",
+            "offset_threshold",
+        ],
+    ),
 ];
 
 /// Plan v3 U_R5：lazy migration。旧 v1 db 含 `diagnostic_logs` 表 + 索引；
@@ -728,5 +783,153 @@ mod tests {
             assert!(links.contains(&c), "导出清单缺连线列 {c}");
         }
         assert!(!links.contains(&"src_sync_name"));
+    }
+
+    async fn fresh_safety_net_pool() -> sqlx::Pool<sqlx::Sqlite> {
+        let opts = SqliteConnectOptions::new()
+            .in_memory(true)
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        sqlx::query(&safety_net_schema_sql())
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    async fn table_columns(pool: &sqlx::Pool<sqlx::Sqlite>, table: &str) -> Vec<String> {
+        sqlx::query(&format!("SELECT name FROM pragma_table_info('{table}')"))
+            .fetch_all(pool)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.get::<String, _>("name"))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn safety_net_creates_timesync_tables_with_full_columns() {
+        let pool = fresh_safety_net_pool().await;
+
+        let domain_cols = table_columns(&pool, "timesync_domain").await;
+        for c in [
+            "session_id",
+            "gm_mid",
+            "one_step_mode",
+            "fre_switch",
+            "disabled_link_seqs",
+        ] {
+            assert!(
+                domain_cols.iter().any(|n| n == c),
+                "timesync_domain 缺列 {c}"
+            );
+        }
+        // 主键 session_id（一 session 一行）。
+        let domain_pk: Vec<String> = sqlx::query(
+            "SELECT name FROM pragma_table_info('timesync_domain') WHERE pk > 0 ORDER BY pk",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.get::<String, _>("name"))
+        .collect();
+        assert_eq!(domain_pk, vec!["session_id".to_string()]);
+
+        let node_cols = table_columns(&pool, "timesync_nodes").await;
+        for c in [
+            "session_id",
+            "mid",
+            "master_port",
+            "slave_port",
+            "port_ptp_enabled",
+            "sync_period",
+            "measure_period",
+            "report_enable",
+            "mean_link_delay_thresh",
+            "offset_threshold",
+        ] {
+            assert!(node_cols.iter().any(|n| n == c), "timesync_nodes 缺列 {c}");
+        }
+        let node_pk: Vec<String> = sqlx::query(
+            "SELECT name FROM pragma_table_info('timesync_nodes') WHERE pk > 0 ORDER BY pk",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.get::<String, _>("name"))
+        .collect();
+        assert_eq!(node_pk, vec!["session_id".to_string(), "mid".to_string()]);
+
+        // 再跑一遍 safety_net 幂等。
+        sqlx::query(&safety_net_schema_sql())
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn deleting_session_cascades_to_timesync_tables() {
+        let pool = fresh_safety_net_pool().await;
+        sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','t','t','{}')")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO timesync_domain (session_id, gm_mid) VALUES ('s1', '0')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO timesync_nodes (session_id, mid, master_port, slave_port) \
+             VALUES ('s1', '0', '[1]', '[]')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query("DELETE FROM sessions WHERE id = 's1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let domain_left: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM timesync_domain WHERE session_id = 's1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let nodes_left: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM timesync_nodes WHERE session_id = 's1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(domain_left, 0, "删 session 应级联清 timesync_domain");
+        assert_eq!(nodes_left, 0, "删 session 应级联清 timesync_nodes");
+    }
+
+    #[test]
+    fn session_scoped_tables_include_timesync_tables() {
+        for (table, required) in [
+            (
+                "timesync_domain",
+                &["session_id", "gm_mid", "disabled_link_seqs"][..],
+            ),
+            (
+                "timesync_nodes",
+                &["session_id", "mid", "master_port", "offset_threshold"][..],
+            ),
+        ] {
+            let cols = SESSION_SCOPED_TABLES
+                .iter()
+                .find(|(t, _)| *t == table)
+                .unwrap_or_else(|| panic!("SESSION_SCOPED_TABLES 缺 {table}"))
+                .1;
+            assert_eq!(cols[0], "session_id", "{table} 首列须为 session_id");
+            for c in required {
+                assert!(cols.contains(c), "{table} 导出清单缺列 {c}");
+            }
+        }
     }
 }

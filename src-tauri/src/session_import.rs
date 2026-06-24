@@ -541,6 +541,79 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_preserves_timesync_tables() {
+        // 时钟同步两表随 session 导出/导入：domain 一行 + nodes 多行，
+        // JSON 数组串列与可空 INTEGER 参数列逐字段保真。
+        tauri::async_runtime::block_on(async {
+            let (dir, main_pool) = seed_main_pool().await;
+            let src_pool = source_pool(dir.path()).await;
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('orig', 't', 'now', 'now', '{}')")
+                .execute(&src_pool).await.unwrap();
+            sqlx::query("INSERT INTO topology_nodes (session_id, mid, x, y, insert_order) VALUES ('orig', '0', 0.0, 0.0, 0), ('orig', '1', 1.0, 1.0, 1)")
+                .execute(&src_pool).await.unwrap();
+            sqlx::query(
+                "INSERT INTO timesync_domain \
+                 (session_id, gm_mid, one_step_mode, fre_switch, disabled_link_seqs) \
+                 VALUES ('orig', '0', 1, 0, '[2,5]')",
+            )
+            .execute(&src_pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO timesync_nodes \
+                 (session_id, mid, master_port, slave_port, port_ptp_enabled, \
+                  sync_period, measure_period, report_enable, mean_link_delay_thresh, offset_threshold) \
+                 VALUES ('orig', '1', '[2,3]', '[1]', '[1,2,3]', 128, 256, 1, 800, 4095)",
+            )
+            .execute(&src_pool)
+            .await
+            .unwrap();
+
+            let export_path = dir.path().join("export.db");
+            crate::session_export::perform_single_session_export(
+                &src_pool,
+                "orig",
+                export_path.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
+
+            perform_import(&main_pool, &export_path, Some("ts"))
+                .await
+                .unwrap();
+
+            let (gm, one_step, disabled): (Option<String>, i64, String) = sqlx::query_as(
+                "SELECT gm_mid, one_step_mode, disabled_link_seqs FROM timesync_domain WHERE session_id='ts'",
+            )
+            .fetch_one(&main_pool)
+            .await
+            .unwrap();
+            assert_eq!(gm.as_deref(), Some("0"));
+            assert_eq!(one_step, 1);
+            assert_eq!(disabled, "[2,5]");
+
+            let (master, slave, ptp, sync_p, offset): (
+                String,
+                String,
+                String,
+                Option<i64>,
+                Option<i64>,
+            ) = sqlx::query_as(
+                "SELECT master_port, slave_port, port_ptp_enabled, sync_period, offset_threshold \
+                 FROM timesync_nodes WHERE session_id='ts' AND mid='1'",
+            )
+            .fetch_one(&main_pool)
+            .await
+            .unwrap();
+            assert_eq!(master, "[2,3]");
+            assert_eq!(slave, "[1]");
+            assert_eq!(ptp, "[1,2,3]");
+            assert_eq!(sync_p, Some(128));
+            assert_eq!(offset, Some(4095));
+        });
+    }
+
+    #[test]
     fn import_rejects_node_count_over_limit() {
         tauri::async_runtime::block_on(async {
             let (dir, main_pool) = seed_main_pool().await;

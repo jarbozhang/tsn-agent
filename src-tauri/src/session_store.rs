@@ -351,6 +351,8 @@ mod tests {
         "topology_nodes",
         "topology_links",
         "topology_undo_snapshots",
+        "timesync_domain",
+        "timesync_nodes",
     ];
 
     #[test]
