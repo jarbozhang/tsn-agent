@@ -291,10 +291,8 @@ async fn persist_initialized_topology(
         // U3：mac/ip 确定性分配，ordinal 取节点 numeric_id（= mid）。
         let mac = crate::topology_intermediate::assign_mac(node.numeric_id);
         let ip = crate::topology_intermediate::assign_ip(node.numeric_id);
-        // 显式写 port_count = 该节点真实端口数（不落 schema DEFAULT 8，避免与导出
-        // build_topology_json 的 portCount=ports.len() 分叉、timesync 端口越界判错值）；
-        // queue_count 与导出 queueCount=3 对齐。
-        let port_count = node.ports.len() as i64;
+        // port_count/queue_count 写 spec 默认 8（节点物理端口/队列容量）。端口实际
+        // 索引为 0..度数-1，恒 < 8，timesync 端口越界校验 [0,8) 不会误判。
         sqlx::query(
             r#"INSERT INTO topology_nodes
                (session_id, mid, name, x, y, node_type, mac, ip, port_count, queue_count, insert_order)
@@ -308,8 +306,8 @@ async fn persist_initialized_topology(
         .bind(type_str)
         .bind(&mac)
         .bind(&ip)
-        .bind(port_count)
-        .bind(crate::topology_compute::EXPORT_QUEUE_COUNT)
+        .bind(8_i64)
+        .bind(8_i64)
         .bind(index as i64)
         .execute(&mut *conn)
         .await
@@ -343,16 +341,24 @@ async fn persist_initialized_topology(
             styles["role"] = json!(role);
         }
         let styles_json = styles.to_string();
+        // 端口/速率拆进独立列（与 styles_json 的 leftLabel/rightLabel/speed 同源）：
+        // compute_clock_tree 读这三列建时钟树，漏写会让设 GM 后算出空树。
+        let src_port = crate::db::parse_port_label(&link.source.port_id);
+        let dst_port = crate::db::parse_port_label(&link.target.port_id);
+        let speed = link.data_rate_mbps;
         sqlx::query(
             r#"INSERT INTO topology_links
-               (session_id, link_seq, name, src_node, dst_node, styles_json)
-               VALUES (?, ?, ?, ?, ?, ?)"#,
+               (session_id, link_seq, name, src_node, dst_node, src_port, dst_port, speed, styles_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(session_id)
         .bind(index as i64)
         .bind(&link.id)
         .bind(&src_node)
         .bind(&dst_node)
+        .bind(src_port)
+        .bind(dst_port)
+        .bind(speed)
         .bind(&styles_json)
         .execute(&mut *conn)
         .await
@@ -994,10 +1000,10 @@ mod tests {
         });
     }
 
-    /// 修复 2：initialize 落库 port_count = 该节点真实端口数（不落 schema DEFAULT 8），
-    /// queue_count 与导出 queueCount=3 对齐——否则 timesync 端口越界判会信错值、导出分叉。
+    /// initialize 落库：port_count/queue_count = spec 默认 8；连线 src_port/dst_port/speed
+    /// 拆进独立列（compute_clock_tree 读这三列建时钟树，漏写会让设 GM 后算出空树）。
     #[test]
-    fn persist_writes_real_port_count_and_export_queue_count() {
+    fn persist_writes_default_counts_and_link_port_columns() {
         tauri::async_runtime::block_on(async {
             let pool = SqlitePoolOptions::new()
                 .max_connections(1)
@@ -1034,7 +1040,12 @@ mod tests {
                           ],
                           "position": { "x": 1.0, "y": 1.0 } }
                     ],
-                    "links": [],
+                    "links": [
+                        { "id": "l0", "numericId": 0,
+                          "source": { "nodeId": "sw1", "portId": "P1" },
+                          "target": { "nodeId": "es1", "portId": "P0" },
+                          "medium": "ethernet", "dataRateMbps": 1000 }
+                    ],
                     "diagnostics": []
                 }))
                 .unwrap();
@@ -1050,23 +1061,36 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(rows.len(), 2);
-            assert_eq!(
-                rows[0].get::<i64, _>("port_count"),
-                4,
-                "节点0 port_count = ports.len()"
-            );
-            assert_eq!(
-                rows[1].get::<i64, _>("port_count"),
-                2,
-                "节点1 port_count = ports.len()"
-            );
             for row in &rows {
+                assert_eq!(row.get::<i64, _>("port_count"), 8, "port_count spec 默认 8");
                 assert_eq!(
                     row.get::<i64, _>("queue_count"),
-                    crate::topology_compute::EXPORT_QUEUE_COUNT,
-                    "queue_count 与导出 queueCount 对齐"
+                    8,
+                    "queue_count spec 默认 8"
                 );
             }
+            // 连线端口/速率拆进独立列（非 NULL）。
+            let link = sqlx::query(
+                "SELECT src_port, dst_port, speed FROM topology_links WHERE session_id = 's1'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                link.get::<Option<i64>, _>("src_port"),
+                Some(1),
+                "src_port=P1→1"
+            );
+            assert_eq!(
+                link.get::<Option<i64>, _>("dst_port"),
+                Some(0),
+                "dst_port=P0→0"
+            );
+            assert_eq!(
+                link.get::<Option<i64>, _>("speed"),
+                Some(1000),
+                "speed=dataRateMbps"
+            );
         });
     }
 
