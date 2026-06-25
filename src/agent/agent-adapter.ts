@@ -1,8 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
-import { logDiagnostic } from "../diagnostics/app-diagnostics";
-import type { DiagnosticLogRepository } from "../diagnostics/diagnostic-log-repository";
 import { getScenarioConfig, WORKFLOW_STEPS, type WorkflowStep } from "../domain/scenario-config";
 import {
   clearPendingStageChange,
@@ -79,32 +77,10 @@ export async function runTsnAgent(
     : normalized;
   const runId = request.runId ?? createRunId();
   const sessionId = request.session?.id;
-  const startedAt = Date.now();
 
   if (!isTauriRuntime()) {
-    logAgent(request.diagnostics, {
-      sessionId,
-      runId,
-      level: "warn",
-      message: "Agent 在非桌面环境不可用",
-      durationMs: Date.now() - startedAt,
-    });
-
     return createUnavailableResult(workflow);
   }
-
-  logAgent(request.diagnostics, {
-    sessionId,
-    runId,
-    message: "Agent 请求开始",
-    details: {
-      mode: "claude",
-      hasResumeSession: Boolean(request.session?.claudeSessionId),
-      inputChars: userIntent.length,
-      topologyRuntime: getTopologyRuntimeSummary("unknown"),
-      context: request.session ? buildSessionDiagnosticsContext(request.session) : undefined,
-    },
-  });
 
   // 大模型路径实际使用的意图/工作流。正常等于用户输入；确认回退「带原话」时被替换为
   // 切阶段后的工作流 + 触发回退的原话，从而切完自动执行原始编辑（不用用户重输）。
@@ -119,14 +95,8 @@ export async function runTsnAgent(
       let verdict: TopologyVerifyResult;
       try {
         verdict = await invoke<TopologyVerifyResult>("verify_topology", { request: { sessionId } });
-      } catch (error) {
+      } catch (_error) {
         // fail-closed：不推进、不冒泡到 App 通用 catch（否则把"继续"卡回输入框）。
-        logAgent(request.diagnostics, {
-          sessionId,
-          runId,
-          message: "结构校验调用失败，未推进",
-          details: { error: error instanceof Error ? error.message : String(error) },
-        });
         return {
           events: [],
           workflow,
@@ -136,12 +106,6 @@ export async function runTsnAgent(
         };
       }
       if (!verdict.ok) {
-        logAgent(request.diagnostics, {
-          sessionId,
-          runId,
-          message: "结构校验未通过，拦截推进",
-          details: { errorCount: verdict.errors.length },
-        });
         return {
           events: [],
           workflow,
@@ -161,14 +125,8 @@ export async function runTsnAgent(
         verdict = await invoke<TopologyVerifyResult>("verify_time_sync", {
           request: { sessionId },
         });
-      } catch (error) {
+      } catch (_error) {
         // fail-closed：不推进、不冒泡到 App 通用 catch。
-        logAgent(request.diagnostics, {
-          sessionId,
-          runId,
-          message: "时钟同步校验调用失败，未推进",
-          details: { error: error instanceof Error ? error.message : String(error) },
-        });
         return {
           events: [],
           workflow,
@@ -178,12 +136,6 @@ export async function runTsnAgent(
         };
       }
       if (!verdict.ok) {
-        logAgent(request.diagnostics, {
-          sessionId,
-          runId,
-          message: "时钟同步校验未通过，拦截推进",
-          details: { errorCount: verdict.errors.length },
-        });
         return {
           events: [],
           workflow,
@@ -195,16 +147,6 @@ export async function runTsnAgent(
     }
 
     const confirmResult = runConfirmAction(workflow);
-    logAgent(request.diagnostics, {
-      sessionId,
-      runId,
-      message: "Agent 使用确认动作推进",
-      durationMs: Date.now() - startedAt,
-      details: {
-        workflowStep: confirmResult.workflow.currentStep,
-        workflowStatus: confirmResult.workflow.stages[confirmResult.workflow.currentStep].status,
-      },
-    });
 
     // 无「带原话」标记 → 纯确定性确认（推进 / time-sync 自动生成 / 无操作），直接返回（静默推进）。
     // 清掉一次性回退通知：确认推进了阶段，若按钮撤销的标志还挂着，会在后续别的阶段晚一轮
@@ -221,23 +163,11 @@ export async function runTsnAgent(
   // 自由文本一律走大模型判断意图（不再有正则快速路径）。跨阶段意图由大模型调
   // request_stage_change 工具表达，应用层在 applyStageResults 校验后执行。
   const snapshot = await fetchTopologySnapshot(sessionId);
-  const streamStats = {
-    chunkCount: 0,
-    totalChars: 0,
-    firstChunkAtMs: undefined as number | undefined,
-    lastPreview: "",
-    // R13：工具事件诊断只记计数，不进原始 args/result。
-    toolCallEvents: 0,
-  };
   // 竞态守卫：invoke 返回后仍可能有 IPC 在途的 tool_call 事件在 done 对账的
   // await 间隙送达——run 收尾后丢弃，防止 running 残卡覆盖权威列表。
   let runFinished = false;
   const unlisten = await listenToClaudeEvents(runId, {
     onChunk: (chunk) => {
-      streamStats.chunkCount += 1;
-      streamStats.totalChars += chunk.length;
-      streamStats.firstChunkAtMs ??= Date.now() - startedAt;
-      streamStats.lastPreview = chunk.slice(-120);
       request.onChunk?.(chunk);
     },
     onToolCall: request.onToolCall
@@ -247,7 +177,6 @@ export async function runTsnAgent(
           }
           const record = toStreamedToolCallRecord(payload);
           if (record) {
-            streamStats.toolCallEvents += 1;
             request.onToolCall?.(record);
           }
         }
@@ -286,27 +215,6 @@ export async function runTsnAgent(
       sessionId,
       userIntent: effectiveIntent,
     });
-    logAgent(request.diagnostics, {
-      sessionId,
-      runId,
-      message: "智能助手请求完成",
-      durationMs: Date.now() - startedAt,
-      details: {
-        claudeSessionId: claude.sessionId,
-        streamStats,
-        assistantChars: claude.assistantText.length,
-        stageResultCount: claude.stageResults?.length ?? 0,
-        appliedStageResult: application.applied
-          ? `${application.applied.producer.type}:${application.applied.producer.name}`
-          : undefined,
-        rejectedStageResults: application.rejections.length,
-        auditPath: claude.auditPath,
-        topologyMutationId: application.topologyMutationId,
-        topologyRuntime: getTopologyRuntimeSummary(
-          application.rejections.length > 0 ? "call_failed" : "available",
-        ),
-      },
-    });
 
     return {
       events: application.events,
@@ -321,19 +229,6 @@ export async function runTsnAgent(
       ),
     };
   } catch (error) {
-    logAgent(request.diagnostics, {
-      sessionId,
-      runId,
-      level: "warn",
-      message: "智能助手请求失败",
-      durationMs: Date.now() - startedAt,
-      details: {
-        error: normalizeError(error),
-        streamStats,
-        topologyRuntime: getTopologyRuntimeSummary("call_failed"),
-      },
-    });
-
     return {
       events: [
         createEvent({
@@ -964,32 +859,6 @@ function createEvent(input: AgentEvent): AgentEvent {
   };
 }
 
-function logAgent(
-  diagnostics: DiagnosticLogRepository | undefined,
-  input: {
-    sessionId?: string;
-    runId: string;
-    level?: "info" | "warn" | "error";
-    message: string;
-    durationMs?: number;
-    details?: Record<string, unknown>;
-  },
-) {
-  if (!diagnostics || !input.sessionId) {
-    return;
-  }
-
-  logDiagnostic(diagnostics, {
-    sessionId: input.sessionId,
-    runId: input.runId,
-    category: "agent",
-    level: input.level ?? "info",
-    message: input.message,
-    durationMs: input.durationMs,
-    details: input.details,
-  });
-}
-
 function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -1100,15 +969,6 @@ function summarizeMessageForContext(content: string): string {
 function formatMessageForContext(message: ChatMessage): string {
   const role = message.role === "user" ? "用户" : "助手";
   return `${role}: ${message.content}`;
-}
-
-function buildSessionDiagnosticsContext(session: TsnSession) {
-  return {
-    messageCount: session.messages.length,
-    eventCount: session.agentEvents.length,
-    topologyMutationId: session.topologyMutationId,
-    hasClaudeSession: Boolean(session.claudeSessionId),
-  };
 }
 
 export function createRunId(): string {

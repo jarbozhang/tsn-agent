@@ -6,7 +6,6 @@
  * agent 结果只携带 workflow 状态与 topologyMutationId。
  */
 
-import type { DiagnosticLogRepository } from "../diagnostics/diagnostic-log-repository";
 import type { WorkflowState, WorkflowStep } from "../project/project-state";
 import type { TsnSession } from "../sessions/session-repository";
 import type { ToolCallRecord } from "./tool-call-record";
@@ -79,5 +78,4 @@ export interface TsnAgentRequest {
   onChunk?: (chunk: string) => void;
   /** Plan 2026-06-10-001：流式工具事件（已脱敏+富化），run 期间按 id upsert 驱动卡片。 */
   onToolCall?: (record: ToolCallRecord) => void;
-  diagnostics?: DiagnosticLogRepository;
 }

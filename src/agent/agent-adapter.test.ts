@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DiagnosticLogRepository } from "../diagnostics/diagnostic-log-repository";
 import {
   createInitialWorkflowState,
   recordStageResult,
@@ -10,19 +9,6 @@ import { createTopologyWorkflowStageResult } from "./topology-workflow-stage-res
 
 const invokeMock = vi.hoisted(() => vi.fn());
 const listenMock = vi.hoisted(() => vi.fn());
-
-function createDiagnosticsRecorder() {
-  const entries: unknown[] = [];
-  const repository: DiagnosticLogRepository = {
-    append: vi.fn(async (entry) => {
-      entries.push(entry);
-    }),
-    list: vi.fn(async () => []),
-    clearSession: vi.fn(async () => undefined),
-  };
-
-  return { repository, entries };
-}
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
@@ -1235,35 +1221,6 @@ describe("runTsnAgent", () => {
     expect(result.workflow.currentStep).toBe("topology");
     expect(result.events).toEqual(
       expect.arrayContaining([expect.objectContaining({ kind: "error", title: "无法前进" })]),
-    );
-  });
-
-  it("records diagnostics for the run lifecycle", async () => {
-    enableTauriRuntime();
-    mockTauriCommands({
-      claude: {
-        assistantText: "已写入拓扑。",
-        sessionId: "claude-session-diag",
-        stageResults: [validStageResult(3)],
-      },
-    });
-    const { repository, entries } = createDiagnosticsRecorder();
-    const { runTsnAgent } = await import("./agent-adapter");
-
-    await runTsnAgent({
-      userIntent: "我需要2个交换机",
-      session: sessionWithWorkflow(createInitialWorkflowState()),
-      diagnostics: repository,
-    });
-
-    expect(entries).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ message: "Agent 请求开始" }),
-        expect.objectContaining({
-          message: "智能助手请求完成",
-          details: expect.objectContaining({ topologyMutationId: 3 }),
-        }),
-      ]),
     );
   });
 });

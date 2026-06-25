@@ -1,6 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { BrowserDiagnosticLogRepository } from "../../diagnostics/diagnostic-log-repository";
 import {
   BrowserSessionRepository,
   createEmptySession,
@@ -27,17 +26,11 @@ function createTestRepository(): SessionRepository {
   return new BrowserSessionRepository(createMemoryStorage());
 }
 
-function createTestDiagnostics(): BrowserDiagnosticLogRepository {
-  return new BrowserDiagnosticLogRepository(createMemoryStorage());
-}
-
 describe("useSessionRepository", () => {
   let repository: SessionRepository;
-  let diagnostics: BrowserDiagnosticLogRepository;
 
   beforeEach(() => {
     repository = createTestRepository();
-    diagnostics = createTestDiagnostics();
   });
 
   afterEach(() => {
@@ -45,7 +38,7 @@ describe("useSessionRepository", () => {
   });
 
   it("hydrates with an empty initial session when repository is empty", async () => {
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+    const { result } = renderHook(() => useSessionRepository({ repository }));
 
     await waitFor(() => {
       expect(result.current.isHydrating).toBe(false);
@@ -61,7 +54,7 @@ describe("useSessionRepository", () => {
     await repository.save(seeded);
     await repository.setCurrent(seeded.id);
 
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+    const { result } = renderHook(() => useSessionRepository({ repository }));
 
     await waitFor(() => {
       expect(result.current.isHydrating).toBe(false);
@@ -84,9 +77,7 @@ describe("useSessionRepository", () => {
       duplicate: async () => undefined,
     };
 
-    const { result } = renderHook(() =>
-      useSessionRepository({ repository: failingRepository, diagnostics }),
-    );
+    const { result } = renderHook(() => useSessionRepository({ repository: failingRepository }));
 
     await waitFor(() => {
       expect(result.current.isHydrating).toBe(false);
@@ -96,11 +87,10 @@ describe("useSessionRepository", () => {
     expect(result.current.sessions).toHaveLength(1);
   });
 
-  it("persistSession saves + logs + updates currentSession when ids match", async () => {
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+  it("persistSession saves and updates currentSession when ids match", async () => {
+    const { result } = renderHook(() => useSessionRepository({ repository }));
     await waitFor(() => expect(result.current.isHydrating).toBe(false));
 
-    const sessionId = result.current.currentSession.id;
     const updated: TsnSession = {
       ...result.current.currentSession,
       title: "updated title",
@@ -111,12 +101,10 @@ describe("useSessionRepository", () => {
     });
 
     expect(result.current.currentSession.title).toBe("updated title");
-    const logs = await diagnostics.list(sessionId);
-    expect(logs.some((log) => log.message === "会话已保存")).toBe(true);
   });
 
   it("persistSession unconditionally sets currentSession to the persisted one", async () => {
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+    const { result } = renderHook(() => useSessionRepository({ repository }));
     await waitFor(() => expect(result.current.isHydrating).toBe(false));
 
     const replacement: TsnSession = {
@@ -134,7 +122,7 @@ describe("useSessionRepository", () => {
   });
 
   it("persistSessionIfCurrent does not overwrite currentSession when ids differ", async () => {
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+    const { result } = renderHook(() => useSessionRepository({ repository }));
     await waitFor(() => expect(result.current.isHydrating).toBe(false));
 
     const orphan: TsnSession = {
@@ -153,7 +141,7 @@ describe("useSessionRepository", () => {
   });
 
   it("persistSessionIfCurrent updates currentSession when ids match", async () => {
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+    const { result } = renderHook(() => useSessionRepository({ repository }));
     await waitFor(() => expect(result.current.isHydrating).toBe(false));
 
     const updated: TsnSession = {
@@ -169,7 +157,7 @@ describe("useSessionRepository", () => {
   });
 
   it("handleNewSession creates and switches to a new session", async () => {
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+    const { result } = renderHook(() => useSessionRepository({ repository }));
     await waitFor(() => expect(result.current.isHydrating).toBe(false));
 
     const originalId = result.current.currentSession.id;
@@ -192,7 +180,7 @@ describe("useSessionRepository", () => {
     };
     await repository.save(targetSession);
 
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+    const { result } = renderHook(() => useSessionRepository({ repository }));
     await waitFor(() => expect(result.current.isHydrating).toBe(false));
 
     await act(async () => {
@@ -207,7 +195,7 @@ describe("useSessionRepository", () => {
     await repository.save(original);
     await repository.setCurrent(original.id);
 
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+    const { result } = renderHook(() => useSessionRepository({ repository }));
     await waitFor(() => expect(result.current.currentSession.id).toBe("to-delete"));
 
     let nextSession: TsnSession | undefined;
@@ -227,7 +215,7 @@ describe("useSessionRepository", () => {
     await repository.save(original);
     await repository.setCurrent(original.id);
 
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+    const { result } = renderHook(() => useSessionRepository({ repository }));
     await waitFor(() => expect(result.current.currentSession.id).toBe("to-delete"));
 
     expect(result.current.isSessionDeleted("to-delete")).toBe(false);
@@ -246,7 +234,7 @@ describe("useSessionRepository", () => {
     const saved: TsnSession = { ...createEmptySession(), id: "known" };
     await repository.save(saved);
 
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+    const { result } = renderHook(() => useSessionRepository({ repository }));
     await waitFor(() => expect(result.current.isHydrating).toBe(false));
 
     expect(await result.current.sessionExists("known")).toBe(true);
@@ -254,7 +242,7 @@ describe("useSessionRepository", () => {
   });
 
   it("updateAssistantMessage updates message content when session id matches", async () => {
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+    const { result } = renderHook(() => useSessionRepository({ repository }));
     await waitFor(() => expect(result.current.isHydrating).toBe(false));
 
     const session = result.current.currentSession;
@@ -268,7 +256,7 @@ describe("useSessionRepository", () => {
   });
 
   it("updateAssistantMessage does not update when session id does not match", async () => {
-    const { result } = renderHook(() => useSessionRepository({ repository, diagnostics }));
+    const { result } = renderHook(() => useSessionRepository({ repository }));
     await waitFor(() => expect(result.current.isHydrating).toBe(false));
 
     const session = result.current.currentSession;

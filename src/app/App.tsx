@@ -5,11 +5,6 @@ import "@xyflow/react/dist/style.css";
 import { createRunId, runTsnAgent } from "../agent/agent-adapter";
 import type { ToolCallRecord } from "../agent/tool-call-record";
 import tsnAgentMark from "../assets/tsn-agent-mark.png";
-import { logDiagnostic, sessionSummary, userIntentPreview } from "../diagnostics/app-diagnostics";
-import {
-  createDiagnosticLogRepository,
-  type DiagnosticLogRepository,
-} from "../diagnostics/diagnostic-log-repository";
 import { getScenarioConfig } from "../domain/scenario-config";
 import { appVersion } from "../release/release-info";
 import {
@@ -41,7 +36,6 @@ import {
 } from "./session-transfer";
 
 const repository: SessionRepository = createSessionRepository();
-const diagnosticsRepository: DiagnosticLogRepository = createDiagnosticLogRepository();
 const ASSISTANT_CONNECTING_MESSAGE = "正在连接智能助手，并结合当前会话上下文生成下一步规划...";
 const SESSION_TITLE_MAX_CHARS = 24;
 
@@ -58,7 +52,7 @@ export function App() {
     handleNewSession: createNewSession,
     handleSelectSession: selectSession,
     handleDeleteSession: deleteSession,
-  } = useSessionRepository({ repository, diagnostics: diagnosticsRepository });
+  } = useSessionRepository({ repository });
   const [input, setInput] = useState("");
   const [activeWorkspacePanel, setActiveWorkspacePanel] = useState<
     WorkspaceToolPanel | undefined
@@ -165,21 +159,9 @@ export function App() {
     agentRun.startRun();
     agentRun.setPendingAssistantMessageId(assistantMessage.id);
     setCurrentSession(pendingSession);
-    logDiagnostic(diagnosticsRepository, {
-      sessionId: pendingSession.id,
-      category: "session",
-      message: "用户提交需求",
-      details: userIntentPreview(trimmedInput),
-    });
 
     try {
       await repository.save(pendingSession);
-      logDiagnostic(diagnosticsRepository, {
-        sessionId: pendingSession.id,
-        category: "session",
-        message: "pending session 已保存",
-        details: sessionSummary(pendingSession),
-      });
       await reloadSessionsList();
 
       const result = await runTsnAgent({
@@ -187,7 +169,6 @@ export function App() {
         action: options.action,
         runId,
         session: contextSession,
-        diagnostics: diagnosticsRepository,
         onChunk: (chunk) => {
           // 终止成功（cancelRequestedRef 已置）后到达的在途 chunk 一律丢弃，避免覆盖
           // 即将定型的「已终止」消息。守 cancelRequestedRef 而非塑形后才置的局部标志，
@@ -263,12 +244,6 @@ export function App() {
         }
 
         await repository.save(terminatedSession);
-        logDiagnostic(diagnosticsRepository, {
-          sessionId: terminatedSession.id,
-          category: "session",
-          message: "本轮推理被用户终止",
-          details: sessionSummary(terminatedSession),
-        });
         setCurrentSession((session) =>
           session.id === terminatedSession.id ? terminatedSession : session,
         );
@@ -311,29 +286,11 @@ export function App() {
       }
 
       await repository.save(nextSession);
-      logDiagnostic(diagnosticsRepository, {
-        sessionId: nextSession.id,
-        category: "session",
-        message: "final session 已保存",
-        details: {
-          ...sessionSummary(nextSession),
-          agentMode: result.mode,
-        },
-      });
       setCurrentSession((session) => (session.id === nextSession.id ? nextSession : session));
       await reloadSessionsList();
     } catch (error) {
       setInput(trimmedInput);
       agentRun.setPendingAssistantMessageId(undefined);
-      logDiagnostic(diagnosticsRepository, {
-        sessionId: pendingSession.id,
-        category: "session",
-        level: "error",
-        message: "会话生成失败",
-        details: {
-          error: normalizeError(error),
-        },
-      });
       setCurrentSession((session) => {
         if (session.id !== pendingSession.id) {
           return session;
@@ -437,12 +394,6 @@ export function App() {
     const outcome = await exportCurrentSession(currentSession.id, currentSession.title);
     if (outcome.status === "done") {
       setTransferNotice({ kind: "success", text: `已导出到 ${outcome.path}`, path: outcome.path });
-      logDiagnostic(diagnosticsRepository, {
-        sessionId: currentSession.id,
-        category: "session",
-        message: "导出会话",
-        details: { targetPath: outcome.path },
-      });
     } else if (outcome.status === "error") {
       setTransferNotice({ kind: "error", text: outcome.message });
     }
@@ -463,12 +414,6 @@ export function App() {
         setCurrentSession(imported);
       }
       setTransferNotice({ kind: "success", text: "会话已导入" });
-      logDiagnostic(diagnosticsRepository, {
-        sessionId: outcome.sessionId,
-        category: "session",
-        message: "导入会话",
-        details: { sessionId: outcome.sessionId },
-      });
     } else if (outcome.status === "error") {
       setTransferNotice({ kind: "error", text: outcome.message });
     }
