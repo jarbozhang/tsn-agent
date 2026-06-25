@@ -672,57 +672,22 @@ pub fn eval_store_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
         .map(|path| path.join("eval"))
 }
 
+// Plan 2026-06-25-002 U8：执行日志模块（diagnostic_store/log_file_writer）已删除。
+// worker 生命周期事件不再进 UI/存储，改写 stderr —— dev/ops 的兜底可见性（计划接受的
+// 删后排障路径）。保留函数与调用点，避免改动 worker-spawn 关键控制流。
 fn log_worker_event(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     session_id: Option<&str>,
     run_id: &str,
     level: &str,
     message: &str,
-    duration_ms: Option<i64>,
+    _duration_ms: Option<i64>,
     details: serde_json::Value,
 ) {
-    let Some(session_id) = session_id else {
-        return;
-    };
-    let entry = crate::diagnostic_store::DiagnosticLogEntry {
-        id: create_log_id(),
-        session_id: session_id.to_string(),
-        category: "agent".to_string(),
-        level: level.to_string(),
-        message: message.to_string(),
-        created_at: iso_now(),
-        run_id: Some(run_id.to_string()),
-        duration_ms,
-        details: Some(details),
-    };
-
-    // U_R5：诊断日志改写 jsonl 文件。LogFileWriter 是 async + 串行 Mutex，
-    // 这里在 worker stderr 同步处理路径上以 block_on 桥接。
-    use tauri::Manager;
-    if let Some(store) = app.try_state::<crate::diagnostic_store::DiagnosticStore>() {
-        let _ = tauri::async_runtime::block_on(store.writer().append(app, entry));
-    }
-}
-
-fn iso_now() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default();
-
-    format!("{millis}")
-}
-
-fn create_log_id() -> String {
-    format!(
-        "diagnostic-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or_default()
-    )
+    eprintln!(
+        "[worker-event] level={level} run={run_id} session={} msg={message} details={details}",
+        session_id.unwrap_or("-")
+    );
 }
 
 fn emit_claude_event(

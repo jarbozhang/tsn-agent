@@ -1,11 +1,9 @@
 mod commands;
 mod db;
-mod diagnostic_store;
 mod eval_command;
 mod inet_bundle;
 mod inet_remote;
 mod inet_verify_command;
-mod log_file_writer;
 mod redaction;
 mod session_export;
 mod session_import;
@@ -60,7 +58,6 @@ pub fn run() {
                 .build(),
         )
         .manage(session_store::SessionStore::default())
-        .manage(diagnostic_store::DiagnosticStore::default())
         .manage(commands::AgentWorkerRegistry::default())
         .manage(std::sync::Arc::new(
             topology_mutation_buffer::TopologyMutationBuffer::default(),
@@ -88,9 +85,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_health,
-            diagnostic_store::append_diagnostic_log,
-            diagnostic_store::clear_session_diagnostic_logs,
-            diagnostic_store::list_diagnostic_logs,
             commands::run_claude_agent,
             commands::cancel_claude_agent,
             commands::describe_topology_templates,
