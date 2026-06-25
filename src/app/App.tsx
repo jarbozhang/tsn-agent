@@ -541,7 +541,7 @@ export function App() {
       <ConfirmDialog
         open={deleteConfirmOpen}
         title="删除当前会话"
-        body={`将删除「${currentSession.title}」及其拓扑数据，删除后无法恢复。`}
+        body={`将删除「${currentSession.title}」及其拓扑数据，删除后无法恢复。该会话的 eval 采集样本不会被删除，如需清除请到「评估采集」面板操作。`}
         confirmLabel="删除"
         danger
         onConfirm={() => void confirmDeleteSession()}
