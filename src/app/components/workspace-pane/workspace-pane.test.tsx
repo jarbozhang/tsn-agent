@@ -33,6 +33,7 @@ vi.mock("@xyflow/react", () => ({
   ),
   EdgeLabelRenderer: ({ children }: { children?: unknown }) => children ?? null,
   getBezierPath: () => ["M0 0", 0, 0],
+  MarkerType: { ArrowClosed: "arrowclosed", Arrow: "arrow" },
   useInternalNode: (id: string) => flowMocks.internalNodes.get(id),
   applyNodeChanges: (_changes: unknown[], nodes: Array<{ id: string }>) => nodes,
   Position: { Left: "left", Right: "right", Top: "top", Bottom: "bottom" },
@@ -111,6 +112,23 @@ vi.mock("@xyflow/react", () => ({
             选择链路 {edge.id}
           </button>
         ))}
+        {edges.map((edge) => {
+          const e = edge as {
+            id: string;
+            className?: string;
+            markerStart?: unknown;
+            markerEnd?: unknown;
+          };
+          return (
+            <span
+              key={`edge-meta-${edge.id}`}
+              data-testid={`edge-meta-${edge.id}`}
+              data-class={e.className ?? ""}
+              data-marker-start={e.markerStart ? "yes" : "no"}
+              data-marker-end={e.markerEnd ? "yes" : "no"}
+            />
+          );
+        })}
         <button type="button" onClick={() => props.onPaneClick?.({})}>
           点击画布空白
         </button>
@@ -122,11 +140,14 @@ vi.mock("@xyflow/react", () => ({
 import type { TimesyncSnapshot } from "../../../sessions/timesync-snapshot";
 import type { TopologyNodeRow, TopologyRowSnapshot } from "../../../sessions/topology-snapshot";
 import {
+  classifyTimesyncEdge,
   nodeRowLabel,
   nodeTypeToken,
   parseLinkStyles,
+  parsePortLabel,
   planeClassName,
   type TsnEdgeData,
+  timesyncEdgeDecoration,
   timesyncRoleBadge,
   topologySnapshotToReactFlow,
   WorkspacePane,
@@ -1072,5 +1093,228 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
     expect(timesyncRoleBadge("synced")).toBe("同步");
     expect(timesyncRoleBadge("passive")).toBe("旁路");
     expect(timesyncRoleBadge("uncovered")).toBe("未覆盖");
+  });
+
+  // 带端口标签的拓扑：link0 SW-1.P0 — ES-2.P0；GM=1，1 master=[0]、2 slave=[0] → 树边（父→子）。
+  function portedSnapshot(): TopologyRowSnapshot {
+    return {
+      sessionId: "s1",
+      nodes: [
+        { mid: "1", name: "SW-1", x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
+        { mid: "2", name: "ES-2", x: 160, y: 0, nodeType: "endSystem", insertOrder: 1 },
+      ],
+      links: [
+        {
+          linkSeq: 0,
+          name: null,
+          srcNode: "1",
+          dstNode: "2",
+          stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}',
+        },
+      ],
+    };
+  }
+
+  it("time-sync 阶段：树边醒目 className + 父→子方向箭头", () => {
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: portedSnapshot(),
+          workflowStep: "time-sync",
+          timesyncSnapshot: timesyncFor("1"),
+        })}
+      />,
+    );
+    const meta = screen.getByTestId("edge-meta-link-0");
+    expect(meta).toHaveAttribute("data-class", "timesync-tree-edge");
+    // src(1)=父 master、dst(2)=子 slave → 箭头指向 target（markerEnd）。
+    expect(meta).toHaveAttribute("data-marker-end", "yes");
+    expect(meta).toHaveAttribute("data-marker-start", "no");
+  });
+
+  it("time-sync 阶段：非树边（端口不在 master/slave 集合）淡化无箭头", () => {
+    // GM 设了但两节点端口集合都空 → passive 边。
+    const noTree: TimesyncSnapshot = {
+      sessionId: "s1",
+      domain: { gmMid: "1", oneStepMode: 0, freSwitch: 0, disabledLinkSeqs: [] },
+      nodes: [
+        {
+          mid: "1",
+          masterPort: [],
+          slavePort: [],
+          portPtpEnabled: [],
+          syncPeriod: null,
+          measurePeriod: null,
+          reportEnable: null,
+          meanLinkDelayThresh: null,
+          offsetThreshold: null,
+        },
+        {
+          mid: "2",
+          masterPort: [],
+          slavePort: [],
+          portPtpEnabled: [],
+          syncPeriod: null,
+          measurePeriod: null,
+          reportEnable: null,
+          meanLinkDelayThresh: null,
+          offsetThreshold: null,
+        },
+      ],
+    };
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: portedSnapshot(),
+          workflowStep: "time-sync",
+          timesyncSnapshot: noTree,
+        })}
+      />,
+    );
+    const meta = screen.getByTestId("edge-meta-link-0");
+    expect(meta).toHaveAttribute("data-class", "timesync-passive-edge");
+    expect(meta).toHaveAttribute("data-marker-end", "no");
+    expect(meta).toHaveAttribute("data-marker-start", "no");
+  });
+
+  it("topology 阶段：边不受时钟树富化影响（保留平面 className、无箭头）", () => {
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: portedSnapshot(),
+          workflowStep: "topology",
+          timesyncSnapshot: timesyncFor("1"),
+        })}
+      />,
+    );
+    const meta = screen.getByTestId("edge-meta-link-0");
+    // 无 plane → plane-neutral，绝不出现 timesync-* 边类，也无方向箭头。
+    expect(meta).toHaveAttribute("data-class", "plane-neutral");
+    expect(meta).toHaveAttribute("data-marker-end", "no");
+    expect(meta).toHaveAttribute("data-marker-start", "no");
+  });
+});
+
+describe("parsePortLabel（端口标签数字提取）", () => {
+  it("认 P<digits> 与纯数字", () => {
+    expect(parsePortLabel("P0")).toBe(0);
+    expect(parsePortLabel("p1")).toBe(1);
+    expect(parsePortLabel("12")).toBe(12);
+  });
+
+  it("非数字 / 空 / 缺失 → undefined", () => {
+    expect(parsePortLabel("eth0")).toBeUndefined();
+    expect(parsePortLabel("GE0/1")).toBeUndefined();
+    expect(parsePortLabel("")).toBeUndefined();
+    expect(parsePortLabel("P")).toBeUndefined();
+    expect(parsePortLabel(undefined)).toBeUndefined();
+  });
+});
+
+describe("classifyTimesyncEdge（时钟树边分类纯函数）", () => {
+  // 线性 0—1—2，GM=0：0 master=[0]；1 slave(朝父0)=[0]、master(朝子2)=[1]；2 slave=[0]。
+  function snap(): TimesyncSnapshot {
+    return {
+      sessionId: "s1",
+      domain: { gmMid: "0", oneStepMode: 0, freSwitch: 0, disabledLinkSeqs: [] },
+      nodes: [
+        {
+          mid: "0",
+          masterPort: [0],
+          slavePort: [],
+          portPtpEnabled: [0],
+          syncPeriod: null,
+          measurePeriod: null,
+          reportEnable: null,
+          meanLinkDelayThresh: null,
+          offsetThreshold: null,
+        },
+        {
+          mid: "1",
+          masterPort: [1],
+          slavePort: [0],
+          portPtpEnabled: [0, 1],
+          syncPeriod: null,
+          measurePeriod: null,
+          reportEnable: null,
+          meanLinkDelayThresh: null,
+          offsetThreshold: null,
+        },
+        {
+          mid: "2",
+          masterPort: [],
+          slavePort: [0],
+          portPtpEnabled: [0],
+          syncPeriod: null,
+          measurePeriod: null,
+          reportEnable: null,
+          meanLinkDelayThresh: null,
+          offsetThreshold: null,
+        },
+      ],
+    };
+  }
+
+  it("src=父 master、dst=子 slave → tree-master-to-slave", () => {
+    // link 0→1：src(0).P0 ∈ master、dst(1).P0 ∈ slave。
+    const link = { srcNode: "0", dstNode: "1", stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}' };
+    expect(classifyTimesyncEdge(link, snap())).toBe("tree-master-to-slave");
+  });
+
+  it("src=子 slave、dst=父 master → tree-slave-to-master（方向反向）", () => {
+    // link 2→1：src(2).P0 ∈ slave、dst(1).P1 ∈ master。
+    const link = { srcNode: "2", dstNode: "1", stylesJson: '{"leftLabel":"P0","rightLabel":"P1"}' };
+    expect(classifyTimesyncEdge(link, snap())).toBe("tree-slave-to-master");
+  });
+
+  it("端口都不在 master/slave 集合 → passive", () => {
+    // link 0→1 但用 P9（不在任何集合）。
+    const link = { srcNode: "0", dstNode: "1", stylesJson: '{"leftLabel":"P9","rightLabel":"P9"}' };
+    expect(classifyTimesyncEdge(link, snap())).toBe("passive");
+  });
+
+  it("端口标签缺失/非数字 → passive（无法判定）", () => {
+    expect(classifyTimesyncEdge({ srcNode: "0", dstNode: "1", stylesJson: "{}" }, snap())).toBe(
+      "passive",
+    );
+    expect(
+      classifyTimesyncEdge(
+        { srcNode: "0", dstNode: "1", stylesJson: '{"leftLabel":"eth0","rightLabel":"eth0"}' },
+        snap(),
+      ),
+    ).toBe("passive");
+  });
+
+  it("节点不在快照 / 无快照 → passive", () => {
+    const link = { srcNode: "0", dstNode: "9", stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}' };
+    expect(classifyTimesyncEdge(link, snap())).toBe("passive");
+    expect(classifyTimesyncEdge(link, undefined)).toBe("passive");
+  });
+
+  it("一端是树端口、另一端不匹配 → passive（半边不成树）", () => {
+    // src(0).P0 ∈ master，但 dst(1).P1 ∈ master（非 slave）→ 不构成 master→slave。
+    const link = { srcNode: "0", dstNode: "1", stylesJson: '{"leftLabel":"P0","rightLabel":"P1"}' };
+    expect(classifyTimesyncEdge(link, snap())).toBe("passive");
+  });
+});
+
+describe("timesyncEdgeDecoration（分类 → 边装饰）", () => {
+  it("树边醒目 className + 父→子方向箭头落在子端", () => {
+    const fwd = timesyncEdgeDecoration("tree-master-to-slave");
+    expect(fwd.className).toBe("timesync-tree-edge");
+    expect(fwd.markerEnd).toBeDefined();
+    expect(fwd.markerStart).toBeUndefined();
+
+    const rev = timesyncEdgeDecoration("tree-slave-to-master");
+    expect(rev.className).toBe("timesync-tree-edge");
+    expect(rev.markerStart).toBeDefined();
+    expect(rev.markerEnd).toBeUndefined();
+  });
+
+  it("非树边淡化无箭头", () => {
+    const passive = timesyncEdgeDecoration("passive");
+    expect(passive.className).toBe("timesync-passive-edge");
+    expect(passive.markerEnd).toBeUndefined();
+    expect(passive.markerStart).toBeUndefined();
   });
 });

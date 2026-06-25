@@ -2023,6 +2023,20 @@ textarea:focus-visible {
   background: #16a34a;
 }
 
+/* U12：time-sync 阶段时钟树边——树边醒目（绿、加粗、实线），非树边淡化（灰、虚线）。
+   置于 .selected 规则之后无所谓：本阶段平面 className 被替换，无 plane-* 竞争。 */
+.topology-canvas .react-flow__edge.timesync-tree-edge .react-flow__edge-path {
+  stroke: #15803d;
+  stroke-width: 2.4px;
+}
+
+.topology-canvas .react-flow__edge.timesync-passive-edge .react-flow__edge-path {
+  stroke: #94a3b8;
+  stroke-width: 1px;
+  stroke-dasharray: 4 4;
+  opacity: 0.6;
+}
+
 /* 时钟同步信息栏：GM + 禁用链路 + 未覆盖告警。 */
 .clock-tree-bar {
   display: flex;

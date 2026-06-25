@@ -1,4 +1,4 @@
-import type { Edge, Node } from "@xyflow/react";
+import { type Edge, type EdgeMarker, MarkerType, type Node } from "@xyflow/react";
 import type {
   TopologyLinkRow,
   TopologyNodeRow,
@@ -167,7 +167,7 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): {
   };
 }
 
-import type { TimesyncNodeRole } from "../../../sessions/timesync-snapshot";
+import type { TimesyncNodeRole, TimesyncSnapshot } from "../../../sessions/timesync-snapshot";
 
 /** time-sync 阶段画布注入到 React Flow 节点 data 的时钟树角色（拓扑阶段为 undefined）。 */
 export interface TsnNodeTimesync {
@@ -175,6 +175,90 @@ export interface TsnNodeTimesync {
   masterCount: number;
   slaveCount: number;
   isGm: boolean;
+}
+
+/**
+ * 端口标签数字提取（与 Rust db.rs::parse_port_label 同口径）：
+ * 只认 `P<digits>`（大小写 P，`"P1"`→1）或纯数字（`"1"`→1）；其余（`"eth0"`/空/缺失）→ undefined。
+ * 端口号是前端唯一能从 link 拿到的端口标识（query_topology 不暴露 src/dst_port，
+ * 但 styles_json 的 leftLabel=src 端口、rightLabel=dst 端口，与建表迁移同源）。
+ */
+export function parsePortLabel(label: string | undefined): number | undefined {
+  if (label === undefined) {
+    return undefined;
+  }
+  const digits = label.startsWith("P") || label.startsWith("p") ? label.slice(1) : label;
+  if (digits === "" || !/^\d+$/.test(digits)) {
+    return undefined;
+  }
+  return Number.parseInt(digits, 10);
+}
+
+/**
+ * 时钟树边分类（time-sync 阶段，纯函数）。
+ *
+ * 树边判定：一端是某节点的 master 端口（朝子）、另一端是子节点的 slave 端口（朝父）。
+ * - `tree-master-to-slave`：src 端口 ∈ src.masterPort 且 dst 端口 ∈ dst.slavePort（src=父、dst=子）。
+ * - `tree-slave-to-master`：src 端口 ∈ src.slavePort 且 dst 端口 ∈ dst.masterPort（dst=父、src=子）。
+ * - `passive`：以上都不成立（两端 passive / 禁用 / 端口缺失 / 无快照）。
+ *
+ * 方向信息（哪端 master=父）编码在返回值里，渲染层据此画 父→子 的同步报文方向箭头。
+ */
+export type TimesyncEdgeKind = "tree-master-to-slave" | "tree-slave-to-master" | "passive";
+
+export function classifyTimesyncEdge(
+  link: Pick<TopologyLinkRow, "srcNode" | "dstNode" | "stylesJson">,
+  snapshot: TimesyncSnapshot | undefined,
+): TimesyncEdgeKind {
+  if (!snapshot) {
+    return "passive";
+  }
+  const meta = parseLinkStyles(link.stylesJson);
+  const srcPort = parsePortLabel(meta.leftLabel);
+  const dstPort = parsePortLabel(meta.rightLabel);
+  if (srcPort === undefined || dstPort === undefined) {
+    return "passive";
+  }
+  const srcNode = snapshot.nodes.find((node) => node.mid === link.srcNode);
+  const dstNode = snapshot.nodes.find((node) => node.mid === link.dstNode);
+  if (!srcNode || !dstNode) {
+    return "passive";
+  }
+  if (srcNode.masterPort.includes(srcPort) && dstNode.slavePort.includes(dstPort)) {
+    return "tree-master-to-slave";
+  }
+  if (srcNode.slavePort.includes(srcPort) && dstNode.masterPort.includes(dstPort)) {
+    return "tree-slave-to-master";
+  }
+  return "passive";
+}
+
+/** 父→子方向箭头：报文从 master（父）流向 slave（子），即 GM 往外。 */
+const TREE_DIRECTION_MARKER: EdgeMarker = {
+  type: MarkerType.ArrowClosed,
+  width: 16,
+  height: 16,
+  color: "#15803d",
+};
+
+/** 时钟树边富化：注入 className（树边醒目/非树边淡化）+ 父→子方向箭头。 */
+export interface TimesyncEdgeDecoration {
+  className: string;
+  markerStart?: EdgeMarker;
+  markerEnd?: EdgeMarker;
+}
+
+export function timesyncEdgeDecoration(kind: TimesyncEdgeKind): TimesyncEdgeDecoration {
+  switch (kind) {
+    case "tree-master-to-slave":
+      // src=父、dst=子：箭头指向 target（dst）。
+      return { className: "timesync-tree-edge", markerEnd: TREE_DIRECTION_MARKER };
+    case "tree-slave-to-master":
+      // dst=父、src=子：箭头指向 source（src）。
+      return { className: "timesync-tree-edge", markerStart: TREE_DIRECTION_MARKER };
+    default:
+      return { className: "timesync-passive-edge" };
+  }
 }
 
 /** 时钟树角色 → 节点徽标短文（画布上 GM/被同步/旁路/未覆盖一目了然）。 */

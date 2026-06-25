@@ -250,7 +250,7 @@ function PortLabel({
 }
 
 export function TsnFloatingEdge(props: EdgeProps) {
-  const { id, source, target, markerEnd, style, selected } = props;
+  const { id, source, target, markerEnd, markerStart, style, selected } = props;
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
   if (!sourceNode || !targetNode) {
@@ -287,6 +287,7 @@ export function TsnFloatingEdge(props: EdgeProps) {
         id={id}
         path={path}
         markerEnd={markerEnd}
+        markerStart={markerStart}
         style={style}
         interactionWidth={TSN_EDGE_INTERACTION_WIDTH}
       />

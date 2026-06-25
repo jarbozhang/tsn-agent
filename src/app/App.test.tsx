@@ -22,6 +22,7 @@ vi.mock("@xyflow/react", () => ({
     Left: "left",
     Right: "right",
   },
+  MarkerType: { ArrowClosed: "arrowclosed", Arrow: "arrow" },
   ReactFlow: ({
     nodes,
     edges,
