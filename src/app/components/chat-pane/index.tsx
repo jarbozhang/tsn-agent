@@ -40,6 +40,8 @@ export interface ChatPaneProps {
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   onConfirm: () => void;
+  /** 终止当前推理（U3 接到推理态发送键切出的「终止」按钮；本期仅占位，渲染未消费）。 */
+  onTerminate?: () => void;
 }
 
 export function ChatPane({

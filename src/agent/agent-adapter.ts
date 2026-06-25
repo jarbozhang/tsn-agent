@@ -1109,7 +1109,7 @@ function buildSessionDiagnosticsContext(session: TsnSession) {
   };
 }
 
-function createRunId(): string {
+export function createRunId(): string {
   const random =
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
