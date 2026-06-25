@@ -4,9 +4,9 @@ use std::io::{BufRead, BufReader};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager, path::BaseDirectory};
 
