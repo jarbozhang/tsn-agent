@@ -12,7 +12,10 @@
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
-use crate::inet_remote::{RemoteConfig, RemoteError, RemoteRunner, SimRunOutcome, SshRunner};
+use crate::inet_remote::{
+    is_valid_host_or_user, InetHostConfig, RemoteConfig, RemoteError, RemoteRunner, SimRunOutcome,
+    SshRunner,
+};
 use crate::inet_sim_bundle::{
     build_timesync_sim_bundle, OscillatorKind, SimNodeTiming, SimOverrides,
 };
@@ -20,6 +23,97 @@ use crate::inet_sim_bundle::{
 const CALIBER_TIMESYNC_SIMULATED: &str = "timesync_simulated";
 /// scavetool filter（执行期实跑后微调）：clock 模块的 timeChanged 向量。
 const TIMECHANGED_FILTER: &str = "module=~\"**.clock\" AND name=~\"timeChanged:vector\"";
+/// app_state 里远端主机配置的 key（R20）。
+const INET_HOST_CONFIG_KEY: &str = "inet_host_config";
+
+// ---------- U5：远端主机 UI 配置（app_state 持久化 + env>UI>默认 resolve）----------
+
+/// 读 UI 持久的远端主机配置（app_state）。无记录 → None。
+async fn load_host_config(pool: &sqlx::Pool<sqlx::Sqlite>) -> Option<InetHostConfig> {
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT value FROM app_state WHERE key = ? LIMIT 1")
+            .bind(INET_HOST_CONFIG_KEY)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    raw.and_then(|s| serde_json::from_str::<InetHostConfig>(&s).ok())
+}
+
+/// 解析最终远端配置：env 覆盖 > UI 持久值 > dev_default。host/user 过字符集校验（拒非法）。
+async fn resolve_remote_config(pool: &sqlx::Pool<sqlx::Sqlite>) -> Result<RemoteConfig, String> {
+    let base = RemoteConfig::dev_default();
+    let ui = load_host_config(pool).await;
+    let pick = |env_key: &str, ui_val: Option<&str>, base_val: &str| -> String {
+        std::env::var(env_key)
+            .ok()
+            .filter(|v| !v.is_empty())
+            .or_else(|| ui_val.map(|s| s.to_string()))
+            .unwrap_or_else(|| base_val.to_string())
+    };
+    let host = pick("TSN_AGENT_INET_HOST", ui.as_ref().map(|c| c.host.as_str()), &base.host);
+    let user = pick("TSN_AGENT_INET_USER", ui.as_ref().map(|c| c.user.as_str()), &base.user);
+    let inet_path = pick(
+        "TSN_AGENT_INET_PATH",
+        ui.as_ref().map(|c| c.inet_path.as_str()),
+        &base.inet_path,
+    );
+    if !is_valid_host_or_user(&host) {
+        return Err(format!("主机名 {host:?} 含非法字符（仅允许字母/数字/.-_），请在设置里改正。"));
+    }
+    if !is_valid_host_or_user(&user) {
+        return Err(format!("用户名 {user:?} 含非法字符（仅允许字母/数字/.-_），请在设置里改正。"));
+    }
+    Ok(RemoteConfig {
+        host,
+        user,
+        remote_base_dir: base.remote_base_dir,
+        inet_path,
+        timeout: base.timeout,
+    })
+}
+
+/// 读远端主机配置给设置面板展示：UI 持久值优先，无则播种当前默认（dev_default）。
+#[tauri::command]
+pub async fn get_inet_host_config(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, crate::session_store::SessionStore>,
+) -> Result<InetHostConfig, String> {
+    let pool = store.pool(&app).await?;
+    if let Some(cfg) = load_host_config(&pool).await {
+        return Ok(cfg);
+    }
+    let base = RemoteConfig::dev_default();
+    Ok(InetHostConfig {
+        host: base.host,
+        user: base.user,
+        inet_path: base.inet_path,
+    })
+}
+
+/// 写远端主机配置（设置面板保存）。落 app_state；写前 host/user 字符集校验。
+#[tauri::command]
+pub async fn set_inet_host_config(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, crate::session_store::SessionStore>,
+    config: InetHostConfig,
+) -> Result<(), String> {
+    if !is_valid_host_or_user(&config.host) {
+        return Err("主机名含非法字符（仅允许字母/数字/.-_）。".to_string());
+    }
+    if !is_valid_host_or_user(&config.user) {
+        return Err("用户名含非法字符（仅允许字母/数字/.-_）。".to_string());
+    }
+    let pool = store.pool(&app).await?;
+    let json = serde_json::to_string(&config).map_err(|e| format!("序列化配置失败：{e}"))?;
+    sqlx::query("INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, datetime('now'))")
+        .bind(INET_HOST_CONFIG_KEY)
+        .bind(&json)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("写配置失败：{e}"))?;
+    Ok(())
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -203,7 +297,7 @@ pub async fn run_timesync_sim(
     request: RunTimesyncSimRequest,
 ) -> Result<SimResult, String> {
     let pool = store.pool(&app).await?;
-    let cfg = RemoteConfig::dev_default();
+    let cfg = resolve_remote_config(&pool).await?;
     let overrides = SimOverrides {
         oscillator: parse_oscillator(request.oscillator.as_deref()),
         drift_ppm: request.drift_ppm,
@@ -483,6 +577,72 @@ fn parse_i64_array(json: &str) -> Vec<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    async fn app_state_pool() -> sqlx::Pool<sqlx::Sqlite> {
+        let opts = SqliteConnectOptions::new().in_memory(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE app_state (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn host_config_save_load_round_trip_and_resolve_prefers_ui() {
+        let pool = app_state_pool().await;
+        // 无配置 → load None。
+        assert!(load_host_config(&pool).await.is_none());
+        // 直写 UI 配置。
+        let cfg = InetHostConfig {
+            host: "10.0.0.5".into(),
+            user: "alice".into(),
+            inet_path: "/opt/inet".into(),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        sqlx::query("INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, 'now')")
+            .bind(INET_HOST_CONFIG_KEY)
+            .bind(&json)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(load_host_config(&pool).await, Some(cfg.clone()));
+        // resolve（无 env 时）取 UI 值。
+        if std::env::var("TSN_AGENT_INET_HOST").is_err() {
+            let resolved = resolve_remote_config(&pool).await.unwrap();
+            assert_eq!(resolved.host, "10.0.0.5");
+            assert_eq!(resolved.user, "alice");
+            assert_eq!(resolved.inet_path, "/opt/inet");
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_rejects_invalid_saved_host() {
+        if std::env::var("TSN_AGENT_INET_HOST").is_ok() {
+            return; // env 覆盖会绕过 UI 值，跳过。
+        }
+        let pool = app_state_pool().await;
+        let bad = InetHostConfig {
+            host: "evil; rm -rf".into(),
+            user: "zhang".into(),
+            inet_path: "/opt/inet".into(),
+        };
+        let json = serde_json::to_string(&bad).unwrap();
+        sqlx::query("INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, 'now')")
+            .bind(INET_HOST_CONFIG_KEY)
+            .bind(&json)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(resolve_remote_config(&pool).await.is_err());
+    }
 
     #[test]
     fn parse_csv_extracts_timechanged_series() {

@@ -5,9 +5,28 @@
 //! `RemoteRunner` trait 抽象（`SshRunner` 默认实现；测试注入 mock，真连留集成验收）。
 //! 阶段无关（KTD4）：本模块只管「发送+跑+回收」，不含拓扑阶段语义，后续阶段可复用。
 
+use serde::{Deserialize, Serialize};
 use std::io;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+
+/// 远端主机 UI 可配置项（R20）：host/user/inet 路径。落 app_state KV（JSON）。
+/// remote_base_dir 本期不进 UI（保持 env/默认）；base_dir 用户可编辑是 deferred。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InetHostConfig {
+    pub host: String,
+    pub user: String,
+    pub inet_path: String,
+}
+
+/// host/user 字符集校验（R20 + security-lens）：限 `[a-zA-Z0-9._-]`、非空。
+/// 拦含空格/shell 元字符的值，防 `user@host` 拼进 ssh argv 被注入额外选项（如 `-o ProxyCommand=`）。
+pub fn is_valid_host_or_user(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
 
 /// 远端执行器消费的 bundle 形状（三文件内容）。定义在执行器侧（inet_remote 保留），
 /// 由 bundle 生成器（inet_sim_bundle）产出——这样删旧的 inet_bundle 不影响执行器。
@@ -503,6 +522,17 @@ mod tests {
         let s = "网络拓扑".repeat(300);
         let t = tail(&s, 50); // 不 panic 即通过；String 本身保证合法 UTF-8。
         assert!(t.starts_with('…'));
+    }
+
+    #[test]
+    fn host_user_validation_rejects_injection_chars() {
+        assert!(is_valid_host_or_user("100.104.38.106"));
+        assert!(is_valid_host_or_user("zhang"));
+        assert!(is_valid_host_or_user("dev-box_1"));
+        assert!(!is_valid_host_or_user("")); // 空
+        assert!(!is_valid_host_or_user("zhang -o ProxyCommand=x")); // 空格 + 选项注入
+        assert!(!is_valid_host_or_user("a;rm -rf")); // shell 元字符
+        assert!(!is_valid_host_or_user("a@b")); // @ 不允许
     }
 
     #[cfg(unix)]
