@@ -138,13 +138,16 @@ vi.mock("@xyflow/react", () => ({
 }));
 
 import type { TimesyncSnapshot } from "../../../sessions/timesync-snapshot";
-import type { TopologyNodeRow, TopologyRowSnapshot } from "../../../sessions/topology-snapshot";
+import type {
+  TopologyLinkRow,
+  TopologyNodeRow,
+  TopologyRowSnapshot,
+} from "../../../sessions/topology-snapshot";
 import {
   classifyTimesyncEdge,
   nodeRowLabel,
   nodeTypeToken,
   parseLinkStyles,
-  parsePortLabel,
   planeClassName,
   type TsnEdgeData,
   timesyncEdgeDecoration,
@@ -168,22 +171,35 @@ function sampleSnapshot(): TopologyRowSnapshot {
       { mid: "1", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
       { mid: "2", name: null, x: 160, y: 0, nodeType: null, insertOrder: 1 },
     ],
-    links: [{ linkSeq: 0, name: "uplink", srcNode: "1", dstNode: "2", stylesJson: "{}" }],
+    links: [
+      {
+        linkSeq: 0,
+        name: "uplink",
+        srcNode: "1",
+        dstNode: "2",
+        srcPort: 0,
+        dstPort: 0,
+        stylesJson: "{}",
+      },
+    ],
   };
 }
 
 function baseProps(overrides: Partial<WorkspacePaneProps> = {}): WorkspacePaneProps {
   return {
     topologySnapshot: undefined,
-    selectedTopologyItem: undefined,
-    activeConfigTab: "node-detail",
+    selectedNodeId: undefined,
+    configPanelExpanded: true,
+    activeConfigTab: "node-props",
     isAgentRunning: false,
     hasUserInteraction: false,
     lastMutationId: 0,
+    sessionId: "s1",
+    simState: { status: "idle" },
+    onSimStateChange: vi.fn(),
+    onToggleConfigPanel: vi.fn(),
     onSelectConfigTab: vi.fn(),
     onNodeSelect: vi.fn(),
-    onLinkSelect: vi.fn(),
-    onClearSelection: vi.fn(),
     onRefreshTopology: vi.fn(),
     commitNodePosition: vi.fn(async () => ({ mutationId: 1 })),
     ...overrides,
@@ -217,11 +233,11 @@ describe("WorkspacePane", () => {
       <WorkspacePane
         {...baseProps({
           topologySnapshot: sampleSnapshot(),
-          selectedTopologyItem: { kind: "node", id: "1" },
+          selectedNodeId: "1",
         })}
       />,
     );
-    const panel = screen.getByRole("tabpanel", { name: "节点详情" });
+    const panel = screen.getByRole("tabpanel", { name: "节点属性" });
     expect(within(panel).getByText("SW-1")).toBeInTheDocument();
     expect(within(panel).getByText("交换机")).toBeInTheDocument();
   });
@@ -233,52 +249,64 @@ describe("WorkspacePane", () => {
       <WorkspacePane
         {...baseProps({
           topologySnapshot: sampleSnapshot(),
-          selectedTopologyItem: { kind: "node", id: "1" },
+          selectedNodeId: "1",
           onSelectConfigTab,
         })}
       />,
     );
-    await user.click(screen.getByRole("tab", { name: "链路详情" }));
-    expect(onSelectConfigTab).toHaveBeenCalledWith("link-detail");
+    await user.click(screen.getByRole("tab", { name: "时钟同步" }));
+    expect(onSelectConfigTab).toHaveBeenCalledWith("time-sync");
   });
 });
 
-describe("WorkspacePane 详情面板显隐", () => {
-  it("无选中时详情面板默认隐藏", () => {
-    render(<WorkspacePane {...baseProps({ topologySnapshot: sampleSnapshot() })} />);
+describe("WorkspacePane 弹出框显隐（U10）", () => {
+  it("默认收起时面板隐藏、handle 条仍可见", () => {
+    render(
+      <WorkspacePane
+        {...baseProps({ topologySnapshot: sampleSnapshot(), configPanelExpanded: false })}
+      />,
+    );
     expect(screen.queryByRole("tablist", { name: "工程详情" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开配置面板" })).toBeInTheDocument();
   });
 
-  it("点击画布空白触发清除选中", async () => {
+  it("点 handle 条切换显隐（无选中节点时也能开）", async () => {
     const user = userEvent.setup();
-    const onClearSelection = vi.fn();
+    const onToggleConfigPanel = vi.fn();
     render(
       <WorkspacePane
         {...baseProps({
           topologySnapshot: sampleSnapshot(),
-          selectedTopologyItem: { kind: "node", id: "1" },
-          onClearSelection,
+          configPanelExpanded: false,
+          onToggleConfigPanel,
         })}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "点击画布空白" }));
-    expect(onClearSelection).toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "展开配置面板" }));
+    expect(onToggleConfigPanel).toHaveBeenCalled();
   });
 
-  it("关闭按钮触发清除选中", async () => {
+  it("展开时关闭按钮触发收起", async () => {
     const user = userEvent.setup();
-    const onClearSelection = vi.fn();
+    const onToggleConfigPanel = vi.fn();
     render(
       <WorkspacePane
         {...baseProps({
           topologySnapshot: sampleSnapshot(),
-          selectedTopologyItem: { kind: "node", id: "1" },
-          onClearSelection,
+          selectedNodeId: "1",
+          onToggleConfigPanel,
         })}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "关闭详情" }));
-    expect(onClearSelection).toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "收起配置" }));
+    expect(onToggleConfigPanel).toHaveBeenCalled();
+  });
+
+  it("点链路无响应（链路选中已移除，无选择链路按钮）", () => {
+    render(<WorkspacePane {...baseProps({ topologySnapshot: sampleSnapshot() })} />);
+    // 画布 mock 仍渲染「选择链路」按钮，但 WorkspacePane 不再传 onEdgeClick，点击无副作用。
+    // 这里断言面板不会因链路出现「链路详情」tab（已删）。
+    expect(screen.queryByRole("tab", { name: "链路详情" })).not.toBeInTheDocument();
   });
 });
 
@@ -337,13 +365,13 @@ describe("WorkspacePane 拖动持久化（U4）", () => {
       <WorkspacePane
         {...baseProps({
           topologySnapshot: sampleSnapshot(),
-          selectedTopologyItem: { kind: "node", id: "2" },
+          selectedNodeId: "2",
           commitNodePosition,
         })}
       />,
     );
     await user.click(screen.getByRole("button", { name: "拖毕节点 2" }));
-    const panel = screen.getByRole("tabpanel", { name: "节点详情" });
+    const panel = screen.getByRole("tabpanel", { name: "节点属性" });
     await waitFor(() => expect(within(panel).getByText("480, 96")).toBeInTheDocument());
   });
 
@@ -634,15 +662,11 @@ describe("nodeTypeToken（节点类型视觉系统）", () => {
   });
 });
 
-describe("parseLinkStyles（R7 容错）", () => {
-  it("解析 plane 与端口标签", () => {
+describe("parseLinkStyles（R7 容错 + U8 仅 plane）", () => {
+  it("只解析 plane（端口已挪到 src_port/dst_port 列，styles_json 不再含 leftLabel/rightLabel）", () => {
     expect(
       parseLinkStyles('{"plane":"A","leftLabel":"P0","rightLabel":"P1","speed":1000}'),
-    ).toEqual({
-      plane: "A",
-      leftLabel: "P0",
-      rightLabel: "P1",
-    });
+    ).toEqual({ plane: "A" });
   });
 
   it("缺失/非法 plane、非 JSON、非对象一律回退空 meta 不抛错", () => {
@@ -654,15 +678,8 @@ describe("parseLinkStyles（R7 容错）", () => {
     expect(parseLinkStyles("null")).toEqual({});
   });
 
-  it("存量 p1 标签原值透传（AE4：不映射、不过滤）", () => {
-    expect(parseLinkStyles('{"leftLabel":"p1","rightLabel":"p2"}')).toEqual({
-      leftLabel: "p1",
-      rightLabel: "p2",
-    });
-  });
-
-  it("空字符串标签按缺失处理（不渲染空标签）", () => {
-    expect(parseLinkStyles('{"leftLabel":"","rightLabel":""}')).toEqual({});
+  it("U8：styles_json 残留的 leftLabel/rightLabel 被忽略（不再读端口标签）", () => {
+    expect(parseLinkStyles('{"leftLabel":"p1","rightLabel":"p2"}')).toEqual({});
   });
 });
 
@@ -674,7 +691,7 @@ describe("planeClassName（R3）", () => {
   });
 });
 
-describe("topologySnapshotToReactFlow（U3 映射）", () => {
+describe("topologySnapshotToReactFlow（U3 映射 + U8 端口读列）", () => {
   function node(id: number, x: number, y: number): TopologyNodeRow {
     return {
       mid: String(id),
@@ -685,27 +702,26 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
       insertOrder: id,
     };
   }
+  function link(
+    linkSeq: number,
+    srcNode: string,
+    dstNode: string,
+    srcPort: number | null,
+    dstPort: number | null,
+    stylesJson = "{}",
+  ): TopologyLinkRow {
+    return { linkSeq, name: null, srcNode, dstNode, srcPort, dstPort, stylesJson };
+  }
 
-  it("Covers AE1/AE4：floating 边无 handle 绑定、className 三态、存量 p1 标签透传", () => {
+  it("Covers AE9：floating 边无 handle、className 三态、端口读 src_port/dst_port 列", () => {
     const snapshot: TopologyRowSnapshot = {
       sessionId: "s1",
       nodes: [node(1, 120, 300), node(10, 90, 60)],
       links: [
-        {
-          linkSeq: 0,
-          name: null,
-          srcNode: "10",
-          dstNode: "1",
-          stylesJson: '{"plane":"A","leftLabel":"P0","rightLabel":"P0"}',
-        },
-        {
-          linkSeq: 1,
-          name: null,
-          srcNode: "10",
-          dstNode: "1",
-          stylesJson: '{"leftLabel":"p1","rightLabel":"p2"}',
-        },
-        { linkSeq: 2, name: null, srcNode: "10", dstNode: "1", stylesJson: "broken" },
+        link(0, "10", "1", 0, 0, '{"plane":"A"}'),
+        // styles_json 残留 leftLabel 也不再被读：端口来自列。
+        link(1, "10", "1", 1, 2, '{"leftLabel":"p9","rightLabel":"p9"}'),
+        link(2, "10", "1", null, null, "broken"),
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
@@ -714,67 +730,37 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
     expect(edges.every((e) => e.sourceHandle === undefined && e.targetHandle === undefined)).toBe(
       true,
     );
-    const legacy = edges[1].data as TsnEdgeData;
-    expect(legacy.leftLabel).toBe("p1");
-    expect(legacy.rightLabel).toBe("p2");
+    const ports = edges[1].data as TsnEdgeData;
+    expect(ports.srcPort).toBe(1);
+    expect(ports.dstPort).toBe(2);
+    // 列 NULL → 不渲染端口（undefined）。
+    const nullPorts = edges[2].data as TsnEdgeData;
+    expect(nullPorts.srcPort).toBeUndefined();
+    expect(nullPorts.dstPort).toBeUndefined();
   });
 
-  it("同节点同方位的标签序数递增，无标签端不占槽（标签防撞分层）", () => {
+  it("同节点同方位的标签序数递增，无端口端不占槽（标签防撞分层）", () => {
     const snapshot: TopologyRowSnapshot = {
       sessionId: "s1",
       nodes: [node(1, 120, 300), node(10, 90, 60)],
       links: [
-        {
-          linkSeq: 0,
-          name: null,
-          srcNode: "10",
-          dstNode: "1",
-          stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}',
-        },
-        {
-          linkSeq: 1,
-          name: null,
-          srcNode: "10",
-          dstNode: "1",
-          stylesJson: '{"leftLabel":"P1","rightLabel":"P1"}',
-        },
-        { linkSeq: 2, name: null, srcNode: "10", dstNode: "1", stylesJson: "broken" },
+        link(0, "10", "1", 0, 0),
+        link(1, "10", "1", 1, 1),
+        link(2, "10", "1", null, null, "broken"),
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
     const [d0, d1, d2] = edges.map((e) => e.data as TsnEdgeData);
-    expect([d0.leftOrd, d0.rightOrd]).toEqual([0, 0]);
-    expect([d1.leftOrd, d1.rightOrd]).toEqual([1, 1]);
-    expect([d2.leftOrd, d2.rightOrd]).toEqual([0, 0]);
+    expect([d0.srcOrd, d0.dstOrd]).toEqual([0, 0]);
+    expect([d1.srcOrd, d1.dstOrd]).toEqual([1, 1]);
+    expect([d2.srcOrd, d2.dstOrd]).toEqual([0, 0]);
   });
 
   it("同一对节点之间多条边记录等分序号，避免画布连线完全重合", () => {
     const snapshot: TopologyRowSnapshot = {
       sessionId: "s1",
       nodes: [node(1, 120, 300), node(10, 90, 60)],
-      links: [
-        {
-          linkSeq: 0,
-          name: null,
-          srcNode: "10",
-          dstNode: "1",
-          stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}',
-        },
-        {
-          linkSeq: 1,
-          name: null,
-          srcNode: "10",
-          dstNode: "1",
-          stylesJson: '{"leftLabel":"P1","rightLabel":"P1"}',
-        },
-        {
-          linkSeq: 2,
-          name: null,
-          srcNode: "2",
-          dstNode: "3",
-          stylesJson: "{}",
-        },
-      ],
+      links: [link(0, "10", "1", 0, 0), link(1, "10", "1", 1, 1), link(2, "2", "3", null, null)],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
     const [first, second, single] = edges.map((e) => e.data as TsnEdgeData);
@@ -787,10 +773,7 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
     const snapshot: TopologyRowSnapshot = {
       sessionId: "s1",
       nodes: [node(1, 120, 300), node(10, 90, 60)],
-      links: [
-        { linkSeq: 0, name: null, srcNode: "10", dstNode: "1", stylesJson: "{}" },
-        { linkSeq: 1, name: null, srcNode: "1", dstNode: "10", stylesJson: "{}" },
-      ],
+      links: [link(0, "10", "1", null, null), link(1, "1", "10", null, null)],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
     expect(
@@ -1011,7 +994,17 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
         { mid: "1", name: "SW-1", x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
         { mid: "2", name: "ES-2", x: 160, y: 0, nodeType: "endSystem", insertOrder: 1 },
       ],
-      links: [{ linkSeq: 0, name: null, srcNode: "1", dstNode: "2", stylesJson: "{}" }],
+      links: [
+        {
+          linkSeq: 0,
+          name: null,
+          srcNode: "1",
+          dstNode: "2",
+          srcPort: 0,
+          dstPort: 0,
+          stylesJson: "{}",
+        },
+      ],
     };
   }
 
@@ -1109,7 +1102,9 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
           name: null,
           srcNode: "1",
           dstNode: "2",
-          stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}',
+          srcPort: 0,
+          dstPort: 0,
+          stylesJson: "{}",
         },
       ],
     };
@@ -1195,23 +1190,7 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
   });
 });
 
-describe("parsePortLabel（端口标签数字提取）", () => {
-  it("认 P<digits> 与纯数字", () => {
-    expect(parsePortLabel("P0")).toBe(0);
-    expect(parsePortLabel("p1")).toBe(1);
-    expect(parsePortLabel("12")).toBe(12);
-  });
-
-  it("非数字 / 空 / 缺失 → undefined", () => {
-    expect(parsePortLabel("eth0")).toBeUndefined();
-    expect(parsePortLabel("GE0/1")).toBeUndefined();
-    expect(parsePortLabel("")).toBeUndefined();
-    expect(parsePortLabel("P")).toBeUndefined();
-    expect(parsePortLabel(undefined)).toBeUndefined();
-  });
-});
-
-describe("classifyTimesyncEdge（时钟树边分类纯函数）", () => {
+describe("classifyTimesyncEdge（时钟树边分类纯函数，U8 读端口列）", () => {
   // 线性 0—1—2，GM=0：0 master=[0]；1 slave(朝父0)=[0]、master(朝子2)=[1]；2 slave=[0]。
   function snap(): TimesyncSnapshot {
     return {
@@ -1256,44 +1235,41 @@ describe("classifyTimesyncEdge（时钟树边分类纯函数）", () => {
   }
 
   it("src=父 master、dst=子 slave → tree-master-to-slave", () => {
-    // link 0→1：src(0).P0 ∈ master、dst(1).P0 ∈ slave。
-    const link = { srcNode: "0", dstNode: "1", stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}' };
+    // link 0→1：src(0).port0 ∈ master、dst(1).port0 ∈ slave。
+    const link = { srcNode: "0", dstNode: "1", srcPort: 0, dstPort: 0 };
     expect(classifyTimesyncEdge(link, snap())).toBe("tree-master-to-slave");
   });
 
   it("src=子 slave、dst=父 master → tree-slave-to-master（方向反向）", () => {
-    // link 2→1：src(2).P0 ∈ slave、dst(1).P1 ∈ master。
-    const link = { srcNode: "2", dstNode: "1", stylesJson: '{"leftLabel":"P0","rightLabel":"P1"}' };
+    // link 2→1：src(2).port0 ∈ slave、dst(1).port1 ∈ master。
+    const link = { srcNode: "2", dstNode: "1", srcPort: 0, dstPort: 1 };
     expect(classifyTimesyncEdge(link, snap())).toBe("tree-slave-to-master");
   });
 
   it("端口都不在 master/slave 集合 → passive", () => {
-    // link 0→1 但用 P9（不在任何集合）。
-    const link = { srcNode: "0", dstNode: "1", stylesJson: '{"leftLabel":"P9","rightLabel":"P9"}' };
+    // link 0→1 但用 port9（不在任何集合）。
+    const link = { srcNode: "0", dstNode: "1", srcPort: 9, dstPort: 9 };
     expect(classifyTimesyncEdge(link, snap())).toBe("passive");
   });
 
-  it("端口标签缺失/非数字 → passive（无法判定）", () => {
-    expect(classifyTimesyncEdge({ srcNode: "0", dstNode: "1", stylesJson: "{}" }, snap())).toBe(
-      "passive",
-    );
+  it("端口列 NULL → passive（无法判定）", () => {
     expect(
-      classifyTimesyncEdge(
-        { srcNode: "0", dstNode: "1", stylesJson: '{"leftLabel":"eth0","rightLabel":"eth0"}' },
-        snap(),
-      ),
+      classifyTimesyncEdge({ srcNode: "0", dstNode: "1", srcPort: null, dstPort: null }, snap()),
+    ).toBe("passive");
+    expect(
+      classifyTimesyncEdge({ srcNode: "0", dstNode: "1", srcPort: 0, dstPort: null }, snap()),
     ).toBe("passive");
   });
 
   it("节点不在快照 / 无快照 → passive", () => {
-    const link = { srcNode: "0", dstNode: "9", stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}' };
+    const link = { srcNode: "0", dstNode: "9", srcPort: 0, dstPort: 0 };
     expect(classifyTimesyncEdge(link, snap())).toBe("passive");
     expect(classifyTimesyncEdge(link, undefined)).toBe("passive");
   });
 
   it("一端是树端口、另一端不匹配 → passive（半边不成树）", () => {
-    // src(0).P0 ∈ master，但 dst(1).P1 ∈ master（非 slave）→ 不构成 master→slave。
-    const link = { srcNode: "0", dstNode: "1", stylesJson: '{"leftLabel":"P0","rightLabel":"P1"}' };
+    // src(0).port0 ∈ master，但 dst(1).port1 ∈ master（非 slave）→ 不构成 master→slave。
+    const link = { srcNode: "0", dstNode: "1", srcPort: 0, dstPort: 1 };
     expect(classifyTimesyncEdge(link, snap())).toBe("passive");
   });
 });

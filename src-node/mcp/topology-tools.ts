@@ -65,7 +65,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       allowedToolName: "mcp__tsn_topology__topology_inspect",
       title: "Inspect topology",
       description:
-        "Return the session's full persisted topology rows: nodes (mid/name/nodeType/x/y/insertOrder) and links (linkSeq/name/srcNode/dstNode/stylesJson). No parameters. Call this first to locate existing mid/linkSeq values before building apply_operations batches. 节点身份是 mid（逻辑序号），连线两端 srcNode/dstNode 引用节点 mid。name 列是节点显示名（与对话命名一致）；定位用户说的 SW-N/ES-N 时优先按 name 精确匹配，勿按列表顺序/第 N 台折算（完整显示名规则见 skill 指引）。links 的 stylesJson 是 JSON 串：plane（A/B）控制画布链路配色（A=蓝、B=红，错值会误导用户）、role（access/backbone）为链路角色、leftLabel/rightLabel 作为端口号渲染在连线两端。",
+        "Return the session's full persisted topology rows: nodes (mid/name/nodeType/x/y/insertOrder) and links (linkSeq/name/srcNode/dstNode/srcPort/dstPort/stylesJson). No parameters. Call this first to locate existing mid/linkSeq values before building apply_operations batches. 节点身份是 mid（逻辑序号），连线两端 srcNode/dstNode 引用节点 mid。name 列是节点显示名（与对话命名一致）；定位用户说的 SW-N/ES-N 时优先按 name 精确匹配，勿按列表顺序/第 N 台折算（完整显示名规则见 skill 指引）。端口号是独立列：srcPort 在 source 端、dstPort 在 target 端（结构事实源，画布据此渲染端口标签）。links 的 stylesJson 仅承载显示属性：plane（A/B）控制画布链路配色（A=蓝、B=红，错值会误导用户）、role（access/backbone）为链路角色；端口号不在 stylesJson 里。",
       inputSchema: {},
       handler: async (args) => callSidecarTool("/db/topology/inspect", args, {}),
     },
@@ -410,10 +410,7 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
         .describe(
           "链路在 srcNode 上占用的端口号（端口是结构事实源、直写列）。新生成拓扑端口 P0 起编，填两端节点实际端口；必传——缺省会被拒绝（端口不再从 stylesJson 解析）",
         ),
-      dstPort: z
-        .number()
-        .int()
-        .describe("链路在 dstNode 上占用的端口号；必传——缺省会被拒绝"),
+      dstPort: z.number().int().describe("链路在 dstNode 上占用的端口号；必传——缺省会被拒绝"),
       speed: z.number().int().optional().describe("链路速率 Mbps（可选，缺省由 bundle 取默认）"),
       stylesJson: z
         .string()

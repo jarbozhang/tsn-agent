@@ -274,11 +274,26 @@ export function TsnFloatingEdge(props: EdgeProps) {
   const parallelCount = typeof data.parallelCount === "number" ? data.parallelCount : 1;
   const anchors = parallelFloatingEdgeAnchors(sourceRect, targetRect, parallelIndex, parallelCount);
   const path = straightFloatingEdgePath(anchors);
-  const left = data.leftLabel
-    ? portLabelPoint(anchors.sx, anchors.sy, anchors.sourcePosition, data.leftOrd ?? 0)
+  // U8/KTD1：src_port 标在 source 端、dst_port 标在 target 端（几何无关，跟节点不跟屏幕）。
+  // 自环（src===dst）端点重合：两标签各自反向小偏移（src 上、dst 下）防叠压。
+  const selfLoop = data.selfLoop === true;
+  const hasSrc = typeof data.srcPort === "number";
+  const hasDst = typeof data.dstPort === "number";
+  const src = hasSrc
+    ? portLabelPoint(
+        anchors.sx,
+        anchors.sy,
+        selfLoop ? Position.Top : anchors.sourcePosition,
+        data.srcOrd ?? 0,
+      )
     : undefined;
-  const right = data.rightLabel
-    ? portLabelPoint(anchors.tx, anchors.ty, anchors.targetPosition, data.rightOrd ?? 0)
+  const dst = hasDst
+    ? portLabelPoint(
+        anchors.tx,
+        anchors.ty,
+        selfLoop ? Position.Bottom : anchors.targetPosition,
+        data.dstOrd ?? 0,
+      )
     : undefined;
 
   return (
@@ -291,11 +306,11 @@ export function TsnFloatingEdge(props: EdgeProps) {
         style={style}
         interactionWidth={TSN_EDGE_INTERACTION_WIDTH}
       />
-      {left && data.leftLabel && (
-        <PortLabel x={left.x} y={left.y} text={data.leftLabel} selected={Boolean(selected)} />
+      {src && hasSrc && (
+        <PortLabel x={src.x} y={src.y} text={String(data.srcPort)} selected={Boolean(selected)} />
       )}
-      {right && data.rightLabel && (
-        <PortLabel x={right.x} y={right.y} text={data.rightLabel} selected={Boolean(selected)} />
+      {dst && hasDst && (
+        <PortLabel x={dst.x} y={dst.y} text={String(data.dstPort)} selected={Boolean(selected)} />
       )}
     </>
   );

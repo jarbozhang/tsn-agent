@@ -47,6 +47,9 @@ pub struct TopologyLinkRow {
     pub name: Option<String>,
     pub src_node: String,
     pub dst_node: String,
+    /// 端口列（结构事实源，KTD1/R24）：画布按 source/target 端点渲染、不再读 styles_json.leftLabel。
+    pub src_port: Option<i64>,
+    pub dst_port: Option<i64>,
     pub styles_json: String,
 }
 
@@ -68,7 +71,7 @@ pub async fn query_topology(
     .await
     .map_err(|e| format!("查询节点失败：{e}"))?;
     let links = sqlx::query(
-        r#"SELECT link_seq, name, src_node, dst_node, styles_json
+        r#"SELECT link_seq, name, src_node, dst_node, src_port, dst_port, styles_json
            FROM topology_links
            WHERE session_id = ?
            ORDER BY link_seq"#,
@@ -98,6 +101,8 @@ pub async fn query_topology(
                 name: r.get("name"),
                 src_node: r.get("src_node"),
                 dst_node: r.get("dst_node"),
+                src_port: r.get("src_port"),
+                dst_port: r.get("dst_port"),
                 styles_json: r.get("styles_json"),
             })
             .collect(),
