@@ -101,7 +101,7 @@ function topologyAgentResult(overrides: Partial<TsnAgentResult> = {}): TsnAgentR
         stage: "topology",
         skillName: "tsn_topology",
         title: "拓扑工具结果",
-        content: "拓扑已写入工程数据库（mutation #1）。",
+        content: "拓扑已写入工程数据库。",
         status: "success",
       },
       {

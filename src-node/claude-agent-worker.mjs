@@ -1295,7 +1295,7 @@ function extractTrustedTopologyMutation(value) {
     return undefined;
   }
 
-  const { sessionId, mutationId, applied } = value.summary;
+  const { sessionId, mutationId } = value.summary;
   if (typeof sessionId !== "string" || sessionId.length === 0) {
     return undefined;
   }
@@ -1306,7 +1306,6 @@ function extractTrustedTopologyMutation(value) {
   return {
     sessionId,
     mutationId,
-    appliedCount: Array.isArray(applied) ? applied.length : undefined,
   };
 }
 

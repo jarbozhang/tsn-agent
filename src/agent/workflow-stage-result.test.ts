@@ -19,7 +19,7 @@ function topologyWorkflowResult(
       tool: "topology.apply_operations",
     },
     status: "success",
-    summary: "拓扑已写入工程数据库（mutation #7）。",
+    summary: "拓扑已写入工程数据库。",
     validation: { ok: true, errors: [] },
     payload: {
       kind: "topology",

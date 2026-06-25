@@ -8,7 +8,7 @@ import {
 describe("topology workflow stage result factory", () => {
   it("builds a workflow stage result from a trusted sidecar mutation", () => {
     const result = createTopologyWorkflowStageResult(
-      { sessionId: "session-1", mutationId: 7, appliedCount: 3 },
+      { sessionId: "session-1", mutationId: 7 },
       {
         producer: {
           type: "mcp",
@@ -34,8 +34,7 @@ describe("topology workflow stage result factory", () => {
         mutationId: 7,
       },
     });
-    expect(result.summary).toContain("mutation #7");
-    expect(result.summary).toContain("3 个操作");
+    expect(result.summary).toBe("拓扑已写入工程数据库。");
     expect(result.safeEventSummary).toMatchObject({ status: "success" });
     expect(validateWorkflowStageResult(result)).toEqual({ ok: true, errors: [] });
   });

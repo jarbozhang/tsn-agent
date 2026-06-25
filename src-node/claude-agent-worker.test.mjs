@@ -408,7 +408,7 @@ describe("claude-agent-worker", () => {
         ok: true,
         summary: { sessionId: "s1", mutationId: 7, applied: [{}, {}], dryRun: false },
       }),
-    ).toEqual({ sessionId: "s1", mutationId: 7, appliedCount: 2 });
+    ).toEqual({ sessionId: "s1", mutationId: 7 });
     // 缺 mutationId → 拒绝
     expect(
       _extractTrustedTopologyMutationForTest({
@@ -487,7 +487,7 @@ describe("claude-agent-worker", () => {
         mutationId: 5,
       },
     });
-    expect(extracted[0].result.summary).toContain("mutation #5");
+    expect(extracted[0].result.summary).toBe("拓扑已写入工程数据库。");
   });
 
   it("U1: request_stage_change tool returns the structured stage-change proposal", async () => {

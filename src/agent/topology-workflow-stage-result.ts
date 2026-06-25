@@ -12,8 +12,6 @@ import {
 export interface TrustedTopologyMutation {
   sessionId: string;
   mutationId: number;
-  /** sidecar applied 操作数，仅用于 summary 文案。 */
-  appliedCount?: number;
 }
 
 export interface TopologyWorkflowStageResultOptions {
@@ -33,11 +31,7 @@ export function createTopologyWorkflowStageResult(
     throw new Error("trusted topology mutation must include a positive mutationId.");
   }
 
-  const summary =
-    options.summary ??
-    (trustedResult.appliedCount !== undefined
-      ? `拓扑已写入工程数据库（mutation #${trustedResult.mutationId}，${trustedResult.appliedCount} 个操作）。`
-      : `拓扑已写入工程数据库（mutation #${trustedResult.mutationId}）。`);
+  const summary = options.summary ?? "拓扑已写入工程数据库。";
 
   return {
     schemaVersion: WORKFLOW_STAGE_RESULT_SCHEMA_VERSION,
