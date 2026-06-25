@@ -13,16 +13,19 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
 use crate::inet_remote::{
-    is_valid_host_or_user, InetHostConfig, RemoteConfig, RemoteError, RemoteRunner, SimRunOutcome,
-    SshRunner,
+    InetHostConfig, RemoteConfig, RemoteError, RemoteRunner, SimRunOutcome, SshRunner,
+    is_valid_host_or_user,
 };
 use crate::inet_sim_bundle::{
-    build_timesync_sim_bundle, OscillatorKind, SimNodeTiming, SimOverrides,
+    OscillatorKind, SimNodeTiming, SimOverrides, build_timesync_sim_bundle,
 };
 
 const CALIBER_TIMESYNC_SIMULATED: &str = "timesync_simulated";
 /// scavetool filter（执行期实跑后微调）：clock 模块的 timeChanged 向量。
 const TIMECHANGED_FILTER: &str = "module=~\"**.clock\" AND name=~\"timeChanged:vector\"";
+/// 收敛默认阈值（纳秒）：稳态 max|offset| 在此内算收敛（参考线、非设计质量判定，R8）。
+/// 逐节点 offset_threshold 的精确 mid↔module 映射 deferred（实跑确认 module 路径后接入）。
+const CONVERGENCE_THRESHOLD_NS: f64 = 1000.0; // 1µs
 /// app_state 里远端主机配置的 key（R20）。
 const INET_HOST_CONFIG_KEY: &str = "inet_host_config";
 
@@ -51,18 +54,30 @@ async fn resolve_remote_config(pool: &sqlx::Pool<sqlx::Sqlite>) -> Result<Remote
             .or_else(|| ui_val.map(|s| s.to_string()))
             .unwrap_or_else(|| base_val.to_string())
     };
-    let host = pick("TSN_AGENT_INET_HOST", ui.as_ref().map(|c| c.host.as_str()), &base.host);
-    let user = pick("TSN_AGENT_INET_USER", ui.as_ref().map(|c| c.user.as_str()), &base.user);
+    let host = pick(
+        "TSN_AGENT_INET_HOST",
+        ui.as_ref().map(|c| c.host.as_str()),
+        &base.host,
+    );
+    let user = pick(
+        "TSN_AGENT_INET_USER",
+        ui.as_ref().map(|c| c.user.as_str()),
+        &base.user,
+    );
     let inet_path = pick(
         "TSN_AGENT_INET_PATH",
         ui.as_ref().map(|c| c.inet_path.as_str()),
         &base.inet_path,
     );
     if !is_valid_host_or_user(&host) {
-        return Err(format!("主机名 {host:?} 含非法字符（仅允许字母/数字/.-_），请在设置里改正。"));
+        return Err(format!(
+            "主机名 {host:?} 含非法字符（仅允许字母/数字/.-_），请在设置里改正。"
+        ));
     }
     if !is_valid_host_or_user(&user) {
-        return Err(format!("用户名 {user:?} 含非法字符（仅允许字母/数字/.-_），请在设置里改正。"));
+        return Err(format!(
+            "用户名 {user:?} 含非法字符（仅允许字母/数字/.-_），请在设置里改正。"
+        ));
     }
     Ok(RemoteConfig {
         host,
@@ -80,7 +95,7 @@ pub async fn get_inet_host_config(
     store: tauri::State<'_, crate::session_store::SessionStore>,
 ) -> Result<InetHostConfig, String> {
     let pool = store.pool(&app).await?;
-    if let Some(cfg) = load_host_config(&pool).await {
+    if let Some(cfg) = load_host_config(pool).await {
         return Ok(cfg);
     }
     let base = RemoteConfig::dev_default();
@@ -106,12 +121,14 @@ pub async fn set_inet_host_config(
     }
     let pool = store.pool(&app).await?;
     let json = serde_json::to_string(&config).map_err(|e| format!("序列化配置失败：{e}"))?;
-    sqlx::query("INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, datetime('now'))")
-        .bind(INET_HOST_CONFIG_KEY)
-        .bind(&json)
-        .execute(pool)
-        .await
-        .map_err(|e| format!("写配置失败：{e}"))?;
+    sqlx::query(
+        "INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+    )
+    .bind(INET_HOST_CONFIG_KEY)
+    .bind(&json)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("写配置失败：{e}"))?;
     Ok(())
 }
 
@@ -173,12 +190,9 @@ pub fn parse_timechanged_csv(csv: &str) -> Result<Vec<NodeSeries>, String> {
     let header = lines.next().ok_or_else(|| "CSV 空".to_string())?;
     let cols: Vec<&str> = split_csv_row(header);
     let idx = |name: &str| cols.iter().position(|c| c.trim() == name);
-    let (Some(mi), Some(ni), Some(ti), Some(vi)) = (
-        idx("module"),
-        idx("name"),
-        idx("vectime"),
-        idx("vecvalue"),
-    ) else {
+    let (Some(mi), Some(ni), Some(ti), Some(vi)) =
+        (idx("module"), idx("name"), idx("vectime"), idx("vecvalue"))
+    else {
         return Err("CSV 缺 module/name/vectime/vecvalue 列".to_string());
     };
 
@@ -223,6 +237,7 @@ fn parse_num_array(s: &str) -> Vec<f64> {
         .trim_matches('"')
         .split_whitespace()
         .filter_map(|t| t.parse::<f64>().ok())
+        .filter(|v| v.is_finite()) // 丢弃 inf/nan，防污染 GM 对齐与收敛判定
         .collect()
 }
 
@@ -297,13 +312,13 @@ pub async fn run_timesync_sim(
     request: RunTimesyncSimRequest,
 ) -> Result<SimResult, String> {
     let pool = store.pool(&app).await?;
-    let cfg = resolve_remote_config(&pool).await?;
+    let cfg = resolve_remote_config(pool).await?;
     let overrides = SimOverrides {
         oscillator: parse_oscillator(request.oscillator.as_deref()),
         drift_ppm: request.drift_ppm,
         sim_time_s: request.sim_time_s,
     };
-    run_timesync_sim_inner(&pool, &request.session_id, &overrides, &SshRunner, &cfg).await
+    run_timesync_sim_inner(pool, &request.session_id, &overrides, &SshRunner, &cfg).await
 }
 
 /// 可测内核：注入 RemoteRunner，编排 verify-gate → bundle → 远端跑 → 取数算偏差。
@@ -337,48 +352,49 @@ pub async fn run_timesync_sim_inner<R: RemoteRunner>(
             .map_err(|e| format!("读 GM 失败：{e}"))?
             .flatten();
     let Some(gm_mid) = gm_mid else {
-        return Err("未设 GM，无法软仿。".to_string());
+        // 结构化返回（非 Err）：让前端走结果区文案、不弹 IPC 错误（reliability review）。
+        return Ok(SimResult {
+            caliber: CALIBER_TIMESYNC_SIMULATED.to_string(),
+            status: "no_gm".to_string(),
+            per_node: vec![],
+            overall: "未设 GM，请先在时钟同步阶段设定 GM 并确认时钟树。".to_string(),
+            message: Some("timesync_domain.gm_mid 为空。".to_string()),
+        });
     };
 
     let (nodes, links) = load_topology(pool, session_id).await?;
     let timing = load_timing(pool, session_id).await?;
 
     // 3) 生成 bundle。
-    let bundle = match build_timesync_sim_bundle(
-        &nodes,
-        &links,
-        &gm_mid,
-        &timing,
-        overrides,
-        session_id,
-        0,
-    ) {
-        Ok(b) => b,
-        Err(errs) => {
-            let msg = errs
-                .iter()
-                .map(|e| e.message_zh.clone())
-                .collect::<Vec<_>>()
-                .join("；");
-            return Ok(SimResult {
-                caliber: CALIBER_TIMESYNC_SIMULATED.to_string(),
-                status: "bundle_error".to_string(),
-                per_node: vec![],
-                overall: "软仿工程生成失败。".to_string(),
-                message: Some(msg),
-            });
-        }
-    };
+    let sim_bundle =
+        match build_timesync_sim_bundle(&nodes, &links, &gm_mid, &timing, overrides, session_id, 0)
+        {
+            Ok(b) => b,
+            Err(errs) => {
+                let msg = errs
+                    .iter()
+                    .map(|e| e.message_zh.clone())
+                    .collect::<Vec<_>>()
+                    .join("；");
+                return Ok(SimResult {
+                    caliber: CALIBER_TIMESYNC_SIMULATED.to_string(),
+                    status: "bundle_error".to_string(),
+                    per_node: vec![],
+                    overall: "软仿工程生成失败。".to_string(),
+                    message: Some(msg),
+                });
+            }
+        };
 
     // 4) 远端跑 + 取数。
-    let outcome = match runner.run_sim_fetch_csv(&bundle, cfg, TIMECHANGED_FILTER) {
+    let outcome = match runner.run_sim_fetch_csv(&sim_bundle.bundle, cfg, TIMECHANGED_FILTER) {
         Ok(o) => o,
         Err(RemoteError::Unreachable(m)) => {
             return Ok(unreachable_result(&m));
         }
     };
 
-    classify_and_compute(outcome, &gm_mid, &timing)
+    classify_and_compute(outcome, &sim_bundle.gm_ned_name, &gm_mid, &timing)
 }
 
 fn unreachable_result(msg: &str) -> SimResult {
@@ -391,9 +407,11 @@ fn unreachable_result(msg: &str) -> SimResult {
     }
 }
 
-/// 把远端 outcome 分型 + 算偏差。exit≠0→load_failed；csv 空→结果为空；解析失败→parse_failed。
+/// 把远端 outcome 分型 + 算偏差。exit≠0→load_failed；scavetool 失败→scavetool_failed；
+/// csv 空→结果为空；CSV 解析失败→parse_failed；否则按 GM 对齐算稳态偏差。
 fn classify_and_compute(
     outcome: SimRunOutcome,
+    gm_ned: &str,
     gm_mid: &str,
     timing: &[SimNodeTiming],
 ) -> Result<SimResult, String> {
@@ -407,21 +425,38 @@ fn classify_and_compute(
         });
     }
     let Some(csv) = outcome.csv else {
+        // 区分 scavetool 命令失败（多半是远端没装 opp_scavetool）与跑成功但 0 行。
+        if outcome.scavetool_failed {
+            return Ok(SimResult {
+                caliber: CALIBER_TIMESYNC_SIMULATED.to_string(),
+                status: "scavetool_failed".to_string(),
+                per_node: vec![],
+                overall: "取数失败：远端 opp_scavetool 执行失败（检查是否已安装、是否在 PATH）。"
+                    .to_string(),
+                message: Some("scavetool 命令非零退出，未取到 CSV。".to_string()),
+            });
+        }
         return Ok(empty_result());
     };
     let series = match parse_timechanged_csv(&csv) {
         Ok(s) => s,
-        Err(_e) => {
-            // 0 行 timeChanged → 结果为空（指向 recording/模块路径）；其余解析问题同归空（保守）。
-            return Ok(empty_result());
+        Err(e) => {
+            // CSV 解析失败（列缺失/格式异常）单独分型，区别于 0 行的「结果为空」。
+            return Ok(SimResult {
+                caliber: CALIBER_TIMESYNC_SIMULATED.to_string(),
+                status: "parse_failed".to_string(),
+                per_node: vec![],
+                overall: "结果解析失败：scavetool CSV 格式不符预期。".to_string(),
+                message: Some(e),
+            });
         }
     };
 
-    // GM clock 模块：module 含 GM 的 ned 名。bundle 用 sw{N}/es{N} 命名，库 mid 与 ned 名不直通；
-    // 这里用「referenceClock 对齐」性质——GM 自身相对自己偏差≈0，取 timeChanged 绝对值最小且方差最小者为 GM。
-    // 更稳妥：caller 已知 GM ned 名。本内核按 module 路径含最短偏差列定位 GM，实跑后可换精确匹配。
-    let gm_series = pick_gm_series(&series);
-    let Some(gm_series) = gm_series else {
+    // GM 序列：按 caller 给的 GM ned 名（bundle 生成时确定的 sw{N}/es{N}）精确匹配 module 路径，
+    // 取代「值域最小=GM」启发式（启发式会把稀疏 slave 误当 GM，全部偏差失真仍渲染收敛）。
+    let gm_marker = format!("{gm_ned}.clock");
+    let Some(gm_series) = series.iter().find(|s| s.module.ends_with(&gm_marker)) else {
+        // 取不到 GM 序列（filter/录制路径与预期不符）→ 结果为空，不臆造参考系。
         return Ok(empty_result());
     };
 
@@ -437,9 +472,10 @@ fn classify_and_compute(
         let Some((max_ns, mean_ns)) = steady_state_offset(s, gm_series) else {
             continue;
         };
-        // 阈值：用 module 名兜不回 mid，先用全局无阈值（within=true）；精确 mid↔module 映射实跑后补。
-        let within = true;
-        let converged = max_ns.is_finite();
+        // 收敛判定：稳态 max|offset| 在阈值内才算收敛（阈值为参考线，非设计质量判定）。
+        // mid↔module 精确映射 deferred（实跑确认 module 路径后补），故先用全局默认阈值。
+        let within = max_ns.is_finite() && max_ns <= CONVERGENCE_THRESHOLD_NS;
+        let converged = within;
         if converged {
             converged_count += 1;
         }
@@ -467,7 +503,10 @@ fn classify_and_compute(
     }
 
     let total = per_node.len();
-    let overall = format!("{converged_count} 个收敛 / {} 个未收敛", total - converged_count);
+    let overall = format!(
+        "{converged_count} 个收敛 / {} 个未收敛",
+        total - converged_count
+    );
     Ok(SimResult {
         caliber: CALIBER_TIMESYNC_SIMULATED.to_string(),
         status: "converged".to_string(),
@@ -482,31 +521,22 @@ fn empty_result() -> SimResult {
         caliber: CALIBER_TIMESYNC_SIMULATED.to_string(),
         status: "empty".to_string(),
         per_node: vec![],
-        overall: "结果为空：未取到 timeChanged 数据（通常是 recording/模块路径配置问题）。".to_string(),
+        overall: "结果为空：未取到 timeChanged 数据（通常是 recording/模块路径配置问题）。"
+            .to_string(),
         message: Some("空结果不渲染成收敛。".to_string()),
     }
-}
-
-/// 选 GM 序列：GM clock 相对 referenceClock(自身) 偏差应最小——取 |值| 范围最小者。
-fn pick_gm_series(series: &[NodeSeries]) -> Option<&NodeSeries> {
-    series.iter().min_by(|a, b| {
-        let ra = series_range(a);
-        let rb = series_range(b);
-        ra.partial_cmp(&rb).unwrap_or(std::cmp::Ordering::Equal)
-    })
-}
-
-fn series_range(s: &NodeSeries) -> f64 {
-    let max = s.values.iter().cloned().fold(f64::MIN, f64::max);
-    let min = s.values.iter().cloned().fold(f64::MAX, f64::min);
-    max - min
 }
 
 async fn load_topology(
     pool: &sqlx::Pool<sqlx::Sqlite>,
     session_id: &str,
-) -> Result<(Vec<crate::topology_verify::VerifyNode>, Vec<crate::topology_verify::VerifyLink>), String>
-{
+) -> Result<
+    (
+        Vec<crate::topology_verify::VerifyNode>,
+        Vec<crate::topology_verify::VerifyLink>,
+    ),
+    String,
+> {
     let node_rows = sqlx::query(
         "SELECT mid, name, node_type FROM topology_nodes WHERE session_id = ? ORDER BY insert_order, mid",
     )
@@ -607,12 +637,14 @@ mod tests {
             inet_path: "/opt/inet".into(),
         };
         let json = serde_json::to_string(&cfg).unwrap();
-        sqlx::query("INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, 'now')")
-            .bind(INET_HOST_CONFIG_KEY)
-            .bind(&json)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, 'now')",
+        )
+        .bind(INET_HOST_CONFIG_KEY)
+        .bind(&json)
+        .execute(&pool)
+        .await
+        .unwrap();
         assert_eq!(load_host_config(&pool).await, Some(cfg.clone()));
         // resolve（无 env 时）取 UI 值。
         if std::env::var("TSN_AGENT_INET_HOST").is_err() {
@@ -635,12 +667,14 @@ mod tests {
             inet_path: "/opt/inet".into(),
         };
         let json = serde_json::to_string(&bad).unwrap();
-        sqlx::query("INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, 'now')")
-            .bind(INET_HOST_CONFIG_KEY)
-            .bind(&json)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, 'now')",
+        )
+        .bind(INET_HOST_CONFIG_KEY)
+        .bind(&json)
+        .execute(&pool)
+        .await
+        .unwrap();
         assert!(resolve_remote_config(&pool).await.is_err());
     }
 
@@ -680,42 +714,8 @@ mod tests {
         assert!((mean_ns - 1.0).abs() < 1e-6, "瞬态不计入稳态");
     }
 
-    #[test]
-    fn classify_load_failed_on_nonzero_exit() {
-        let outcome = SimRunOutcome {
-            exit_code: Some(1),
-            output_tail: "boom".into(),
-            csv: None,
-        };
-        let r = classify_and_compute(outcome, "0", &[]).unwrap();
-        assert_eq!(r.status, "load_failed");
-        assert!(r.per_node.is_empty());
-    }
-
-    #[test]
-    fn classify_empty_on_no_csv() {
-        let outcome = SimRunOutcome {
-            exit_code: Some(0),
-            output_tail: "".into(),
-            csv: None,
-        };
-        let r = classify_and_compute(outcome, "0", &[]).unwrap();
-        assert_eq!(r.status, "empty");
-        assert!(r.per_node.is_empty(), "空结果不渲染成收敛");
-    }
-
-    #[test]
-    fn classify_converged_from_csv() {
-        // GM=es1 恒0；sw1 收敛到 1ns。期望 1 slave。
-        let csv = "run,module,name,vectime,vecvalue\n\
-            r1,net.es1.clock,timeChanged:vector,0 1 2 3,0 0 0 0\n\
-            r1,net.sw1.clock,timeChanged:vector,0 1 2 3,0.001 0.0005 1e-9 1e-9\n";
-        let outcome = SimRunOutcome {
-            exit_code: Some(0),
-            output_tail: "".into(),
-            csv: Some(csv.into()),
-        };
-        let timing = [
+    fn timing2() -> [SimNodeTiming; 2] {
+        [
             SimNodeTiming {
                 mid: "0".into(),
                 master_port: vec![],
@@ -730,11 +730,117 @@ mod tests {
                 sync_period_ms: None,
                 measure_period_ms: None,
             },
-        ];
-        // gm_mid "0" → expected_slaves = 1（mid 1）。
-        let r = classify_and_compute(outcome, "0", &timing).unwrap();
+        ]
+    }
+
+    #[test]
+    fn classify_load_failed_on_nonzero_exit() {
+        let outcome = SimRunOutcome {
+            exit_code: Some(1),
+            output_tail: "boom".into(),
+            csv: None,
+            scavetool_failed: false,
+        };
+        let r = classify_and_compute(outcome, "es1", "0", &[]).unwrap();
+        assert_eq!(r.status, "load_failed");
+        assert!(r.per_node.is_empty());
+    }
+
+    #[test]
+    fn classify_empty_vs_scavetool_failed() {
+        // 跑成功但 0 行 → empty。
+        let empty = classify_and_compute(
+            SimRunOutcome {
+                exit_code: Some(0),
+                output_tail: "".into(),
+                csv: None,
+                scavetool_failed: false,
+            },
+            "es1",
+            "0",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(empty.status, "empty");
+        // scavetool 命令失败 → scavetool_failed（区别于结果为空）。
+        let tool = classify_and_compute(
+            SimRunOutcome {
+                exit_code: Some(0),
+                output_tail: "".into(),
+                csv: None,
+                scavetool_failed: true,
+            },
+            "es1",
+            "0",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(tool.status, "scavetool_failed");
+    }
+
+    #[test]
+    fn classify_parse_failed_on_bad_csv() {
+        // exit 0、csv 有内容但缺列 → parse_failed（区别于 empty）。
+        let outcome = SimRunOutcome {
+            exit_code: Some(0),
+            output_tail: "".into(),
+            csv: Some("not,a,valid,header\n1,2,3,4\n".into()),
+            scavetool_failed: false,
+        };
+        let r = classify_and_compute(outcome, "es1", "0", &[]).unwrap();
+        assert_eq!(r.status, "parse_failed");
+    }
+
+    #[test]
+    fn classify_converged_from_csv() {
+        // GM=es1 恒0；sw1 收敛到 1ns。期望 1 slave。gm_ned=es1 精确匹配 module。
+        let csv = "run,module,name,vectime,vecvalue\n\
+            r1,net.es1.clock,timeChanged:vector,0 1 2 3,0 0 0 0\n\
+            r1,net.sw1.clock,timeChanged:vector,0 1 2 3,0.001 0.0005 1e-9 1e-9\n";
+        let outcome = SimRunOutcome {
+            exit_code: Some(0),
+            output_tail: "".into(),
+            csv: Some(csv.into()),
+            scavetool_failed: false,
+        };
+        let r = classify_and_compute(outcome, "es1", "0", &timing2()).unwrap();
         assert_eq!(r.status, "converged", "{r:?}");
         assert_eq!(r.per_node.len(), 1);
         assert!(r.per_node[0].converged);
+    }
+
+    #[test]
+    fn classify_marks_large_offset_not_converged() {
+        // sw1 稳态偏差 1ms = 1e6 ns >> 1µs 阈值 → 未收敛（不渲染全绿）。
+        let csv = "run,module,name,vectime,vecvalue\n\
+            r1,net.es1.clock,timeChanged:vector,0 1 2 3,0 0 0 0\n\
+            r1,net.sw1.clock,timeChanged:vector,0 1 2 3,0.001 0.001 0.001 0.001\n";
+        let outcome = SimRunOutcome {
+            exit_code: Some(0),
+            output_tail: "".into(),
+            csv: Some(csv.into()),
+            scavetool_failed: false,
+        };
+        let r = classify_and_compute(outcome, "es1", "0", &timing2()).unwrap();
+        assert_eq!(r.status, "converged"); // status=有结果；逐节点判收敛
+        assert_eq!(r.per_node.len(), 1);
+        assert!(!r.per_node[0].converged, "1ms 偏差不应判收敛");
+        assert!(r.overall.contains("未收敛"));
+    }
+
+    #[test]
+    fn classify_wrong_gm_name_yields_empty() {
+        // gm_ned 与 CSV 里任何 module 都不匹配 → 不臆造参考系，判 empty。
+        let csv = "run,module,name,vectime,vecvalue\n\
+            r1,net.es1.clock,timeChanged:vector,0 1,0 0\n\
+            r1,net.sw1.clock,timeChanged:vector,0 1,1e-9 1e-9\n";
+        let outcome = SimRunOutcome {
+            exit_code: Some(0),
+            output_tail: "".into(),
+            csv: Some(csv.into()),
+            scavetool_failed: false,
+        };
+        let r = classify_and_compute(outcome, "es99", "0", &timing2()).unwrap();
+        assert_eq!(r.status, "empty");
     }
 }

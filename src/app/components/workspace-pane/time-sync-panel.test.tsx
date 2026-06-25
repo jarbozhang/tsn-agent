@@ -200,3 +200,77 @@ describe("TimeSyncPanel 解释（U13）", () => {
     expect(screen.getByRole("button", { name: "解释" })).toBeEnabled();
   });
 });
+
+/** 受控 deferred：手动控制 promise 何时 resolve，模拟 await 期间的会话切换/并发。 */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+describe("TimeSyncPanel 异步竞态", () => {
+  it("软仿运行中切走会话 → 迟到结果不落进新会话", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<SimResult>();
+    const runTimesyncSim = vi.fn(() => pending.promise);
+    const onSimStateChange = vi.fn();
+    const { rerender } = render(
+      <TimeSyncPanel {...baseProps({ sessionId: "s1", runTimesyncSim, onSimStateChange })} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "软仿" }));
+    expect(onSimStateChange).toHaveBeenCalledWith({ status: "running" });
+
+    // await 未结束前切到新会话（prop 变化）。
+    rerender(
+      <TimeSyncPanel {...baseProps({ sessionId: "s2", runTimesyncSim, onSimStateChange })} />,
+    );
+
+    pending.resolve(convergedResult());
+    await pending.promise;
+
+    // 切走后 done 不得落进新会话状态。
+    expect(onSimStateChange).not.toHaveBeenCalledWith({
+      status: "done",
+      result: convergedResult(),
+    });
+  });
+
+  it("软仿快速双击 → invoke 只调用一次", async () => {
+    const pending = deferred<SimResult>();
+    const runTimesyncSim = vi.fn(() => pending.promise);
+    render(<TimeSyncPanel {...baseProps({ runTimesyncSim })} />);
+
+    const button = screen.getByRole("button", { name: "软仿" });
+    // 两次同步点击，disabled 态下一拍才生效；ref 守卫拦住第二次。
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    expect(runTimesyncSim).toHaveBeenCalledTimes(1);
+    pending.resolve(convergedResult());
+    await pending.promise;
+  });
+
+  it("解释快速双击 → LLM 只调用一次", async () => {
+    const pending = deferred<string>();
+    const explainSim = vi.fn(() => pending.promise);
+    render(
+      <TimeSyncPanel
+        {...baseProps({
+          simState: { status: "done", result: partlyConvergedResult() },
+          explainSim,
+        })}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "解释" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    expect(explainSim).toHaveBeenCalledTimes(1);
+    pending.resolve("解释内容");
+    await pending.promise;
+  });
+});

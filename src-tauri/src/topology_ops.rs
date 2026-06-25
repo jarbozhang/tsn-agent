@@ -302,7 +302,8 @@ pub async fn apply_op(
                     && a.name.as_ref().is_none_or(|n| {
                         row.get::<Option<String>, _>("name").as_deref() == Some(n.as_str())
                     })
-                    && a.speed.is_none_or(|s| row.get::<Option<i64>, _>("speed") == Some(s));
+                    && a.speed
+                        .is_none_or(|s| row.get::<Option<i64>, _>("speed") == Some(s));
                 if !same_provided {
                     return Err(OpError::LinkSeqTaken(format!(
                         "linkSeq={} 已存在且取值不同；新增链路请换未占用 linkSeq（先 inspect），删旧建新请用 link_delete + link_add",

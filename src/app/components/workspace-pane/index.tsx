@@ -744,6 +744,7 @@ export function WorkspacePane({
 
             {activeConfigTab === "time-sync" && (
               <TimeSyncPanel
+                key={sessionId}
                 inTimeSyncStage={showClockTree}
                 treeConfirmed={Boolean(timesyncSnapshot?.domain?.gmMid)}
                 sessionId={sessionId}

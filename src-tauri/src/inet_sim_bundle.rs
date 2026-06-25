@@ -32,6 +32,14 @@ const SEED_SET: u32 = 0;
 
 pub use crate::inet_remote::InetBundle;
 
+/// build_timesync_sim_bundle 产物：bundle + GM 的 ned 名。命令层用 gm_ned_name 按 module 名
+/// 精确定位 GM 时间序列（取代脆弱的「值域最小=GM」启发式，code-review correctness/adversarial）。
+#[derive(Debug, Clone)]
+pub struct TimesyncSimBundle {
+    pub bundle: InetBundle,
+    pub gm_ned_name: String,
+}
+
 /// 覆盖表单（R4）：振荡器类型 / 漂移幅度 / sim 时长。缺省走 R3(a) 固定默认。
 #[derive(Debug, Clone, Default)]
 pub struct SimOverrides {
@@ -111,10 +119,16 @@ fn build_port_eth_map(links: &[VerifyLink]) -> BTreeMap<String, BTreeMap<i64, us
     let mut node_ports: BTreeMap<String, std::collections::BTreeSet<i64>> = BTreeMap::new();
     for link in links {
         if let Some(p) = link.src_port {
-            node_ports.entry(link.src_node.clone()).or_default().insert(p);
+            node_ports
+                .entry(link.src_node.clone())
+                .or_default()
+                .insert(p);
         }
         if let Some(p) = link.dst_port {
-            node_ports.entry(link.dst_node.clone()).or_default().insert(p);
+            node_ports
+                .entry(link.dst_node.clone())
+                .or_default()
+                .insert(p);
         }
     }
     let mut map: BTreeMap<String, BTreeMap<i64, usize>> = BTreeMap::new();
@@ -126,7 +140,11 @@ fn build_port_eth_map(links: &[VerifyLink]) -> BTreeMap<String, BTreeMap<i64, us
     map
 }
 
-fn eth_name(map: &BTreeMap<String, BTreeMap<i64, usize>>, mid: &str, db_port: i64) -> Option<String> {
+fn eth_name(
+    map: &BTreeMap<String, BTreeMap<i64, usize>>,
+    mid: &str,
+    db_port: i64,
+) -> Option<String> {
     map.get(mid)
         .and_then(|inner| inner.get(&db_port))
         .map(|k| format!("eth{k}"))
@@ -142,7 +160,7 @@ pub fn build_timesync_sim_bundle(
     overrides: &SimOverrides,
     session_id: &str,
     source_mutation_id: i64,
-) -> Result<InetBundle, Vec<VerifyError>> {
+) -> Result<TimesyncSimBundle, Vec<VerifyError>> {
     let mut errors: Vec<VerifyError> = Vec::new();
     let mut mapped: BTreeMap<&str, MappedNode> = BTreeMap::new();
     let mut sw_seq = 0u32;
@@ -234,10 +252,7 @@ pub fn build_timesync_sim_bundle(
         };
         // 端口列已校验非 NULL。
         let (sp, dp) = (link.src_port.unwrap(), link.dst_port.unwrap());
-        let (ks, kd) = (
-            port_eth[&link.src_node][&sp],
-            port_eth[&link.dst_node][&dp],
-        );
+        let (ks, kd) = (port_eth[&link.src_node][&sp], port_eth[&link.dst_node][&dp]);
         let rate = link_rate(link);
         connections.push_str(&format!(
             "        {}.ethg[{}] <--> EthernetLink {{ datarate = {}Mbps; length = {}; }} <--> {}.ethg[{}];\n",
@@ -276,10 +291,13 @@ network TsnAgentTimesyncNetwork extends TsnNetworkBase\n{{\n\
     let manifest_json =
         serde_json::to_string_pretty(&manifest).unwrap_or_else(|_| "{}".to_string());
 
-    Ok(InetBundle {
-        network_ned,
-        omnetpp_ini,
-        manifest_json,
+    Ok(TimesyncSimBundle {
+        gm_ned_name: gm_ned.clone(),
+        bundle: InetBundle {
+            network_ned,
+            omnetpp_ini,
+            manifest_json,
+        },
     })
 }
 
@@ -451,7 +469,7 @@ mod tests {
             7,
         )
         .unwrap();
-        let ini = &b.omnetpp_ini;
+        let ini = &b.bundle.omnetpp_ini;
         // gPTP 硬性前提全在。
         assert!(ini.contains("simtime-resolution = fs"));
         assert!(ini.contains("seed-set = 0"));
@@ -468,10 +486,17 @@ mod tests {
     #[test]
     fn ned_uses_explicit_gate_indices_from_mapping() {
         let (nodes, links, timing) = sample();
-        let b =
-            build_timesync_sim_bundle(&nodes, &links, "1", &timing, &SimOverrides::default(), "s1", 7)
-                .unwrap();
-        let ned = &b.network_ned;
+        let b = build_timesync_sim_bundle(
+            &nodes,
+            &links,
+            "1",
+            &timing,
+            &SimOverrides::default(),
+            "s1",
+            7,
+        )
+        .unwrap();
+        let ned = &b.bundle.network_ned;
         // sw0 端口5→eth1 接 es1.eth0；端口2→eth0 接 es2.eth0。
         assert!(ned.contains("sw1.ethg[1] <-->"), "{ned}");
         assert!(ned.contains("sw1.ethg[0] <-->"), "{ned}");
@@ -483,9 +508,16 @@ mod tests {
         let nodes = vec![node("0", "switch"), node("1", "endSystem")];
         let links = vec![link(0, "0", "1", Some(1), None)]; // dst_port NULL
         let timing = vec![];
-        let err =
-            build_timesync_sim_bundle(&nodes, &links, "0", &timing, &SimOverrides::default(), "s1", 1)
-                .unwrap_err();
+        let err = build_timesync_sim_bundle(
+            &nodes,
+            &links,
+            "0",
+            &timing,
+            &SimOverrides::default(),
+            "s1",
+            1,
+        )
+        .unwrap_err();
         assert!(err.iter().any(|e| e.code == "link_port_null"), "{err:?}");
     }
 
@@ -514,7 +546,7 @@ mod tests {
             sim_time_s: Some(2.5),
         };
         let b = build_timesync_sim_bundle(&nodes, &links, "1", &timing, &ov, "s1", 1).unwrap();
-        let ini = &b.omnetpp_ini;
+        let ini = &b.bundle.omnetpp_ini;
         assert!(ini.contains("ConstantDriftOscillator"));
         assert!(ini.contains("driftRate = 50ppm"));
         assert!(ini.contains("sim-time-limit = 2.5s"));

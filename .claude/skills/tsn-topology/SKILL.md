@@ -55,9 +55,9 @@ description: TSN Agent 拓扑阶段主索引。承载场景无关的领域语义
 
 用户要插交换机、改连接时：
 
-1. 调 `mcp__tsn_topology__topology_inspect`（无参数）拿该会话全部 rows：nodes（syncName/name/nodeType/x/y/insertOrder）+ links（linkSeq/name/srcSyncName/dstSyncName/stylesJson）。节点身份是 `syncName`（逻辑序号），连线两端 `srcSyncName`/`dstSyncName` 引用节点的 syncName。
-2. 在 rows 里按 name/nodeType/连接关系找到目标节点和链路，拿到准确的 syncName / linkSeq。用户的指代不唯一时，先用中文数字编号给选项问清楚。匹配按上面「显示名怎么定」来。
-3. 构造原子 operations（比如插一台交换机 = `[link_delete, node_add, link_add, link_add]`）：新节点的 `nodeType` 照抄 inspect 里同类节点的原文，`srcSyncName`/`dstSyncName` 填两端节点的 syncName；新的 `syncName`/`linkSeq` 要避开 rows 里已经占用的值。**链路端口走显式字段**：`link_add` 必须传 `srcPort`/`dstPort`（两端节点实际占用的端口号，新生成拓扑 P0 起编）——端口是结构事实源、直写库列，**不再塞进 `stylesJson`**；漏传端口会被拒（`LINK_PORT_MISSING`），补全后重试。`stylesJson` 现在只放显示属性（plane 平面配色 / role 角色），可参照已有链路但不要照抄其端口。`node_add` 可带 `name` 显示名（交换机 `SW-N`、端系统 `ES-N`、服务器 `SRV-N`，序号 N 接现有同类最大值往下；省略则展示层按前缀+syncName 派生，但若填了 name 必须合前缀、且各节点 name 不重名，否则结构校验报 `NODE_NAME_PREFIX`/`DUPLICATE_NAME`）。补名或改名用 `node_update`（同样带 `name`）。
+1. 调 `mcp__tsn_topology__topology_inspect`（无参数）拿该会话全部 rows：nodes（mid/name/nodeType/x/y/insertOrder）+ links（linkSeq/name/srcNode/dstNode/srcPort/dstPort/stylesJson）。节点身份是 `mid`（逻辑序号），连线两端 `srcNode`/`dstNode` 引用节点的 mid；端口号是独立列 `srcPort`/`dstPort`（结构事实源）。
+2. 在 rows 里按 name/nodeType/连接关系找到目标节点和链路，拿到准确的 mid / linkSeq。用户的指代不唯一时，先用中文数字编号给选项问清楚。匹配按上面「显示名怎么定」来。
+3. 构造原子 operations（比如插一台交换机 = `[link_delete, node_add, link_add, link_add]`）：新节点的 `nodeType` 照抄 inspect 里同类节点的原文，`srcNode`/`dstNode` 填两端节点的 mid；新的 `mid`/`linkSeq` 要避开 rows 里已经占用的值。**链路端口走显式字段**：`link_add` 必须传 `srcPort`/`dstPort`（两端节点实际占用的端口号，新生成拓扑 P0 起编）——端口是结构事实源、直写库列，**不再塞进 `stylesJson`**；漏传端口会被拒（`LINK_PORT_MISSING`），补全后重试。`stylesJson` 现在只放显示属性（plane 平面配色 / role 角色），可参照已有链路但不要照抄其端口。`node_add` 可带 `name` 显示名（交换机 `SW-N`、端系统 `ES-N`、服务器 `SRV-N`，序号 N 接现有同类最大值往下；省略则展示层按前缀+mid 派生，但若填了 name 必须合前缀、且各节点 name 不重名，否则结构校验报 `NODE_NAME_PREFIX`/`DUPLICATE_NAME`）。补名或改名用 `node_update`（同样带 `name`）。
 4. 调 `mcp__tsn_topology__topology_apply_operations`；不要把 rows 或 changeSet 写进对话。
 5. 看 `apply_operations` 返回的 `validation` 字段（库内结构校验结论，handler 自动追的），按它把结果告诉用户（见下「结构校验」）。
 

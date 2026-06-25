@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   buildSimExplainPrompt,
   hasNonConvergedNode,
@@ -51,6 +51,13 @@ export function TimeSyncPanel({
     { status: "idle" } | { status: "running" } | { status: "done"; text: string }
   >({ status: "idle" });
   const [explainFailed, setExplainFailed] = useState(false);
+  // 同步互斥：disabled/loading 态下一拍才生效，两次快速点击都能越过门控；ref 即时拦并发。
+  const softSimInflight = useRef(false);
+  const explainInflight = useRef(false);
+  // 异步落地校验读最新会话：handler 闭包定格的是发起时那次 render 的 sessionId，
+  // 切走后 prop 变了但旧闭包看不到；ref 始终指向当前 prop，await 落地后据此判定是否切走。
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
 
   const running = simState.status === "running";
   // 门控两条文案（doc-review）：未到阶段 / 树未确认。
@@ -62,33 +69,57 @@ export function TimeSyncPanel({
       : undefined;
 
   async function handleSoftSim() {
-    if (softSimDisabled) {
+    if (softSimDisabled || softSimInflight.current) {
       return;
     }
+    softSimInflight.current = true;
+    // 运行前定格当前会话：await 期间用户切走时，迟到结果不得落进新会话的状态。
+    const runSessionId = sessionId;
     setHardSimNotice(false);
     setExplainState({ status: "idle" });
     setExplainFailed(false);
     onSimStateChange({ status: "running" });
     try {
-      const result = await runTimesyncSim(sessionId, form);
+      const result = await runTimesyncSim(runSessionId, form);
+      if (runSessionId !== sessionIdRef.current) {
+        return;
+      }
       onSimStateChange({ status: "done", result });
     } catch (error) {
+      if (runSessionId !== sessionIdRef.current) {
+        return;
+      }
       onSimStateChange({
         status: "error",
         message: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      softSimInflight.current = false;
     }
   }
 
   async function handleExplain(result: SimResult) {
+    if (explainInflight.current) {
+      return;
+    }
+    explainInflight.current = true;
+    const runSessionId = sessionId;
     setExplainState({ status: "running" });
     setExplainFailed(false);
     try {
       const text = await explainSim(buildSimExplainPrompt(result));
+      if (runSessionId !== sessionIdRef.current) {
+        return;
+      }
       setExplainState({ status: "done", text });
     } catch {
+      if (runSessionId !== sessionIdRef.current) {
+        return;
+      }
       setExplainState({ status: "idle" });
       setExplainFailed(true);
+    } finally {
+      explainInflight.current = false;
     }
   }
 

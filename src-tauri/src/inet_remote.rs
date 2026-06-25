@@ -82,6 +82,9 @@ pub struct SimRunOutcome {
     pub output_tail: String,
     /// scavetool 导出的 timeChanged CSV 原文（成功且非空才 Some）。
     pub csv: Option<String>,
+    /// scavetool 命令本身失败（非零退出/缺失/连接断）——区别于「跑成功但导出 0 行」，
+    /// 让 caller 给出「工具未安装/执行失败」而非「recording 配置」的诊断（reliability/maintainability review）。
+    pub scavetool_failed: bool,
 }
 
 pub trait RemoteRunner {
@@ -318,11 +321,13 @@ impl RemoteRunner for SshRunner {
                 exit_code: code,
                 output_tail: tail(&redacted, 2000),
                 csv: None,
+                scavetool_failed: false,
             });
         }
 
         // 4) scavetool 导出 timeChanged CSV 并 cat 回传。
-        let csv = match run_with_timeout(
+        // 区分「命令失败」（非零退出/缺失/断连）与「成功但导出 0 行」——前者 scavetool_failed=true。
+        let (csv, scavetool_failed) = match run_with_timeout(
             make_cmd(
                 &ssh,
                 build_ssh_argv(cfg, &remote_scavetool_cmd(&remote_dir, scavetool_filter)),
@@ -332,13 +337,13 @@ impl RemoteRunner for SshRunner {
             Ok(o) if o.status.success() => {
                 let out = String::from_utf8_lossy(&o.stdout).to_string();
                 if out.trim().is_empty() {
-                    None
+                    (None, false) // 跑成功但无 timeChanged 行 → 真·结果为空
                 } else {
-                    Some(out)
+                    (Some(out), false)
                 }
             }
-            // scavetool 失败（含命令缺失/无 .vec）→ csv None：caller 判「结果为空」。
-            _ => None,
+            // scavetool 非零退出/缺失/断连 → 命令失败（与结果为空区分）。
+            _ => (None, true),
         };
 
         // 5) best-effort 清理。
@@ -349,6 +354,7 @@ impl RemoteRunner for SshRunner {
             exit_code: code,
             output_tail: tail(&redacted, 2000),
             csv,
+            scavetool_failed,
         })
     }
 }
