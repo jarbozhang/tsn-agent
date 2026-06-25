@@ -184,6 +184,9 @@ pub async fn remove_session(
         &request.session_id,
     )
     .await?;
+    // Plan 2026-06-25-002 U5：eval store（app-config/eval/）**有意不在此删除**——它与
+    // 会话生命周期解耦（删会话不删 eval，R5）。隐私清除走 U7 告知 + 专门的 clear_eval_*
+    // 命令（U6）。勿在此追加 eval 清理。
 
     if current_id.as_deref() != Some(request.session_id.as_str()) {
         return Ok(());
