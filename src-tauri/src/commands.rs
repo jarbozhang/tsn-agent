@@ -135,7 +135,6 @@ pub struct ClaudeAgentResponse {
     stage_results: Vec<serde_json::Value>,
     // Plan 2026-06-09-003：结构化工具调用记录，前端富化成卡片。与 stage_results 同构透传。
     tool_calls: Vec<serde_json::Value>,
-    audit_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -147,7 +146,6 @@ struct ClaudeWorkerResponse {
     stage_results: Vec<serde_json::Value>,
     #[serde(default)]
     tool_calls: Vec<serde_json::Value>,
-    audit_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,7 +163,6 @@ struct ClaudeWorkerEvent {
     // Plan 2026-06-10-001 U2：流式工具事件整体透传，Rust 不拆字段（契约客户端无关）。
     #[serde(default)]
     tool_call: Option<serde_json::Value>,
-    audit_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -208,7 +205,7 @@ fn run_claude_agent_blocking(
     let cwd = repo_root_from_worker(&worker_path);
     let run_id = request.run_id.clone().unwrap_or_else(create_run_id);
     let app_session_id = request.app_session_id.clone();
-    let audit_dir = agent_audit_dir(&app).map(strip_verbatim_prefix);
+    let eval_dir = eval_store_dir(&app).map(strip_verbatim_prefix);
     // 打包态：随 app 分发的 claude binary 路径（dev 态 None → SDK 默认用 node_modules 平台包）。
     let claude_binary_path = find_claude_binary(Some(&app));
     // 同源（R2）：worker 与编辑器消费同一有效 skill 根决策（含 app-data 懒播种）。
@@ -242,7 +239,7 @@ fn run_claude_agent_blocking(
             "hasResumeSession": request.resume_session_id.is_some(),
             "promptChars": prompt_chars,
             "contextChars": context_chars,
-            "auditDir": audit_dir.as_ref().map(|path| path.display().to_string()),
+            "evalDir": eval_dir.as_ref().map(|path| path.display().to_string()),
             "skillRoot": skill_root.as_ref().map(|path| path.display().to_string()),
         }),
     );
@@ -280,7 +277,7 @@ fn run_claude_agent_blocking(
         "cwd": cwd,
         "runId": run_id,
         "appSessionId": request.app_session_id,
-        "auditDir": audit_dir,
+        "evalDir": eval_dir,
         "skillRoot": skill_root,
         "claudeBinaryPath": claude_binary_path,
         "resumeSessionId": request.resume_session_id,
@@ -480,7 +477,6 @@ fn run_claude_agent_blocking(
             "assistantChars": final_response.assistant_text.chars().count(),
             "stdoutLines": stdout_lines.len(),
             "stderrLines": stderr_lines.len(),
-            "auditPath": final_response.audit_path,
         }),
     );
 
@@ -506,7 +502,6 @@ fn parse_worker_output(stdout: &str) -> Result<ClaudeAgentResponse, String> {
         session_id: parsed.session_id,
         stage_results: parsed.stage_results,
         tool_calls: parsed.tool_calls,
-        audit_path: parsed.audit_path,
     })
 }
 
@@ -644,7 +639,6 @@ fn handle_worker_line(
                 session_id: parsed.session_id,
                 stage_results: parsed.stage_results,
                 tool_calls: parsed.tool_calls,
-                audit_path: parsed.audit_path,
             });
         }
         _ => {}
@@ -653,64 +647,32 @@ fn handle_worker_line(
     Ok(())
 }
 
-fn agent_audit_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+/// Plan 2026-06-25-002 U4：raw eval store 目录。放 app-config 下 `eval/`——与 sessions.db
+/// 同源（非 iCloud/Dropbox/TimeMachine 默认同步目录，KTD6），独立于会话生命周期、
+/// 排除在既有 session 导出之外（见 session_export）。
+pub fn eval_store_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
     app.path()
-        .app_data_dir()
+        .app_config_dir()
         .ok()
-        .map(|path| path.join("agent-runs"))
+        .map(|path| path.join("eval"))
 }
 
+// Plan 2026-06-25-002 U8：执行日志模块（diagnostic_store/log_file_writer）已删除。
+// worker 生命周期事件不再进 UI/存储，改写 stderr —— dev/ops 的兜底可见性（计划接受的
+// 删后排障路径）。保留函数与调用点，避免改动 worker-spawn 关键控制流。
 fn log_worker_event(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     session_id: Option<&str>,
     run_id: &str,
     level: &str,
     message: &str,
-    duration_ms: Option<i64>,
+    _duration_ms: Option<i64>,
     details: serde_json::Value,
 ) {
-    let Some(session_id) = session_id else {
-        return;
-    };
-    let entry = crate::diagnostic_store::DiagnosticLogEntry {
-        id: create_log_id(),
-        session_id: session_id.to_string(),
-        category: "agent".to_string(),
-        level: level.to_string(),
-        message: message.to_string(),
-        created_at: iso_now(),
-        run_id: Some(run_id.to_string()),
-        duration_ms,
-        details: Some(details),
-    };
-
-    // U_R5：诊断日志改写 jsonl 文件。LogFileWriter 是 async + 串行 Mutex，
-    // 这里在 worker stderr 同步处理路径上以 block_on 桥接。
-    use tauri::Manager;
-    if let Some(store) = app.try_state::<crate::diagnostic_store::DiagnosticStore>() {
-        let _ = tauri::async_runtime::block_on(store.writer().append(app, entry));
-    }
-}
-
-fn iso_now() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default();
-
-    format!("{millis}")
-}
-
-fn create_log_id() -> String {
-    format!(
-        "diagnostic-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or_default()
-    )
+    eprintln!(
+        "[worker-event] level={level} run={run_id} session={} msg={message} details={details}",
+        session_id.unwrap_or("-")
+    );
 }
 
 fn emit_claude_event(

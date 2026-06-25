@@ -8,11 +8,6 @@ import {
   useState,
 } from "react";
 import type { ToolCallRecord } from "../../agent/tool-call-record";
-import { logDiagnostic, sessionSummary } from "../../diagnostics/app-diagnostics";
-import {
-  createDiagnosticLogRepository,
-  type DiagnosticLogRepository,
-} from "../../diagnostics/diagnostic-log-repository";
 import {
   createEmptySession,
   createSessionRepository,
@@ -22,13 +17,6 @@ import {
 
 export interface UseSessionRepositoryOptions {
   repository?: SessionRepository;
-  diagnostics?: DiagnosticLogRepository;
-}
-
-export interface PersistSessionOptions {
-  logCategory?: "session" | "agent" | "artifact";
-  logMessage?: string;
-  logDetails?: Record<string, unknown>;
 }
 
 export interface UseSessionRepositoryReturn {
@@ -38,14 +26,14 @@ export interface UseSessionRepositoryReturn {
   isHydrating: boolean;
   /** Underlying repository — exposed for low-level reads (find by id, raw save) in App.tsx submitIntent flow. */
   repository: SessionRepository;
-  persistSession: (next: TsnSession, options?: PersistSessionOptions) => Promise<void>;
+  persistSession: (next: TsnSession) => Promise<void>;
   /**
    * Like persistSession but only updates currentSession when its id still
    * matches the incoming session. Use for async results (agent run final,
    * planner attach) where the user may have switched sessions during the
    * operation.
    */
-  persistSessionIfCurrent: (next: TsnSession, options?: PersistSessionOptions) => Promise<void>;
+  persistSessionIfCurrent: (next: TsnSession) => Promise<void>;
   sessionExists: (sessionId: string) => Promise<boolean>;
   /**
    * 本次进程内被删除过的 session id 墓碑。删除后内存里可能仍残留指向该 session 的
@@ -67,17 +55,14 @@ export interface UseSessionRepositoryReturn {
   handleNewSession: () => Promise<TsnSession>;
   handleSelectSession: (session: TsnSession) => Promise<void>;
   handleDeleteSession: () => Promise<TsnSession>;
-  diagnostics: DiagnosticLogRepository;
 }
 
 const defaultRepository = createSessionRepository();
-const defaultDiagnostics = createDiagnosticLogRepository();
 
 export function useSessionRepository(
   options: UseSessionRepositoryOptions = {},
 ): UseSessionRepositoryReturn {
   const repository = options.repository ?? defaultRepository;
-  const diagnostics = options.diagnostics ?? defaultDiagnostics;
   const initialSession = useMemo(() => createEmptySession(), []);
   const [sessions, setSessions] = useState<TsnSession[]>([initialSession]);
   const [currentSession, setCurrentSession] = useState<TsnSession>(initialSession);
@@ -121,33 +106,21 @@ export function useSessionRepository(
   }, [repository]);
 
   const persistSession = useCallback(
-    async (next: TsnSession, persistOptions: PersistSessionOptions = {}) => {
+    async (next: TsnSession) => {
       await repository.save(next);
-      logDiagnostic(diagnostics, {
-        sessionId: next.id,
-        category: persistOptions.logCategory ?? "session",
-        message: persistOptions.logMessage ?? "会话已保存",
-        details: persistOptions.logDetails ?? sessionSummary(next),
-      });
       setCurrentSession(next);
       setSessions(await repository.list());
     },
-    [repository, diagnostics],
+    [repository],
   );
 
   const persistSessionIfCurrent = useCallback(
-    async (next: TsnSession, persistOptions: PersistSessionOptions = {}) => {
+    async (next: TsnSession) => {
       await repository.save(next);
-      logDiagnostic(diagnostics, {
-        sessionId: next.id,
-        category: persistOptions.logCategory ?? "session",
-        message: persistOptions.logMessage ?? "会话已保存",
-        details: persistOptions.logDetails ?? sessionSummary(next),
-      });
       setCurrentSession((session) => (session.id === next.id ? next : session));
       setSessions(await repository.list());
     },
-    [repository, diagnostics],
+    [repository],
   );
 
   const sessionExists = useCallback(
@@ -199,46 +172,27 @@ export function useSessionRepository(
 
   const handleNewSession = useCallback(async (): Promise<TsnSession> => {
     const session = createEmptySession();
-    await persistSession(session, {
-      logMessage: "新建会话",
-      logDetails: sessionSummary(session),
-    });
+    await persistSession(session);
     return session;
   }, [persistSession]);
 
   const handleSelectSession = useCallback(
     async (session: TsnSession) => {
       await repository.setCurrent(session.id);
-      logDiagnostic(diagnostics, {
-        sessionId: session.id,
-        category: "session",
-        message: "切换到会话",
-        details: sessionSummary(session),
-      });
       setCurrentSession(session);
     },
-    [repository, diagnostics],
+    [repository],
   );
 
   const handleDeleteSession = useCallback(async (): Promise<TsnSession> => {
     const deletedSessionId = currentSession.id;
     deletedSessionIds.current.add(deletedSessionId);
     await repository.remove(deletedSessionId);
-    await diagnostics.clearSession(deletedSessionId);
     const nextSession = await repository.ensureCurrentSession();
-    logDiagnostic(diagnostics, {
-      sessionId: nextSession.id,
-      category: "session",
-      message: "删除会话并切换",
-      details: {
-        deletedSessionId,
-        nextSessionId: nextSession.id,
-      },
-    });
     setCurrentSession(nextSession);
     setSessions(await repository.list());
     return nextSession;
-  }, [currentSession.id, repository, diagnostics]);
+  }, [currentSession.id, repository]);
 
   return {
     sessions,
@@ -256,6 +210,5 @@ export function useSessionRepository(
     handleNewSession,
     handleSelectSession,
     handleDeleteSession,
-    diagnostics,
   };
 }

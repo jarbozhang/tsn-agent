@@ -12,6 +12,11 @@
 //!   - 覆盖语义：OS save 对话框已是用户确认点，Rust 端经 tmp+rename 接受覆盖，
 //!     失败只删 `.tmp`，用户既有备份文件全程不动；target 为 symlink 时拒绝。
 //!
+//! Plan 2026-06-25-002 U5：本导出仅是 DB-slice（按 `SESSION_SCOPED_TABLES` 逐表
+//! `INSERT ... SELECT`），**不遍历文件系统**。raw eval store（app-config/eval/ 的 JSONL，
+//! 含未脱敏密钥）是文件存储、不在任何 DB 表里——故结构上不可能被本导出带出（R5/R6 隔离）。
+//! 勿改成遍历 app-config 目录的导出方式，否则会把 eval 原文外泄。
+//!
 //! 文件 mode：Unix 0600；Windows 留待 ACL helper（暂跳过，加 TODO）。
 
 use serde::Deserialize;
