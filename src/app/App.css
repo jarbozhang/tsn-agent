@@ -480,6 +480,14 @@ textarea:focus-visible {
   min-height: 0;
 }
 
+/* 设置面板内的「评估采集」section：与上方设置项之间留分隔线，归入 meta/维护类。 */
+.settings-eval-panel {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
 .release-detail-layout,
 .skill-detail-layout {
   min-height: 260px;
@@ -490,11 +498,10 @@ textarea:focus-visible {
 }
 
 .skill-detail-layout > .master-list {
-  /* 四个 skill 卡 2×2 排布。WebKit（Tauri WKWebView）下 grid + overflow 的 auto 行
-     automatic min size = 0，整行被压塌成 0 高、4 个 skill 卡不可见（同 .skill-file-list
-     的 row collapse，见 a7f06ff）。改 flex-wrap + overflow:visible 规避。 */
+  /* skill 卡横向一行平铺。WebKit（Tauri WKWebView）下 grid + overflow 的 auto 行
+     automatic min size = 0，整行被压塌成 0 高、skill 卡不可见（同 .skill-file-list
+     的 row collapse，见 a7f06ff）。改 flex + overflow:visible 规避。 */
   display: flex;
-  flex-wrap: wrap;
   align-self: start;
   overflow: visible;
   gap: 8px;
@@ -502,10 +509,11 @@ textarea:focus-visible {
 }
 
 .skill-detail-layout .master-list-item {
-  flex: 1 1 calc(50% - 4px);
+  flex: 1 1 0;
+  min-width: 0;
   width: auto;
-  gap: 3px;
-  padding: 10px 12px;
+  gap: 2px;
+  padding: 9px 12px;
   border-radius: 7px;
 }
 
@@ -2835,6 +2843,74 @@ textarea:focus-visible {
 /* 会话抽屉底部三键一行（导出/导入/删除），压缩纵向占用。 */
 .drawer-actions.three-up {
   grid-template-columns: repeat(3, 1fr);
+}
+
+.eval-action-list {
+  display: grid;
+  gap: 8px;
+}
+
+/* 自解释的动作行：图标 + 标题 + 一句说明，填满抽屉横向宽度。 */
+.eval-action {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--text-secondary);
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+
+.eval-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.eval-action-text {
+  display: grid;
+  gap: 2px;
+}
+
+.eval-action-text strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.eval-action:hover .eval-action-text strong {
+  color: var(--accent);
+}
+
+.eval-action-text small {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* 危险区：与上方动作之间留一条分隔线，视觉上把「清空全部」从常规操作里隔开。 */
+.eval-danger-zone {
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.eval-action.danger:hover {
+  border-color: rgba(255, 77, 79, 0.45);
+  color: var(--error);
+  background: var(--error-dim);
+}
+
+.eval-action.danger:hover .eval-action-text strong {
+  color: var(--error);
 }
 
 @keyframes fadeIn {

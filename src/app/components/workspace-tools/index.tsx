@@ -1,14 +1,4 @@
-import {
-  Database,
-  Download,
-  FolderOpen,
-  Plus,
-  Settings,
-  Trash2,
-  Upload,
-  Wrench,
-  X,
-} from "lucide-react";
+import { Download, FolderOpen, Plus, Settings, Trash2, Upload, Wrench, X } from "lucide-react";
 import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 import { resolvePlannerBaseUrl } from "../../../planner/planner-contract";
 import { appVersion, type ReleaseNote, releaseNotes } from "../../../release/release-info";
@@ -24,7 +14,7 @@ import {
 import type { TransferNotice } from "../../session-transfer";
 import { DetailRow, formatTime } from "../shared";
 
-export type WorkspaceToolPanel = "sessions" | "eval" | "skills" | "settings";
+export type WorkspaceToolPanel = "sessions" | "skills" | "settings";
 
 export interface WorkspaceToolsProps {
   activePanel: WorkspaceToolPanel | undefined;
@@ -92,7 +82,6 @@ function WorkspaceToolRail({
 }) {
   const tools: Array<{ id: WorkspaceToolPanel; label: string; icon: typeof FolderOpen }> = [
     { id: "sessions", label: "会话", icon: FolderOpen },
-    { id: "eval", label: "评估采集", icon: Database },
     { id: "skills", label: "Skill", icon: Wrench },
     { id: "settings", label: "设置", icon: Settings },
   ];
@@ -179,10 +168,13 @@ function WorkspaceToolDrawer({
           onRevealExport={onRevealExport}
         />
       )}
-      {activePanel === "eval" && <EvalToolPanel currentSessionId={currentSession.id} />}
       {activePanel === "skills" && <SkillToolPanel />}
       {activePanel === "settings" && (
-        <SettingsToolPanel version={appVersion} releases={releaseNotes} />
+        <SettingsToolPanel
+          version={appVersion}
+          releases={releaseNotes}
+          currentSessionId={currentSession.id}
+        />
       )}
     </aside>
   );
@@ -299,7 +291,7 @@ function SessionToolPanel({
   );
 }
 
-function EvalToolPanel({ currentSessionId }: { currentSessionId: string }) {
+function EvalSettingsSection({ currentSessionId }: { currentSessionId: string }) {
   const [notice, setNotice] = useState<string | undefined>();
 
   const handle = async (action: () => Promise<string>) => {
@@ -311,14 +303,21 @@ function EvalToolPanel({ currentSessionId }: { currentSessionId: string }) {
   };
 
   return (
-    <div className="workspace-tool-panel">
+    <section className="settings-eval-panel" aria-label="评估采集">
+      <div className="detail-surface-header">
+        <div>
+          <p className="drawer-kicker">Eval</p>
+          <h3>评估采集</h3>
+        </div>
+      </div>
       <p className="tool-panel-summary">
-        每次与大模型的交互都原样保存为 eval 样本（不脱敏、含密钥原文），用于离线评估。 数据存在本机
+        每次与大模型的交互都原样保存为 eval 样本（不脱敏、含密钥原文），用于离线评估。数据存在本机
         eval 目录，删除会话不会删除它——隐私清除请用下方按钮。
       </p>
-      <div className="drawer-actions three-up">
+
+      <div className="eval-action-list">
         <button
-          className="btn"
+          className="eval-action"
           type="button"
           onClick={() =>
             handle(async () => {
@@ -327,11 +326,14 @@ function EvalToolPanel({ currentSessionId }: { currentSessionId: string }) {
             })
           }
         >
-          <FolderOpen size={15} aria-hidden="true" />
-          打开目录
+          <FolderOpen size={18} aria-hidden="true" />
+          <span className="eval-action-text">
+            <strong>打开目录</strong>
+            <small>在文件管理器中查看采集的 JSONL</small>
+          </span>
         </button>
         <button
-          className="btn"
+          className="eval-action"
           type="button"
           onClick={() =>
             handle(async () => {
@@ -343,11 +345,14 @@ function EvalToolPanel({ currentSessionId }: { currentSessionId: string }) {
             })
           }
         >
-          <Download size={15} aria-hidden="true" />
-          导出数据集
+          <Download size={18} aria-hidden="true" />
+          <span className="eval-action-text">
+            <strong>导出数据集</strong>
+            <small>另存为单个 JSONL 数据集文件</small>
+          </span>
         </button>
         <button
-          className="btn"
+          className="eval-action"
           type="button"
           onClick={() =>
             handle(async () => {
@@ -356,13 +361,17 @@ function EvalToolPanel({ currentSessionId }: { currentSessionId: string }) {
             })
           }
         >
-          <Trash2 size={15} aria-hidden="true" />
-          清除当前会话
+          <Trash2 size={18} aria-hidden="true" />
+          <span className="eval-action-text">
+            <strong>清除当前会话</strong>
+            <small>仅删除本会话产生的样本</small>
+          </span>
         </button>
       </div>
-      <div className="drawer-actions">
+
+      <div className="eval-danger-zone">
         <button
-          className="btn danger"
+          className="eval-action danger"
           type="button"
           onClick={() =>
             handle(async () => {
@@ -371,16 +380,20 @@ function EvalToolPanel({ currentSessionId }: { currentSessionId: string }) {
             })
           }
         >
-          <Trash2 size={15} aria-hidden="true" />
-          清空全部 eval
+          <Trash2 size={18} aria-hidden="true" />
+          <span className="eval-action-text">
+            <strong>清空全部 eval</strong>
+            <small>不可恢复，删除所有会话的全部样本</small>
+          </span>
         </button>
       </div>
+
       {notice && (
         <p className="transfer-notice" role="status">
           <span>{notice}</span>
         </p>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -408,7 +421,6 @@ function SkillToolPanel() {
             >
               <span className="tool-card-label mono">{skill.id}</span>
               <strong>{skill.displayName}</strong>
-              <small>{skill.stageLabel}</small>
             </button>
           ))}
         </div>
@@ -434,7 +446,15 @@ function SkillToolPanel() {
   );
 }
 
-function SettingsToolPanel({ version, releases }: { version: string; releases: ReleaseNote[] }) {
+function SettingsToolPanel({
+  version,
+  releases,
+  currentSessionId,
+}: {
+  version: string;
+  releases: ReleaseNote[];
+  currentSessionId: string;
+}) {
   const defaultSelectedVersion =
     releases.find((release) => release.version === version)?.version ?? releases[0]?.version;
   const [selectedVersion, setSelectedVersion] = useState(defaultSelectedVersion);
@@ -460,6 +480,8 @@ function SettingsToolPanel({ version, releases }: { version: string; releases: R
           value={window.__TAURI_INTERNALS__ ? "桌面文件系统" : "浏览器预览"}
         />
       </div>
+
+      <EvalSettingsSection currentSessionId={currentSessionId} />
 
       <section className="settings-release-panel" aria-label="更新日志">
         <div className="detail-surface-header">
@@ -504,7 +526,6 @@ function SettingsToolPanel({ version, releases }: { version: string; releases: R
 function workspacePanelLabel(panel: WorkspaceToolPanel): string {
   const labels: Record<WorkspaceToolPanel, string> = {
     sessions: "会话管理",
-    eval: "评估采集",
     skills: "Skill 能力",
     settings: "工作台设置",
   };
@@ -515,7 +536,6 @@ function workspacePanelLabel(panel: WorkspaceToolPanel): string {
 function workspacePanelKicker(panel: WorkspaceToolPanel): string {
   const labels: Record<WorkspaceToolPanel, string> = {
     sessions: "Sessions",
-    eval: "Eval",
     skills: "Skills",
     settings: "Settings",
   };
