@@ -843,4 +843,185 @@ mod tests {
         let r = classify_and_compute(outcome, "es99", "0", &timing2()).unwrap();
         assert_eq!(r.status, "empty");
     }
+
+    // ---------- 全链路集成：seed 拓扑 → 真 set_gm 写库 → run_timesync_sim_inner(mock runner) ----------
+
+    use crate::topology_mutation_buffer::TopologyMutationBuffer;
+    use crate::topology_sidecar::{SecretToken, build_test_router_with_pool};
+    use axum::body::{Body, to_bytes};
+    use axum::http::Request;
+    use std::sync::Mutex;
+    use tower::ServiceExt;
+
+    /// 注入式 RemoteRunner：返回 canned CSV，并捕获收到的 bundle ini（断言覆盖参数确实进了工程）。
+    struct MockRunner {
+        csv: String,
+        captured_ini: Mutex<Option<String>>,
+    }
+    impl RemoteRunner for MockRunner {
+        fn run_sim_fetch_csv(
+            &self,
+            bundle: &crate::inet_remote::InetBundle,
+            _cfg: &RemoteConfig,
+            _filter: &str,
+        ) -> Result<SimRunOutcome, RemoteError> {
+            *self.captured_ini.lock().unwrap() = Some(bundle.omnetpp_ini.clone());
+            Ok(SimRunOutcome {
+                exit_code: Some(0),
+                output_tail: String::new(),
+                csv: Some(self.csv.clone()),
+                scavetool_failed: false,
+            })
+        }
+    }
+
+    async fn integ_pool() -> (
+        sqlx::Pool<sqlx::Sqlite>,
+        std::sync::Arc<TopologyMutationBuffer>,
+    ) {
+        let opts = SqliteConnectOptions::new()
+            .in_memory(true)
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        sqlx::query(&crate::db::safety_net_schema_sql())
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1','t','now','now','{}')")
+            .execute(&pool).await.unwrap();
+        (pool, std::sync::Arc::new(TopologyMutationBuffer::default()))
+    }
+
+    async fn post_json(
+        router: axum::Router,
+        token: &SecretToken,
+        uri: &str,
+        body: serde_json::Value,
+    ) -> serde_json::Value {
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header("Authorization", format!("Bearer {}", token.expose()))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = to_bytes(resp.into_body(), 65_536).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    /// 全链路（覆盖 wish 2+3）：线性 0—1—2 拓扑 → 真 set_gm 写时钟树落库 → 软仿命令
+    /// 注入 MockRunner(canned timeChanged CSV) → 断言 SimResult 收敛 + 逐节点偏差，
+    /// 且覆盖参数（振荡器/漂移/时长）确实进了生成的 omnetpp.ini。
+    #[tokio::test]
+    async fn soft_sim_full_chain_seed_setgm_mockrun() {
+        let (pool, buf) = integ_pool().await;
+        // 线性 0—1—2，全 switch；端口 0.p0—1.p0、1.p1—2.p0（与 timesync 路由 seed_linear 同形）。
+        for (i, m) in ["0", "1", "2"].iter().enumerate() {
+            sqlx::query("INSERT INTO topology_nodes (session_id, mid, name, x, y, node_type, port_count, queue_count, insert_order) VALUES ('s1', ?, NULL, 0, 0, 'switch', 8, 8, ?)")
+                .bind(m).bind(i as i64).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO topology_links (session_id, link_seq, name, src_node, dst_node, src_port, dst_port, speed, styles_json) VALUES ('s1', 0, NULL, '0', '1', 0, 0, 1000, '{}')")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO topology_links (session_id, link_seq, name, src_node, dst_node, src_port, dst_port, speed, styles_json) VALUES ('s1', 1, NULL, '1', '2', 1, 0, 1000, '{}')")
+            .execute(&pool).await.unwrap();
+
+        // 真 set_gm 路由写时钟树落库（GM=0），确保 verify_time_sync 不漂移。
+        let (router, token) = build_test_router_with_pool(pool.clone(), buf).await;
+        let parsed = post_json(
+            router,
+            &token,
+            "/db/timesync/set_gm",
+            serde_json::json!({ "sessionId": "s1", "gmMid": "0" }),
+        )
+        .await;
+        assert_eq!(parsed["ok"], true, "set_gm 应成功：{parsed}");
+
+        // GM=0→ned 名 sw1；1→sw2；2→sw3。canned CSV：GM 恒 0，sw2/sw3 收敛到 1ns。
+        let csv = "run,module,name,vectime,vecvalue\n\
+            r1,net.sw1.clock,timeChanged:vector,0 1 2 3,0 0 0 0\n\
+            r1,net.sw2.clock,timeChanged:vector,0 1 2 3,0.001 0.0005 1e-9 1e-9\n\
+            r1,net.sw3.clock,timeChanged:vector,0 1 2 3,0.001 0.0005 1e-9 1e-9\n"
+            .to_string();
+        let mock = MockRunner {
+            csv,
+            captured_ini: Mutex::new(None),
+        };
+        // 预定义覆盖参数：Constant 振荡器 / 50ppm / 2.5s。
+        let overrides = SimOverrides {
+            oscillator: OscillatorKind::Constant,
+            drift_ppm: Some(50.0),
+            sim_time_s: Some(2.5),
+        };
+        let cfg = RemoteConfig::dev_default();
+
+        let result = run_timesync_sim_inner(&pool, "s1", &overrides, &mock, &cfg)
+            .await
+            .unwrap();
+
+        // 软仿结果：2 个 slave（sw2/sw3）全收敛。
+        assert_eq!(result.status, "converged", "{result:?}");
+        assert_eq!(result.caliber, "timesync_simulated");
+        assert_eq!(result.per_node.len(), 2);
+        assert!(result.per_node.iter().all(|n| n.converged));
+        assert!(result.overall.contains("2 个收敛"));
+
+        // 预定义参数确实进了生成的 ini（端到端：覆盖表单 → bundle → 远端工程）。
+        let ini = mock.captured_ini.lock().unwrap().clone().unwrap();
+        assert!(ini.contains("ConstantDriftOscillator"), "{ini}");
+        assert!(ini.contains("driftRate = 50ppm"));
+        assert!(ini.contains("sim-time-limit = 2.5s"));
+        assert!(ini.contains("simtime-resolution = fs"));
+        assert!(ini.contains("**.referenceClock = \"sw1.clock\""));
+    }
+
+    /// stale-tree 闸：set_gm 后改拓扑（加链路使时钟树漂移）→ 软仿触发时 verify 重跑 fail → 拒绝。
+    #[tokio::test]
+    async fn soft_sim_rejects_stale_tree() {
+        let (pool, buf) = integ_pool().await;
+        for (i, m) in ["0", "1", "2"].iter().enumerate() {
+            sqlx::query("INSERT INTO topology_nodes (session_id, mid, name, x, y, node_type, port_count, queue_count, insert_order) VALUES ('s1', ?, NULL, 0, 0, 'switch', 8, 8, ?)")
+                .bind(m).bind(i as i64).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO topology_links (session_id, link_seq, name, src_node, dst_node, src_port, dst_port, speed, styles_json) VALUES ('s1', 0, NULL, '0', '1', 0, 0, 1000, '{}')")
+            .execute(&pool).await.unwrap();
+        let (router, token) = build_test_router_with_pool(pool.clone(), buf).await;
+        post_json(
+            router,
+            &token,
+            "/db/timesync/set_gm",
+            serde_json::json!({ "sessionId": "s1", "gmMid": "0" }),
+        )
+        .await;
+        // 确认树后改拓扑：加一条新链路 + 节点，使 timesync_nodes 快照对不上重算。
+        sqlx::query("INSERT INTO topology_links (session_id, link_seq, name, src_node, dst_node, src_port, dst_port, speed, styles_json) VALUES ('s1', 1, NULL, '1', '2', 1, 0, 1000, '{}')")
+            .execute(&pool).await.unwrap();
+
+        let mock = MockRunner {
+            csv: String::new(),
+            captured_ini: Mutex::new(None),
+        };
+        let result = run_timesync_sim_inner(
+            &pool,
+            "s1",
+            &SimOverrides::default(),
+            &mock,
+            &RemoteConfig::dev_default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.status, "stale_tree", "{result:?}");
+        assert!(
+            mock.captured_ini.lock().unwrap().is_none(),
+            "陈旧树不应跑远端"
+        );
+    }
 }
