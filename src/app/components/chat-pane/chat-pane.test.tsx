@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getScenarioConfig } from "../../../domain/scenario-config";
 import { createInitialWorkflowState } from "../../../project/project-state";
 import type { ChatMessage } from "../../../sessions/session-repository";
-import { AgentRunStatusBar, ChatPane, type ChatPaneProps } from "./index";
+import { ChatPane, type ChatPaneProps } from "./index";
 
 function baseProps(overrides: Partial<ChatPaneProps> = {}): ChatPaneProps {
   const workflow = createInitialWorkflowState();
@@ -24,14 +24,6 @@ function baseProps(overrides: Partial<ChatPaneProps> = {}): ChatPaneProps {
     ...overrides,
   };
 }
-
-describe("AgentRunStatusBar", () => {
-  it("shows the phase-specific message and elapsed seconds", () => {
-    render(<AgentRunStatusBar elapsedSeconds={5} phase="streaming" />);
-    expect(screen.getByText(/正在持续推理/)).toBeInTheDocument();
-    expect(screen.getByText(/已运行 5 秒/)).toBeInTheDocument();
-  });
-});
 
 describe("ChatPane", () => {
   it("renders chat messages", () => {
@@ -235,5 +227,83 @@ describe("ChatPane", () => {
     expect(confirmButton).toBeInTheDocument();
     await user.click(confirmButton);
     expect(onConfirm).toHaveBeenCalled();
+  });
+
+  it("swaps the send button for a clickable terminate button while running (U3)", async () => {
+    const user = userEvent.setup();
+    const onTerminate = vi.fn();
+    render(
+      <ChatPane
+        {...baseProps({ isAgentRunning: true, agentRunPhase: "streaming", onTerminate })}
+      />,
+    );
+
+    const terminateButton = screen.getByRole("button", { name: "终止推理" });
+    expect(terminateButton).toBeInTheDocument();
+    expect(terminateButton).not.toBeDisabled();
+    expect(screen.queryByRole("button", { name: "生成规划草案" })).toBeNull();
+
+    await user.click(terminateButton);
+    expect(onTerminate).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the send button (not terminate) when idle (U3)", () => {
+    render(<ChatPane {...baseProps({ isAgentRunning: false, input: "需求" })} />);
+    expect(screen.getByRole("button", { name: "生成规划草案" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "终止推理" })).toBeNull();
+  });
+
+  it("shows the phase message and elapsed seconds in the composer status line while running (U3)", () => {
+    const { rerender } = render(
+      <ChatPane
+        {...baseProps({
+          isAgentRunning: true,
+          agentRunPhase: "streaming",
+          agentRunElapsedSeconds: 5,
+        })}
+      />,
+    );
+    expect(screen.getByText(/正在持续推理/)).toBeInTheDocument();
+    expect(screen.getByText(/已运行 5 秒/)).toBeInTheDocument();
+
+    rerender(<ChatPane {...baseProps({ isAgentRunning: false })} />);
+    expect(screen.queryByText(/已运行/)).toBeNull();
+  });
+
+  it("keeps the textarea editable while running and shows the terminate button (U3, R3)", async () => {
+    const user = userEvent.setup();
+    const onInputChange = vi.fn();
+    render(
+      <ChatPane
+        {...baseProps({ isAgentRunning: true, agentRunPhase: "streaming", onInputChange })}
+      />,
+    );
+    const textarea = screen.getByLabelText("输入你的 TSN 需求");
+    expect(textarea).not.toBeDisabled();
+    await user.type(textarea, "x");
+    expect(onInputChange).toHaveBeenCalled();
+  });
+
+  it("keeps the stage-confirmation card alongside the status line and terminate button (U3)", () => {
+    const workflow = createInitialWorkflowState();
+    const waitingStage = {
+      ...workflow.stages[workflow.currentStep],
+      status: "waiting_confirmation" as const,
+      summary: "已识别 4 个交换机。",
+    };
+    render(
+      <ChatPane
+        {...baseProps({
+          currentStage: waitingStage,
+          isAgentRunning: true,
+          agentRunPhase: "streaming",
+          agentRunElapsedSeconds: 3,
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "确认并继续" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "终止推理" })).toBeInTheDocument();
+    expect(screen.getByText(/已运行 3 秒/)).toBeInTheDocument();
   });
 });

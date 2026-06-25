@@ -107,47 +107,6 @@ textarea:focus-visible {
   background: var(--bg-primary);
 }
 
-.agent-run-status {
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: 9px;
-  min-height: 34px;
-  padding: 7px 20px;
-  border-bottom: 1px solid rgba(250, 84, 28, 0.18);
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.4;
-  background:
-    linear-gradient(
-      90deg,
-      rgba(250, 84, 28, 0.08),
-      rgba(255, 255, 255, 0.72),
-      rgba(250, 84, 28, 0.08)
-    ),
-    #ffffff;
-  background-size: 220% 100%;
-  animation: waitingSurface 1.7s ease-in-out infinite;
-}
-
-.agent-run-status.streaming {
-  border-bottom-color: rgba(22, 119, 255, 0.16);
-}
-
-.agent-run-status.waiting {
-  border-bottom-color: rgba(250, 84, 28, 0.28);
-  color: var(--text-primary);
-}
-
-.agent-run-elapsed {
-  margin-left: auto;
-  padding-left: 12px;
-  color: var(--text-muted);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
 .brand-logo {
   display: inline-flex;
   align-items: center;
@@ -1647,6 +1606,26 @@ textarea:focus-visible {
 
 .composer-box button:hover {
   box-shadow: 0 6px 16px rgba(250, 84, 28, 0.28);
+}
+
+.composer-run-status {
+  margin-bottom: 7px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.composer-box button.is-terminate {
+  background: var(--error);
+}
+
+.composer-box button.is-terminate:hover {
+  box-shadow: 0 6px 16px rgba(255, 77, 79, 0.28);
+}
+
+/* 红底终止键：橙色全局 focus outline 会与红底相撞，改浅色描边。 */
+.composer-box button.is-terminate:focus-visible {
+  outline-color: #ffffff;
 }
 
 .workspace-pane {

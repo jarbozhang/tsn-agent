@@ -22,7 +22,7 @@ import {
 import { isEmptyTopologySnapshot } from "../sessions/topology-snapshot";
 import { ConfirmDialog } from "../ui/confirm-dialog";
 import { redactProviderNamesForDisplay } from "../ui/display-redaction";
-import { AgentRunStatusBar, ChatPane } from "./components/chat-pane";
+import { ChatPane } from "./components/chat-pane";
 import {
   type ConfigTabId,
   type SelectedTopologyItem,
@@ -483,10 +483,6 @@ export function App() {
         <div className="brand-spacer" />
       </header>
 
-      {isAgentRunning && (
-        <AgentRunStatusBar elapsedSeconds={agentRunElapsedSeconds} phase={agentRunPhase} />
-      )}
-
       <main className="project-layout">
         <WorkspaceTools
           activePanel={activeWorkspacePanel}
@@ -512,6 +508,8 @@ export function App() {
           scrollContainerRef={scrollContainerRef}
           input={input}
           isAgentRunning={isAgentRunning}
+          agentRunPhase={agentRunPhase}
+          agentRunElapsedSeconds={agentRunElapsedSeconds}
           onInputChange={setInput}
           onSubmit={handleSubmit}
           onConfirm={() => submitIntent("继续", { action: "confirm-stage" })}

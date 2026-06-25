@@ -871,6 +871,28 @@ describe("App", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("cancel_claude_agent", expect.anything());
   });
 
+  it("drops the top run banner and shows status + terminate inside the composer while running (U3)", async () => {
+    const user = userEvent.setup();
+    const run = arrangeControllableRun(["部分内容"]);
+    const { container } = render(<App />);
+
+    await typeDefaultIntent(user);
+    await user.click(screen.getByRole("button", { name: "生成规划草案" }));
+    await waitFor(() => expect(screen.getByText("部分内容")).toBeInTheDocument());
+
+    // 顶部 banner 已移除：header 区不含「已运行 N 秒」计时文案。
+    const header = container.querySelector(".brand-header");
+    expect(header?.textContent).not.toMatch(/已运行/);
+    expect(container.querySelector(".agent-run-status")).toBeNull();
+
+    // 状态文案下沉到输入框区，发送键切成终止键。
+    expect(container.querySelector(".composer-run-status")?.textContent).toMatch(/已运行 \d+ 秒/);
+    expect(screen.getByRole("button", { name: "终止推理" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "生成规划草案" })).toBeNull();
+
+    run.resolveRun(failureRunResult());
+  });
+
   it("surfaces release notes in the settings panel", async () => {
     const user = userEvent.setup();
     render(<App />);
