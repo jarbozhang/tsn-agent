@@ -22,7 +22,7 @@ pub enum TopologyOp {
 #[serde(rename_all = "camelCase")]
 pub struct NodeAddArgs {
     /// 节点逻辑序号（新主键，每会话唯一）。
-    pub sync_name: String,
+    pub mid: String,
     /// 显示名（如 SW-1/ES-1）；省略则落 NULL、由展示层派生（U9，镜像 LinkAddArgs.name）。
     #[serde(default)]
     pub name: Option<String>,
@@ -37,7 +37,7 @@ pub struct NodeAddArgs {
 #[serde(rename_all = "camelCase")]
 pub struct NodeUpdateArgs {
     /// 目标节点逻辑序号（键，不可改）。
-    pub sync_name: String,
+    pub mid: String,
     /// 显示名（U9 闭环：node_add 设名后用本字段改名，避免「设错名只能删重建」死锁）。
     #[serde(default)]
     pub name: Option<String>,
@@ -52,7 +52,7 @@ pub struct NodeUpdateArgs {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeDeleteArgs {
-    pub sync_name: String,
+    pub mid: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,8 +61,8 @@ pub struct LinkAddArgs {
     pub link_seq: i64,
     #[serde(default)]
     pub name: Option<String>,
-    pub src_sync_name: String,
-    pub dst_sync_name: String,
+    pub src_node: String,
+    pub dst_node: String,
     pub styles_json: String,
 }
 
@@ -101,7 +101,7 @@ fn json_or_string_eq(stored: &str, provided: &str) -> bool {
 /// apply_operations 标记为 retryable，而第一次调用可能已 commit。因此写操作
 /// 必须重试安全，同时不允许静默覆盖已有行：
 ///   - node.add / link.add 三态写入：目标 key 不存在 → 插入；存在且同值 →
-///     no-op（重放安全，rows_affected=0）；存在且异值 → SYNC_NAME_TAKEN /
+///     no-op（重放安全，rows_affected=0）；存在且异值 → MID_TAKEN /
 ///     LINK_SEQ_TAKEN（防模型选错 key 时静默覆盖现有节点）。同值比较只针对
 ///     请求实际提供的字段（absent 的 optional 字段不参与判定）；x/y 用 f64
 ///     直比（initialize 坐标全为精确可表示值，JSON/REAL round-trip 无损）。
@@ -119,18 +119,24 @@ pub async fn apply_op(
         TopologyOp::NodeAdd(a) => {
             // 三态写入：写决策由数据库原子完成（DO NOTHING），冲突时读回比对，
             // 无 SELECT-then-INSERT 的 TOCTOU 窗口。
+            // U3：mac/ip 确定性分配，ordinal 取 mid（逻辑序号）；非数字 mid 退 0。
+            let ordinal = a.mid.parse::<i64>().unwrap_or(0);
+            let mac = crate::topology_intermediate::assign_mac(ordinal);
+            let ip = crate::topology_intermediate::assign_ip(ordinal);
             let res = sqlx::query(
                 r#"INSERT INTO topology_nodes
-                   (session_id, sync_name, name, x, y, node_type, insert_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(session_id, sync_name) DO NOTHING"#,
+                   (session_id, mid, name, x, y, node_type, mac, ip, insert_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(session_id, mid) DO NOTHING"#,
             )
             .bind(session_id)
-            .bind(&a.sync_name)
+            .bind(&a.mid)
             .bind(&a.name)
             .bind(a.x)
             .bind(a.y)
             .bind(&a.node_type)
+            .bind(&mac)
+            .bind(&ip)
             .bind(a.insert_order)
             .execute(&mut *tx)
             .await
@@ -138,10 +144,10 @@ pub async fn apply_op(
             if res.rows_affected() == 0 {
                 let row = sqlx::query(
                     r#"SELECT name, x, y, node_type, insert_order
-                       FROM topology_nodes WHERE session_id = ? AND sync_name = ?"#,
+                       FROM topology_nodes WHERE session_id = ? AND mid = ?"#,
                 )
                 .bind(session_id)
-                .bind(&a.sync_name)
+                .bind(&a.mid)
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(|e| OpError::Database(e.to_string()))?;
@@ -156,9 +162,9 @@ pub async fn apply_op(
                         row.get::<Option<String>, _>("name").as_deref() == Some(n.as_str())
                     });
                 if !same_provided {
-                    return Err(OpError::SyncNameTaken(format!(
-                        "syncName={} 已存在且取值不同；修改已有节点属性请用 node_update，新增节点请换未占用 syncName（先 inspect）",
-                        a.sync_name
+                    return Err(OpError::MidTaken(format!(
+                        "mid={} 已存在且取值不同；修改已有节点属性请用 node_update，新增节点请换未占用 mid（先 inspect）",
+                        a.mid
                     )));
                 }
                 // 同值 → no-op（幂等重放），rows_affected=0 自述。
@@ -176,22 +182,19 @@ pub async fn apply_op(
                        x = COALESCE(?, x),
                        y = COALESCE(?, y),
                        node_type = COALESCE(?, node_type)
-                   WHERE session_id = ? AND sync_name = ?"#,
+                   WHERE session_id = ? AND mid = ?"#,
             )
             .bind(&a.name)
             .bind(a.x)
             .bind(a.y)
             .bind(&a.node_type)
             .bind(session_id)
-            .bind(&a.sync_name)
+            .bind(&a.mid)
             .execute(&mut *tx)
             .await
             .map_err(|e| OpError::Database(e.to_string()))?;
             if res.rows_affected() == 0 {
-                return Err(OpError::NotFound(format!(
-                    "topology_nodes(syncName={})",
-                    a.sync_name
-                )));
+                return Err(OpError::NotFound(format!("topology_nodes(mid={})", a.mid)));
             }
             Ok(OpResultSummary {
                 op_kind: "node.update",
@@ -200,27 +203,26 @@ pub async fn apply_op(
         }
         TopologyOp::NodeDelete(a) => {
             let link_refs: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM topology_links WHERE session_id = ? AND (src_sync_name = ? OR dst_sync_name = ?)",
+                "SELECT COUNT(*) FROM topology_links WHERE session_id = ? AND (src_node = ? OR dst_node = ?)",
             )
             .bind(session_id)
-            .bind(&a.sync_name)
-            .bind(&a.sync_name)
+            .bind(&a.mid)
+            .bind(&a.mid)
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| OpError::Database(e.to_string()))?;
             if link_refs > 0 {
                 return Err(OpError::NodeHasLinks(format!(
-                    "topology_nodes(syncName={}) still referenced by {} link(s); delete the links first",
-                    a.sync_name, link_refs
+                    "topology_nodes(mid={}) still referenced by {} link(s); delete the links first",
+                    a.mid, link_refs
                 )));
             }
-            let res =
-                sqlx::query("DELETE FROM topology_nodes WHERE session_id = ? AND sync_name = ?")
-                    .bind(session_id)
-                    .bind(&a.sync_name)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| OpError::Database(e.to_string()))?;
+            let res = sqlx::query("DELETE FROM topology_nodes WHERE session_id = ? AND mid = ?")
+                .bind(session_id)
+                .bind(&a.mid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| OpError::Database(e.to_string()))?;
             // 幂等：目标不存在视为已删除（重试安全），rows_affected=0 自述 no-op。
             Ok(OpResultSummary {
                 op_kind: "node.delete",
@@ -229,44 +231,40 @@ pub async fn apply_op(
         }
         TopologyOp::LinkAdd(a) => {
             let endpoint_count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM topology_nodes WHERE session_id = ? AND sync_name IN (?, ?)",
+                "SELECT COUNT(*) FROM topology_nodes WHERE session_id = ? AND mid IN (?, ?)",
             )
             .bind(session_id)
-            .bind(&a.src_sync_name)
-            .bind(&a.dst_sync_name)
+            .bind(&a.src_node)
+            .bind(&a.dst_node)
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| OpError::Database(e.to_string()))?;
-            let expected = if a.src_sync_name == a.dst_sync_name {
-                1
-            } else {
-                2
-            };
+            let expected = if a.src_node == a.dst_node { 1 } else { 2 };
             if endpoint_count < expected {
                 return Err(OpError::UnknownNode(format!(
-                    "link.add(link_seq={}) references missing node(s): srcSyncName={} dstSyncName={}",
-                    a.link_seq, a.src_sync_name, a.dst_sync_name
+                    "link.add(link_seq={}) references missing node(s): srcNode={} dstNode={}",
+                    a.link_seq, a.src_node, a.dst_node
                 )));
             }
             // 三态写入：同 node.add，冲突时读回只比对请求提供的字段。
             let res = sqlx::query(
                 r#"INSERT INTO topology_links
-                   (session_id, link_seq, name, src_sync_name, dst_sync_name, styles_json)
+                   (session_id, link_seq, name, src_node, dst_node, styles_json)
                    VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT(session_id, link_seq) DO NOTHING"#,
             )
             .bind(session_id)
             .bind(a.link_seq)
             .bind(&a.name)
-            .bind(&a.src_sync_name)
-            .bind(&a.dst_sync_name)
+            .bind(&a.src_node)
+            .bind(&a.dst_node)
             .bind(&a.styles_json)
             .execute(&mut *tx)
             .await
             .map_err(|e| OpError::Database(e.to_string()))?;
             if res.rows_affected() == 0 {
                 let row = sqlx::query(
-                    r#"SELECT name, src_sync_name, dst_sync_name, styles_json
+                    r#"SELECT name, src_node, dst_node, styles_json
                        FROM topology_links WHERE session_id = ? AND link_seq = ?"#,
                 )
                 .bind(session_id)
@@ -274,8 +272,8 @@ pub async fn apply_op(
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(|e| OpError::Database(e.to_string()))?;
-                let same_provided = row.get::<String, _>("src_sync_name") == a.src_sync_name
-                    && row.get::<String, _>("dst_sync_name") == a.dst_sync_name
+                let same_provided = row.get::<String, _>("src_node") == a.src_node
+                    && row.get::<String, _>("dst_node") == a.dst_node
                     && json_or_string_eq(&row.get::<String, _>("styles_json"), &a.styles_json)
                     && a.name.as_ref().is_none_or(|n| {
                         row.get::<Option<String>, _>("name").as_deref() == Some(n.as_str())
@@ -317,8 +315,8 @@ pub enum OpError {
     UnknownNode(String),
     /// node.delete 的目标仍被链路引用（先 link.delete）。
     NodeHasLinks(String),
-    /// node.add 的目标 syncName 已存在且取值不同（三态写入碰撞；改属性走 node_update）。
-    SyncNameTaken(String),
+    /// node.add 的目标 mid 已存在且取值不同（三态写入碰撞；改属性走 node_update）。
+    MidTaken(String),
     /// link.add 的目标 link_seq 已存在且取值不同（三态写入碰撞）。
     LinkSeqTaken(String),
 }
@@ -334,7 +332,7 @@ impl OpError {
             | OpError::Database(_)
             | OpError::UnknownNode(_)
             | OpError::NodeHasLinks(_)
-            | OpError::SyncNameTaken(_)
+            | OpError::MidTaken(_)
             | OpError::LinkSeqTaken(_) => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
         }
     }
@@ -344,7 +342,7 @@ impl OpError {
             OpError::Database(_) => "DATABASE_ERROR",
             OpError::UnknownNode(_) => "UNKNOWN_NODE",
             OpError::NodeHasLinks(_) => "NODE_HAS_LINKS",
-            OpError::SyncNameTaken(_) => "SYNC_NAME_TAKEN",
+            OpError::MidTaken(_) => "MID_TAKEN",
             OpError::LinkSeqTaken(_) => "LINK_SEQ_TAKEN",
         }
     }
@@ -354,7 +352,7 @@ impl OpError {
             | OpError::Database(m)
             | OpError::UnknownNode(m)
             | OpError::NodeHasLinks(m)
-            | OpError::SyncNameTaken(m)
+            | OpError::MidTaken(m)
             | OpError::LinkSeqTaken(m) => m.clone(),
         }
     }
@@ -393,7 +391,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: None,
-                    sync_name: "0".to_string(),
+                    mid: "0".to_string(),
                     x: 1.0,
                     y: 2.0,
                     node_type: None,
@@ -404,14 +402,51 @@ mod tests {
             .unwrap();
             tx.commit().await.unwrap();
 
-            let row = sqlx::query(
-                "SELECT sync_name, insert_order FROM topology_nodes WHERE session_id='s1'",
+            let row =
+                sqlx::query("SELECT mid, insert_order FROM topology_nodes WHERE session_id='s1'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(row.get::<String, _>("mid"), "0");
+            assert_eq!(row.get::<i64, _>("insert_order"), 0);
+        });
+    }
+
+    #[test]
+    fn node_add_fills_mac_ip_by_mid_ordinal() {
+        // U3：apply NodeAdd 增量节点按 mid（=ordinal）确定性补 mac/ip。
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            let mut tx = pool.begin().await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    mid: "7".to_string(),
+                    x: 1.0,
+                    y: 2.0,
+                    node_type: None,
+                    insert_order: 7,
+                }),
             )
-            .fetch_one(&pool)
             .await
             .unwrap();
-            assert_eq!(row.get::<String, _>("sync_name"), "0");
-            assert_eq!(row.get::<i64, _>("insert_order"), 0);
+            tx.commit().await.unwrap();
+
+            let row =
+                sqlx::query("SELECT mac, ip FROM topology_nodes WHERE session_id='s1' AND mid='7'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                row.get::<Option<String>, _>("mac").as_deref(),
+                Some(crate::topology_intermediate::assign_mac(7).as_str())
+            );
+            assert_eq!(
+                row.get::<Option<String>, _>("ip").as_deref(),
+                Some(crate::topology_intermediate::assign_ip(7).as_str())
+            );
         });
     }
 
@@ -426,7 +461,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: Some("SW-5".into()),
-                    sync_name: "5".into(),
+                    mid: "5".into(),
                     x: 1.0,
                     y: 2.0,
                     node_type: Some("switch".into()),
@@ -436,12 +471,11 @@ mod tests {
             .await
             .unwrap();
             tx.commit().await.unwrap();
-            let row = sqlx::query(
-                "SELECT name FROM topology_nodes WHERE session_id='s1' AND sync_name='5'",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+            let row =
+                sqlx::query("SELECT name FROM topology_nodes WHERE session_id='s1' AND mid='5'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(
                 row.get::<Option<String>, _>("name"),
                 Some("SW-5".to_string())
@@ -451,7 +485,7 @@ mod tests {
 
     #[test]
     fn node_add_rename_only_is_not_silent_noop() {
-        // U9：三态读回含 name——同 syncName 但只改 name → 取值不同 → SyncNameTaken，
+        // U9：三态读回含 name——同 mid 但只改 name → 取值不同 → MidTaken，
         // 不被当幂等 no-op 漏掉（没有 name 比对就会静默放过）。
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
@@ -461,7 +495,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: Some("SW-1".into()),
-                    sync_name: "1".into(),
+                    mid: "1".into(),
                     x: 0.0,
                     y: 0.0,
                     node_type: Some("switch".into()),
@@ -475,7 +509,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: Some("SW-99".into()),
-                    sync_name: "1".into(),
+                    mid: "1".into(),
                     x: 0.0,
                     y: 0.0,
                     node_type: Some("switch".into()),
@@ -485,7 +519,7 @@ mod tests {
             .await
             .unwrap_err();
             assert!(
-                matches!(err, OpError::SyncNameTaken(_)),
+                matches!(err, OpError::MidTaken(_)),
                 "只改 name 应被当取值不同: {err:?}"
             );
         });
@@ -502,7 +536,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: None,
-                    sync_name: "5".into(),
+                    mid: "5".into(),
                     x: 0.0,
                     y: 0.0,
                     node_type: Some("switch".into()),
@@ -516,7 +550,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeUpdate(NodeUpdateArgs {
                     name: Some("SW-5".into()),
-                    sync_name: "5".into(),
+                    mid: "5".into(),
                     x: None,
                     y: None,
                     node_type: None,
@@ -525,12 +559,11 @@ mod tests {
             .await
             .unwrap();
             tx.commit().await.unwrap();
-            let row = sqlx::query(
-                "SELECT name FROM topology_nodes WHERE session_id='s1' AND sync_name='5'",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+            let row =
+                sqlx::query("SELECT name FROM topology_nodes WHERE session_id='s1' AND mid='5'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(
                 row.get::<Option<String>, _>("name"),
                 Some("SW-5".to_string())
@@ -547,9 +580,7 @@ mod tests {
             let s = apply_op(
                 &mut tx,
                 "s1",
-                &TopologyOp::NodeDelete(NodeDeleteArgs {
-                    sync_name: "999".into(),
-                }),
+                &TopologyOp::NodeDelete(NodeDeleteArgs { mid: "999".into() }),
             )
             .await
             .unwrap();
@@ -571,7 +602,7 @@ mod tests {
                     "s1",
                     &TopologyOp::NodeAdd(NodeAddArgs {
                         name: None,
-                        sync_name: order.to_string(),
+                        mid: order.to_string(),
                         x: 0.0,
                         y: 0.0,
                         node_type: None,
@@ -587,8 +618,8 @@ mod tests {
                 &TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 0,
                     name: None,
-                    src_sync_name: "0".into(),
-                    dst_sync_name: "1".into(),
+                    src_node: "0".into(),
+                    dst_node: "1".into(),
                     styles_json: "{}".into(),
                 }),
             )
@@ -600,7 +631,7 @@ mod tests {
                 TopologyOp::LinkDelete(LinkDeleteArgs { link_seq: 0 }),
                 TopologyOp::NodeAdd(NodeAddArgs {
                     name: None,
-                    sync_name: "2".into(),
+                    mid: "2".into(),
                     x: 0.5,
                     y: 0.5,
                     node_type: Some("switch".into()),
@@ -609,15 +640,15 @@ mod tests {
                 TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 1,
                     name: None,
-                    src_sync_name: "0".into(),
-                    dst_sync_name: "2".into(),
+                    src_node: "0".into(),
+                    dst_node: "2".into(),
                     styles_json: "{}".into(),
                 }),
                 TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 2,
                     name: None,
-                    src_sync_name: "2".into(),
-                    dst_sync_name: "1".into(),
+                    src_node: "2".into(),
+                    dst_node: "1".into(),
                     styles_json: "{}".into(),
                 }),
             ];
@@ -657,7 +688,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: None,
-                    sync_name: "0".into(),
+                    mid: "0".into(),
                     x: 1.0,
                     y: 2.0,
                     node_type: Some("switch".into()),
@@ -673,7 +704,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: None,
-                    sync_name: "0".into(),
+                    mid: "0".into(),
                     x: 1.0,
                     y: 2.0,
                     node_type: None,
@@ -687,7 +718,7 @@ mod tests {
             tx.commit().await.unwrap();
 
             let row = sqlx::query(
-                "SELECT node_type FROM topology_nodes WHERE session_id='s1' AND sync_name='0'",
+                "SELECT node_type FROM topology_nodes WHERE session_id='s1' AND mid='0'",
             )
             .fetch_one(&pool)
             .await
@@ -700,7 +731,7 @@ mod tests {
     }
 
     #[test]
-    fn node_add_collision_with_different_values_reports_sync_name_taken() {
+    fn node_add_collision_with_different_values_reports_mid_taken() {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
             let mut seed = pool.begin().await.unwrap();
@@ -709,7 +740,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: None,
-                    sync_name: "0".into(),
+                    mid: "0".into(),
                     x: 1.0,
                     y: 2.0,
                     node_type: None,
@@ -720,14 +751,14 @@ mod tests {
             .unwrap();
             seed.commit().await.unwrap();
 
-            // 同 syncName、不同坐标 → 碰撞报错（三态拒绝静默覆盖）。
+            // 同 mid、不同坐标 → 碰撞报错（三态拒绝静默覆盖）。
             let mut tx = pool.begin().await.unwrap();
             let err = apply_op(
                 &mut tx,
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: None,
-                    sync_name: "0".into(),
+                    mid: "0".into(),
                     x: 9.0,
                     y: 9.0,
                     node_type: None,
@@ -736,8 +767,8 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert!(matches!(err, OpError::SyncNameTaken(_)));
-            assert_eq!(err.code(), "SYNC_NAME_TAKEN");
+            assert!(matches!(err, OpError::MidTaken(_)));
+            assert_eq!(err.code(), "MID_TAKEN");
             // 错误信息给出路：改属性应走 node_update。
             assert!(
                 err.message().contains("node_update"),
@@ -747,11 +778,10 @@ mod tests {
             tx.rollback().await.unwrap();
 
             // 原节点完好。
-            let row =
-                sqlx::query("SELECT x FROM topology_nodes WHERE session_id='s1' AND sync_name='0'")
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
+            let row = sqlx::query("SELECT x FROM topology_nodes WHERE session_id='s1' AND mid='0'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
             assert_eq!(row.get::<f64, _>("x"), 1.0);
         });
     }
@@ -767,7 +797,7 @@ mod tests {
                     "s1",
                     &TopologyOp::NodeAdd(NodeAddArgs {
                         name: None,
-                        sync_name: order.to_string(),
+                        mid: order.to_string(),
                         x: 0.0,
                         y: 0.0,
                         node_type: None,
@@ -783,8 +813,8 @@ mod tests {
                 &TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 0,
                     name: None,
-                    src_sync_name: "0".into(),
-                    dst_sync_name: "1".into(),
+                    src_node: "0".into(),
+                    dst_node: "1".into(),
                     styles_json: "{}".into(),
                 }),
             )
@@ -798,8 +828,8 @@ mod tests {
                 &TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 0,
                     name: None,
-                    src_sync_name: "0".into(),
-                    dst_sync_name: "2".into(),
+                    src_node: "0".into(),
+                    dst_node: "2".into(),
                     styles_json: "{}".into(),
                 }),
             )
@@ -815,8 +845,8 @@ mod tests {
                 &TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 0,
                     name: None,
-                    src_sync_name: "0".into(),
-                    dst_sync_name: "1".into(),
+                    src_node: "0".into(),
+                    dst_node: "1".into(),
                     styles_json: "{}".into(),
                 }),
             )
@@ -837,7 +867,7 @@ mod tests {
                     "s1",
                     &TopologyOp::NodeAdd(NodeAddArgs {
                         name: None,
-                        sync_name: order.to_string(),
+                        mid: order.to_string(),
                         x: 0.0,
                         y: 0.0,
                         node_type: None,
@@ -853,8 +883,8 @@ mod tests {
                 &TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 0,
                     name: None,
-                    src_sync_name: "0".into(),
-                    dst_sync_name: "1".into(),
+                    src_node: "0".into(),
+                    dst_node: "1".into(),
                     styles_json: r#"{"leftLabel":"P1","speed":1000}"#.into(),
                 }),
             )
@@ -869,8 +899,8 @@ mod tests {
                 &TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 0,
                     name: None,
-                    src_sync_name: "0".into(),
-                    dst_sync_name: "1".into(),
+                    src_node: "0".into(),
+                    dst_node: "1".into(),
                     styles_json: r#"{ "speed": 1000, "leftLabel": "P1" }"#.into(),
                 }),
             )
@@ -885,8 +915,8 @@ mod tests {
                 &TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 0,
                     name: None,
-                    src_sync_name: "0".into(),
-                    dst_sync_name: "1".into(),
+                    src_node: "0".into(),
+                    dst_node: "1".into(),
                     styles_json: r#"{"leftLabel":"P1","speed":100}"#.into(),
                 }),
             )
@@ -906,7 +936,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: None,
-                    sync_name: "0".into(),
+                    mid: "0".into(),
                     x: 0.0,
                     y: 0.0,
                     node_type: None,
@@ -922,8 +952,8 @@ mod tests {
                 &TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 0,
                     name: None,
-                    src_sync_name: "0".into(),
-                    dst_sync_name: "0".into(),
+                    src_node: "0".into(),
+                    dst_node: "0".into(),
                     styles_json: "{}".into(),
                 }),
             )
@@ -937,8 +967,8 @@ mod tests {
                 &TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 1,
                     name: None,
-                    src_sync_name: "9".into(),
-                    dst_sync_name: "9".into(),
+                    src_node: "9".into(),
+                    dst_node: "9".into(),
                     styles_json: "{}".into(),
                 }),
             )
@@ -959,8 +989,8 @@ mod tests {
                 &TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 0,
                     name: None,
-                    src_sync_name: "7".into(),
-                    dst_sync_name: "8".into(),
+                    src_node: "7".into(),
+                    dst_node: "8".into(),
                     styles_json: "{}".into(),
                 }),
             )
@@ -982,7 +1012,7 @@ mod tests {
                     "s1",
                     &TopologyOp::NodeAdd(NodeAddArgs {
                         name: None,
-                        sync_name: order.to_string(),
+                        mid: order.to_string(),
                         x: 0.0,
                         y: 0.0,
                         node_type: None,
@@ -998,8 +1028,8 @@ mod tests {
                 &TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 0,
                     name: None,
-                    src_sync_name: "0".into(),
-                    dst_sync_name: "1".into(),
+                    src_node: "0".into(),
+                    dst_node: "1".into(),
                     styles_json: "{}".into(),
                 }),
             )
@@ -1009,9 +1039,7 @@ mod tests {
             let err = apply_op(
                 &mut tx,
                 "s1",
-                &TopologyOp::NodeDelete(NodeDeleteArgs {
-                    sync_name: "0".into(),
-                }),
+                &TopologyOp::NodeDelete(NodeDeleteArgs { mid: "0".into() }),
             )
             .await
             .unwrap_err();
@@ -1029,9 +1057,7 @@ mod tests {
             let s = apply_op(
                 &mut tx,
                 "s1",
-                &TopologyOp::NodeDelete(NodeDeleteArgs {
-                    sync_name: "0".into(),
-                }),
+                &TopologyOp::NodeDelete(NodeDeleteArgs { mid: "0".into() }),
             )
             .await
             .unwrap();
@@ -1051,7 +1077,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: None,
-                    sync_name: "0".into(),
+                    mid: "0".into(),
                     x: 0.0,
                     y: 0.0,
                     node_type: None,
@@ -1065,7 +1091,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: None,
-                    sync_name: "1".into(),
+                    mid: "1".into(),
                     x: 1.0,
                     y: 1.0,
                     node_type: None,
@@ -1081,8 +1107,8 @@ mod tests {
                 &TopologyOp::LinkAdd(LinkAddArgs {
                     link_seq: 0,
                     name: None,
-                    src_sync_name: "0".into(),
-                    dst_sync_name: "1".into(),
+                    src_node: "0".into(),
+                    dst_node: "1".into(),
                     styles_json: "{}".into(),
                 }),
             )
@@ -1113,7 +1139,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeUpdate(NodeUpdateArgs {
                     name: None,
-                    sync_name: "999".into(),
+                    mid: "999".into(),
                     x: None,
                     y: None,
                     node_type: None,
@@ -1154,7 +1180,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeAdd(NodeAddArgs {
                     name: None,
-                    sync_name: "5".into(),
+                    mid: "5".into(),
                     x: 1.0,
                     y: 2.0,
                     node_type: None,
@@ -1168,7 +1194,7 @@ mod tests {
                 "s1",
                 &TopologyOp::NodeUpdate(NodeUpdateArgs {
                     name: None,
-                    sync_name: "5".into(),
+                    mid: "5".into(),
                     x: None,
                     y: Some(9.0),
                     node_type: Some("switch".into()),
@@ -1178,8 +1204,12 @@ mod tests {
             .unwrap();
             tx.commit().await.unwrap();
 
-            let row = sqlx::query("SELECT x, y, node_type FROM topology_nodes WHERE session_id='s1' AND sync_name='5'")
-                .fetch_one(&pool).await.unwrap();
+            let row = sqlx::query(
+                "SELECT x, y, node_type FROM topology_nodes WHERE session_id='s1' AND mid='5'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             assert_eq!(row.get::<f64, _>("x"), 1.0); // 未提供 x → 保留
             assert_eq!(row.get::<f64, _>("y"), 9.0); // 提供 y → 更新
             assert_eq!(
@@ -1203,6 +1233,6 @@ mod tests {
         assert_eq!(OpError::Database("y".into()).code(), "DATABASE_ERROR");
         assert_eq!(OpError::UnknownNode("z".into()).code(), "UNKNOWN_NODE");
         assert_eq!(OpError::NodeHasLinks("w".into()).code(), "NODE_HAS_LINKS");
-        assert_eq!(OpError::SyncNameTaken("s".into()).code(), "SYNC_NAME_TAKEN");
+        assert_eq!(OpError::MidTaken("s".into()).code(), "MID_TAKEN");
     }
 }

@@ -46,6 +46,8 @@ function mockTauriCommands(
     topology?: Record<string, unknown>;
     verify?: Record<string, unknown>;
     verifyError?: unknown;
+    verifyTimeSync?: Record<string, unknown>;
+    verifyTimeSyncError?: unknown;
   } = {},
 ) {
   invokeMock.mockImplementation(async (command: string) => {
@@ -59,6 +61,14 @@ function mockTauriCommands(
       }
       // 默认通过：确认过关闸放行，既有 confirm 测试不被新闸拦。
       return options.verify ?? { ok: true, caliber: "structural_only", errors: [] };
+    }
+
+    if (command === "verify_time_sync") {
+      if (options.verifyTimeSyncError !== undefined) {
+        throw options.verifyTimeSyncError;
+      }
+      // 默认通过：time-sync 确认过关闸放行。
+      return options.verifyTimeSync ?? { ok: true, caliber: "timesync_structural", errors: [] };
     }
 
     if (command === "verify_inet") {
@@ -478,7 +488,7 @@ describe("runTsnAgent", () => {
         caliber: "structural_only",
         errors: [
           { code: "ISOLATED_NODE", messageZh: "ES-7 没连任何线，是个孤立节点。", nodeRef: "7" },
-          { code: "DUP_SYNC_NAME", messageZh: "syncName 3 被两个节点占用。", nodeRef: "3" },
+          { code: "DUP_MID", messageZh: "mid 3 被两个节点占用。", nodeRef: "3" },
         ],
       },
     });
@@ -492,7 +502,7 @@ describe("runTsnAgent", () => {
 
     // 逐条文案直接来自 Rust messageZh（节点专属串 TS 无从硬编码 → 证明透传，不另写）。
     expect(result.assistantText).toContain("ES-7 没连任何线，是个孤立节点。");
-    expect(result.assistantText).toContain("syncName 3 被两个节点占用。");
+    expect(result.assistantText).toContain("mid 3 被两个节点占用。");
     // 展示框架（可修复语气 + CTA）保留，但走的是结构分支、不是 INET 分支文案。
     expect(result.assistantText).toContain("先修好再继续");
     expect(result.assistantText).toContain("确认并继续");
@@ -587,6 +597,47 @@ describe("runTsnAgent", () => {
     expect(result.mode).toBe("local");
     expect(result.assistantText).toContain("结构校验暂时无法运行");
     expect(result.verification).toBeUndefined();
+  });
+
+  it("time-sync confirm calls verify_time_sync and advances when ok", async () => {
+    enableTauriRuntime();
+    mockTauriCommands(); // verify_time_sync 默认通过
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "继续",
+      action: "confirm-stage",
+      session: sessionWithWorkflow(timeSyncWaitingWorkflow()),
+    });
+
+    // 走 time-sync 过关闸（调 verify_time_sync），通过则推进。
+    expect(invokeMock.mock.calls.some(([command]) => command === "verify_time_sync")).toBe(true);
+    expect(result.workflow.stages["time-sync"].status).toBe("confirmed");
+  });
+
+  it("fail-closed: verify_time_sync verdict.ok=false does not advance", async () => {
+    enableTauriRuntime();
+    mockTauriCommands({
+      verifyTimeSync: {
+        ok: false,
+        caliber: "timesync_structural",
+        errors: [{ code: "GM_NOT_SET", messageZh: "还没有指定时钟主节点（GM）。" }],
+      },
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "继续",
+      action: "confirm-stage",
+      session: sessionWithWorkflow(timeSyncWaitingWorkflow()),
+    });
+
+    // 不放行：仍停在 time-sync 待确认。
+    expect(result.workflow.currentStep).toBe("time-sync");
+    expect(result.workflow.stages["time-sync"].status).toBe("waiting_confirmation");
+    expect(result.mode).toBe("local");
+    expect(result.verification).toMatchObject({ ok: false });
+    expect(result.assistantText).toContain("时钟同步还差一点");
   });
 
   it("applies a validated mutationId stage result from the worker", async () => {
@@ -691,7 +742,7 @@ describe("runTsnAgent", () => {
     );
   });
 
-  it("rejects placeholder stage results for other stages", async () => {
+  it("U9: ignores time-sync stage results instead of rejecting them (writes go via sidecar tools)", async () => {
     enableTauriRuntime();
     mockTauriCommands({
       claude: {
@@ -717,18 +768,19 @@ describe("runTsnAgent", () => {
       session: sessionWithWorkflow(createInitialWorkflowState()),
     });
 
+    // U9：time-sync 写库走 sidecar 工具、不经 stageResult——结果被忽略，不再「暂未启用」报错。
     expect(result.workflow.stages.topology.status).toBe("current");
-    expect(result.events).toEqual(
+    expect(result.events).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "error",
-          content: expect.stringContaining("time-sync 阶段结果暂未启用"),
+          content: expect.stringContaining("暂未启用"),
         }),
       ]),
     );
   });
 
-  it("confirms a waiting topology stage via the button and auto-generates time-sync defaults (U4 regression)", async () => {
+  it("U9: confirming topology advances into time-sync and guides GM selection (status current)", async () => {
     enableTauriRuntime();
     mockTauriCommands(); // 过关闸默认通过（verify ok=true）
     const { runTsnAgent } = await import("./agent-adapter");
@@ -744,18 +796,16 @@ describe("runTsnAgent", () => {
     expect(invokeMock.mock.calls.some(([command]) => command === "verify_topology")).toBe(true);
     expect(result.workflow.stages.topology.status).toBe("confirmed");
     expect(result.workflow.currentStep).toBe("time-sync");
-    expect(result.workflow.stages["time-sync"].status).toBe("waiting_confirmation");
-    // 阶段处理没丢：进入 time-sync 自动生成默认摘要。
-    expect(result.workflow.stages["time-sync"].summary).toContain("统一时钟");
-    expect(result.events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: "confirmation-required", stage: "time-sync" }),
-      ]),
-    );
+    // U9：进入 time-sync 不再自动生成固定摘要 + waiting_confirmation；改为引导选 GM（status current）。
+    expect(result.workflow.stages["time-sync"].status).toBe("current");
+    expect(result.assistantText).toContain("GM");
+    // 仍可点「确认并继续」（current 非 topology 阶段动作含 confirm-stage），由 U6 校验闸把关。
+    expect(result.workflow.availableActions).toContain("confirm-stage");
   });
 
   it("shows the offline notice when the confirm button advances into a gray stage (U4 regression)", async () => {
     enableTauriRuntime();
+    mockTauriCommands(); // time-sync 确认现在先过 verify_time_sync 过关闸（默认通过）
     const workflow = createInitialWorkflowState();
     workflow.currentStep = "time-sync";
     workflow.stages.topology = { step: "topology", status: "confirmed" };
@@ -773,7 +823,8 @@ describe("runTsnAgent", () => {
     });
 
     expect(result.mode).toBe("local");
-    expect(invokeMock).not.toHaveBeenCalled();
+    // time-sync 前进确认现在先过校验闸（调 verify_time_sync），不再是完全 invoke-free。
+    expect(invokeMock.mock.calls.some(([command]) => command === "verify_time_sync")).toBe(true);
     expect(result.workflow.currentStep).toBe("flow-template");
     expect(result.assistantText).toContain("暂时下线");
   });
@@ -954,7 +1005,7 @@ describe("runTsnAgent", () => {
     expect(confirmed.assistantText).toContain("没有待确认的操作");
   });
 
-  it("U3-fix(E): confirming a rollback to time-sync re-arms it with auto-generated defaults", async () => {
+  it("U9: confirming a rollback to time-sync re-arms it in the GM-selection (current) state", async () => {
     enableTauriRuntime();
     const base = createInitialWorkflowState();
     base.currentStep = "flow-template";
@@ -972,8 +1023,10 @@ describe("runTsnAgent", () => {
 
     expect(result.mode).toBe("local");
     expect(result.workflow.currentStep).toBe("time-sync");
-    expect(result.workflow.stages["time-sync"].status).toBe("waiting_confirmation");
-    expect(result.workflow.stages["time-sync"].summary).toContain("统一时钟");
+    // U9：回退到 time-sync 重新进入引导选 GM（current），不再固定摘要 + waiting_confirmation。
+    expect(result.workflow.stages["time-sync"].status).toBe("current");
+    expect(result.assistantText).toContain("GM");
+    expect(result.workflow.availableActions).toContain("confirm-stage");
     expect(result.workflow.pendingStageChange).toBeUndefined();
     expect(result.workflow.stages["flow-template"].status).toBe("locked");
   });
@@ -1005,10 +1058,10 @@ describe("runTsnAgent", () => {
       topology: {
         sessionId: "session-1",
         nodes: [
-          { syncName: "0", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
-          { syncName: "1", name: null, x: 1, y: 0, nodeType: null, insertOrder: 1 },
+          { mid: "0", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
+          { mid: "1", name: null, x: 1, y: 0, nodeType: null, insertOrder: 1 },
         ],
-        links: [{ linkSeq: 0, name: null, srcSyncName: "0", dstSyncName: "1", stylesJson: "{}" }],
+        links: [{ linkSeq: 0, name: null, srcNode: "0", dstNode: "1", stylesJson: "{}" }],
       },
     });
     const { runTsnAgent } = await import("./agent-adapter");
@@ -1136,7 +1189,8 @@ describe("runTsnAgent", () => {
     expect(result.mode).toBe("local");
     expect(result.workflow.stages.topology.status).toBe("confirmed");
     expect(result.workflow.currentStep).toBe("time-sync");
-    expect(result.workflow.stages["time-sync"].status).toBe("waiting_confirmation");
+    // U9：进入 time-sync 为引导选 GM 的 current 态（非 waiting_confirmation）。
+    expect(result.workflow.stages["time-sync"].status).toBe("current");
   });
 
   it("U3: rejects an illegal (offline) stage-switch target", async () => {

@@ -1,10 +1,17 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { measureJsonBytes, measureJsonDepth, TOPOLOGY_LIMITS } from "../../src/topology/limits";
-import { TOPOLOGY_TOOL_NAMES, type TopologyToolName } from "../../src/topology/topology-service";
+import {
+  TIMESYNC_TOOL_NAMES,
+  type TimesyncToolName,
+  TOPOLOGY_TOOL_NAMES,
+  type TopologyToolName,
+} from "../../src/topology/topology-service";
 import { fetchSidecar, type SidecarFailure, type SidecarResult } from "./sidecar-client";
 
 export const TOPOLOGY_MCP_ALLOWED_TOOLS = TOPOLOGY_TOOL_NAMES.map(expectedAllowedToolName);
+
+export const TIMESYNC_MCP_ALLOWED_TOOLS = TIMESYNC_TOOL_NAMES.map(expectedAllowedToolName);
 
 export interface TopologyMcpToolDefinition {
   name: TopologyToolName;
@@ -58,7 +65,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       allowedToolName: "mcp__tsn_topology__topology_inspect",
       title: "Inspect topology",
       description:
-        "Return the session's full persisted topology rows: nodes (syncName/name/nodeType/x/y/insertOrder) and links (linkSeq/name/srcSyncName/dstSyncName/stylesJson). No parameters. Call this first to locate existing syncName/linkSeq values before building apply_operations batches. 节点身份是 syncName（逻辑序号），连线两端 srcSyncName/dstSyncName 引用节点 syncName。name 列是节点显示名（与对话命名一致）；定位用户说的 SW-N/ES-N 时优先按 name 精确匹配，勿按列表顺序/第 N 台折算（完整显示名规则见 skill 指引）。links 的 stylesJson 是 JSON 串：plane（A/B）控制画布链路配色（A=蓝、B=红，错值会误导用户）、role（access/backbone）为链路角色、leftLabel/rightLabel 作为端口号渲染在连线两端。",
+        "Return the session's full persisted topology rows: nodes (mid/name/nodeType/x/y/insertOrder) and links (linkSeq/name/srcNode/dstNode/stylesJson). No parameters. Call this first to locate existing mid/linkSeq values before building apply_operations batches. 节点身份是 mid（逻辑序号），连线两端 srcNode/dstNode 引用节点 mid。name 列是节点显示名（与对话命名一致）；定位用户说的 SW-N/ES-N 时优先按 name 精确匹配，勿按列表顺序/第 N 台折算（完整显示名规则见 skill 指引）。links 的 stylesJson 是 JSON 串：plane（A/B）控制画布链路配色（A=蓝、B=红，错值会误导用户）、role（access/backbone）为链路角色、leftLabel/rightLabel 作为端口号渲染在连线两端。",
       inputSchema: {},
       handler: async (args) => callSidecarTool("/db/topology/inspect", args, {}),
     },
@@ -97,7 +104,8 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.build_artifacts",
       allowedToolName: "mcp__tsn_topology__topology_build_artifacts",
       title: "Build topology artifacts",
-      description: "Build the four legacy JSON topology artifacts from a topology snapshot.",
+      description:
+        "Build the clean topology.json export (mid/mac/ip/port) from a topology snapshot.",
       inputSchema: {
         topology: z.unknown().optional(),
       },
@@ -110,7 +118,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       name: "topology.validate_artifacts",
       allowedToolName: "mcp__tsn_topology__topology_validate_artifacts",
       title: "Validate topology artifacts",
-      description: "Validate legacy JSON artifact references.",
+      description: "Validate topology.json artifact structure and link references.",
       inputSchema: {
         artifacts: z.unknown().optional(),
       },
@@ -124,7 +132,7 @@ export function createTopologyToolRegistry(): TopologyMcpToolDefinition[] {
       allowedToolName: "mcp__tsn_topology__topology_apply_operations",
       title: "Apply topology operations",
       description:
-        "Apply atomic topology operations (node_add / node_update / node_delete / link_add / link_delete) to the session's persisted topology. Returns summary.mutationId on commit. Call topology.inspect first to locate existing syncName/linkSeq values; retries must resend the exact same batch (same syncName/linkSeq), never re-allocate keys. On a committed (non-dryRun) apply the response carries a `validation` field with the post-apply structural check (errors in Chinese) — relay any problems to the user. validation.ran=false means the structural-check call itself failed (infra issue, NOT a structure problem); only when ran=true judge by valid/errors.",
+        "Apply atomic topology operations (node_add / node_update / node_delete / link_add / link_delete) to the session's persisted topology. Returns summary.mutationId on commit. Call topology.inspect first to locate existing mid/linkSeq values; retries must resend the exact same batch (same mid/linkSeq), never re-allocate keys. On a committed (non-dryRun) apply the response carries a `validation` field with the post-apply structural check (errors in Chinese) — relay any problems to the user. validation.ran=false means the structural-check call itself failed (infra issue, NOT a structure problem); only when ran=true judge by valid/errors.",
       inputSchema: applyOperationsInputSchema(),
       handler: async (args) => applyOperationsWithValidation(args),
     },
@@ -347,17 +355,17 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
   const nodeAddSchema = z
     .object({
       op: z.literal("node_add"),
-      syncName: z
+      mid: z
         .string()
         .describe(
-          '新节点 key（逻辑序号，如 "5"）；必须避开已占用 syncName（先 inspect）。修改已有节点属性用 node_update，node_add 仅用于新增节点',
+          '新节点 key（逻辑序号，如 "5"）；必须避开已占用 mid（先 inspect）。修改已有节点属性用 node_update，node_add 仅用于新增节点',
         ),
       name: z
         .string()
         .min(1)
         .optional()
         .describe(
-          "新节点显示名（交换机 SW-N、端系统 ES-N、服务器 SRV-N；省略则展示层按前缀+syncName 派生）",
+          "新节点显示名（交换机 SW-N、端系统 ES-N、服务器 SRV-N；省略则展示层按前缀+mid 派生）",
         ),
       x: z.number(),
       y: z.number(),
@@ -370,9 +378,9 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
   const nodeUpdateSchema = z
     .object({
       op: z.literal("node_update"),
-      syncName: z
+      mid: z
         .string()
-        .describe("目标节点的既有 syncName（先 inspect）；只更新提供的字段，syncName 本身不可改"),
+        .describe("目标节点的既有 mid（先 inspect）；只更新提供的字段，mid 本身不可改"),
       name: z
         .string()
         .min(1)
@@ -386,9 +394,7 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
   const nodeDeleteSchema = z
     .object({
       op: z.literal("node_delete"),
-      syncName: z
-        .string()
-        .describe("目标节点的既有 syncName；仍被链路引用时会被拒绝（先 link_delete）"),
+      mid: z.string().describe("目标节点的既有 mid；仍被链路引用时会被拒绝（先 link_delete）"),
     })
     .strict();
   const linkAddSchema = z
@@ -396,8 +402,8 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
       op: z.literal("link_add"),
       linkSeq: z.number().int().describe("新链路 key；必须避开已占用 linkSeq（先 inspect）"),
       name: z.string().optional(),
-      srcSyncName: z.string(),
-      dstSyncName: z.string(),
+      srcNode: z.string(),
+      dstNode: z.string(),
       stylesJson: z
         .string()
         .describe(
@@ -426,7 +432,7 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
       .min(1)
       .max(32)
       .describe(
-        "原子操作 batch（1-32）。增量修改先 inspect 再构造；重试必须复用同一 batch 的 syncName/linkSeq",
+        "原子操作 batch（1-32）。增量修改先 inspect 再构造；重试必须复用同一 batch 的 mid/linkSeq",
       ),
     dryRun: z.boolean().optional(),
   };
@@ -541,7 +547,7 @@ function pruneUndefined(body: Record<string, unknown>): Record<string, unknown> 
   return out;
 }
 
-export function expectedAllowedToolName(name: TopologyToolName): string {
+export function expectedAllowedToolName(name: TopologyToolName | TimesyncToolName): string {
   return `mcp__tsn_topology__${name.replaceAll(".", "_")}`;
 }
 
@@ -558,4 +564,173 @@ export function assertTopologyToolMapping(): void {
       throw new Error(`Topology MCP allowed tool mapping drifted for ${tool.name}.`);
     }
   }
+}
+
+// ===================== timesync 工具（时钟同步阶段） =====================
+// 与 topology 工具同一 sidecar、同一 stdio server（tsn_topology），按 stage 分别门控
+// （worker buildAllowedToolsForStage：topology 工具仅 topology 阶段、timesync 工具仅
+// time-sync 阶段）。SQL 全在 Rust；handler 走 fetchSidecar('/db/timesync/...')。
+
+export interface TimesyncMcpToolDefinition {
+  name: TimesyncToolName;
+  allowedToolName: (typeof TIMESYNC_MCP_ALLOWED_TOOLS)[number];
+  title: string;
+  description: string;
+  inputSchema: z.ZodRawShape;
+  handler: (args: unknown) => Promise<CallToolResult>;
+}
+
+export function createTimesyncToolRegistry(): TimesyncMcpToolDefinition[] {
+  return [
+    {
+      name: "timesync.set_gm",
+      allowedToolName: "mcp__tsn_topology__timesync_set_gm",
+      title: "Set grandmaster",
+      description:
+        "Set the clock-sync grandmaster (GM) for the session and recompute the whole clock tree. " +
+        "gmMid must reference an existing node mid (call timesync.inspect or topology.inspect first to find it). " +
+        "After this call the port roles (master/slave/passive) for every node are recomputed deterministically and persisted; " +
+        "you do NOT set port roles yourself. oneStepMode / freSwitch are optional domain flags (0/1). " +
+        "Sync parameters default in if not yet set; adjust them via timesync.set_params.",
+      inputSchema: setGmInputSchema(),
+      handler: async (args) =>
+        callSidecarTool("/db/timesync/set_gm", args, {
+          gmMid: pickString(args, "gmMid"),
+          oneStepMode: pickValue(args, "oneStepMode"),
+          freSwitch: pickValue(args, "freSwitch"),
+        }),
+    },
+    {
+      name: "timesync.toggle_link",
+      allowedToolName: "mcp__tsn_topology__timesync_toggle_link",
+      title: "Toggle clock-sync link",
+      description:
+        "Enable or disable a topology link for clock-sync tree computation (disabled=true removes it from the spanning tree, " +
+        "disabled=false restores it), then recompute the whole tree. linkSeq is the topology link's seq (from topology.inspect). " +
+        "Both endpoints of a disabled link become passive. Use this to steer which links carry sync.",
+      inputSchema: {
+        linkSeq: z.number().int().describe("目标链路的 linkSeq（先用 topology.inspect 定位）"),
+        disabled: z.boolean().describe("true=禁用该链路参与时钟树，false=恢复启用"),
+      },
+      handler: async (args) =>
+        callSidecarTool("/db/timesync/toggle_link", args, {
+          linkSeq: pickValue(args, "linkSeq"),
+          disabled: pickValue(args, "disabled"),
+        }),
+    },
+    {
+      name: "timesync.set_params",
+      allowedToolName: "mcp__tsn_topology__timesync_set_params",
+      title: "Set clock-sync parameters",
+      description:
+        "Update gPTP sync parameters for one node (pass mid) or all nodes (omit mid). Only provided fields change; " +
+        "port roles are NOT touched. syncPeriod / measurePeriod are powers of two in ms (1..32768); " +
+        "meanLinkDelayThresh is a power of two (1..128); offsetThreshold is an integer 0..4095; reportEnable is 0/1. " +
+        "Recommended defaults (already applied on set_gm): syncPeriod=128, measurePeriod=1024, reportEnable=1, " +
+        "meanLinkDelayThresh=64, offsetThreshold=1000.",
+      inputSchema: setParamsInputSchema(),
+      handler: async (args) =>
+        callSidecarTool("/db/timesync/set_params", args, {
+          mid: pickString(args, "mid"),
+          syncPeriod: pickValue(args, "syncPeriod"),
+          measurePeriod: pickValue(args, "measurePeriod"),
+          reportEnable: pickValue(args, "reportEnable"),
+          meanLinkDelayThresh: pickValue(args, "meanLinkDelayThresh"),
+          offsetThreshold: pickValue(args, "offsetThreshold"),
+        }),
+    },
+    {
+      name: "timesync.inspect",
+      allowedToolName: "mcp__tsn_topology__timesync_inspect",
+      title: "Inspect clock-sync config",
+      description:
+        "Return the session's current clock-sync config: domain { gmMid, oneStepMode, freSwitch, disabledLinkSeqs } and " +
+        "nodes[] { mid, masterPort[], slavePort[], portPtpEnabled[], syncPeriod, measurePeriod, reportEnable, " +
+        "meanLinkDelayThresh, offsetThreshold }. No parameters. gmMid is null when no GM has been set yet. " +
+        "Call this first to see the current tree before changing GM / params / links.",
+      inputSchema: {},
+      handler: async (args) => callSidecarTool("/db/timesync/inspect", args, {}),
+    },
+    {
+      name: "timesync.undo",
+      allowedToolName: "mcp__tsn_topology__timesync_undo",
+      title: "Undo last clock-sync change",
+      description:
+        "Undo the last clock-sync change (set_gm / set_params / toggle_link), restoring the timesync tables to the pre-change " +
+        "snapshot. No parameters. Only touches clock-sync tables, never the topology. Returns ok with undone=false when there " +
+        "is nothing to undo. After undo, call timesync.inspect to re-confirm the current config before continuing.",
+      inputSchema: {},
+      handler: async (args) => callSidecarTool("/db/timesync/undo", args, {}),
+    },
+  ];
+}
+
+export function runTimesyncTool(name: TimesyncToolName, args: unknown): Promise<CallToolResult> {
+  const tool = createTimesyncToolRegistry().find((candidate) => candidate.name === name);
+
+  if (!tool) {
+    return Promise.resolve(
+      toCallToolResult({
+        ok: false,
+        errors: [
+          {
+            code: "UNKNOWN_TOOL",
+            message: `Unknown timesync tool: ${name}`,
+            path: "$.name",
+            severity: "error",
+            retryable: false,
+            requiresUserClarification: false,
+          },
+        ],
+      }),
+    );
+  }
+
+  return tool.handler(args);
+}
+
+// 2^n 集合校验：syncPeriod/measurePeriod 取 1..32768（n=0..15），meanLinkDelayThresh
+// 取 1..128（n=0..7）。整数且为 2 的幂（含 1=2^0）才合法。
+function powerOfTwoSchema(max: number, label: string): z.ZodNumber {
+  return z
+    .number()
+    .int()
+    .min(1)
+    .max(max)
+    .refine((value) => (value & (value - 1)) === 0, {
+      message: `${label} 必须是 2 的幂（1,2,4,…,${max}）`,
+    });
+}
+
+const binaryFlagSchema = z.number().int().min(0).max(1).describe("0 或 1");
+
+export function setGmInputSchema(): z.ZodRawShape {
+  return {
+    gmMid: z.string().min(1).describe("grandmaster 节点 mid（须指向现存节点，先 inspect）"),
+    oneStepMode: binaryFlagSchema.optional().describe("单步模式开关（0/1，默认 0）"),
+    freSwitch: binaryFlagSchema.optional().describe("频率开关（0/1，默认 0）"),
+  };
+}
+
+export function setParamsInputSchema(): z.ZodRawShape {
+  return {
+    mid: z.string().min(1).optional().describe("目标节点 mid；省略则对全部节点应用"),
+    syncPeriod: powerOfTwoSchema(32768, "syncPeriod")
+      .optional()
+      .describe("同步周期 ms，2 的幂 1..32768（推荐 128）"),
+    measurePeriod: powerOfTwoSchema(32768, "measurePeriod")
+      .optional()
+      .describe("测量周期 ms，2 的幂 1..32768（推荐 1024）"),
+    reportEnable: binaryFlagSchema.optional().describe("上报使能 0/1（推荐 1）"),
+    meanLinkDelayThresh: powerOfTwoSchema(128, "meanLinkDelayThresh")
+      .optional()
+      .describe("平均链路时延阈值，2 的幂 1..128"),
+    offsetThreshold: z
+      .number()
+      .int()
+      .min(0)
+      .max(4095)
+      .optional()
+      .describe("偏移阈值整数 0..4095（推荐 1000）"),
+  };
 }

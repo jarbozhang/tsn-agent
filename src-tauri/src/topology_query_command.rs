@@ -31,7 +31,7 @@ pub struct QueryTopologyResponse {
 #[serde(rename_all = "camelCase")]
 pub struct TopologyNodeRow {
     /// 节点逻辑序号（主键 / 身份；前端画布 id 与选中键）。
-    pub sync_name: String,
+    pub mid: String,
     /// 逻辑节点名（如 ES-1），initialize 写入；缺失时前端回退派生名。
     pub name: Option<String>,
     pub x: f64,
@@ -45,8 +45,8 @@ pub struct TopologyNodeRow {
 pub struct TopologyLinkRow {
     pub link_seq: i64,
     pub name: Option<String>,
-    pub src_sync_name: String,
-    pub dst_sync_name: String,
+    pub src_node: String,
+    pub dst_node: String,
     pub styles_json: String,
 }
 
@@ -58,17 +58,17 @@ pub async fn query_topology(
 ) -> Result<QueryTopologyResponse, String> {
     let pool = store.pool(&app).await?;
     let nodes = sqlx::query(
-        r#"SELECT sync_name, name, x, y, node_type, insert_order
+        r#"SELECT mid, name, x, y, node_type, insert_order
            FROM topology_nodes
            WHERE session_id = ?
-           ORDER BY insert_order, sync_name"#,
+           ORDER BY insert_order, mid"#,
     )
     .bind(&request.session_id)
     .fetch_all(pool)
     .await
     .map_err(|e| format!("查询节点失败：{e}"))?;
     let links = sqlx::query(
-        r#"SELECT link_seq, name, src_sync_name, dst_sync_name, styles_json
+        r#"SELECT link_seq, name, src_node, dst_node, styles_json
            FROM topology_links
            WHERE session_id = ?
            ORDER BY link_seq"#,
@@ -83,7 +83,7 @@ pub async fn query_topology(
         nodes: nodes
             .into_iter()
             .map(|r| TopologyNodeRow {
-                sync_name: r.get("sync_name"),
+                mid: r.get("mid"),
                 name: r.get("name"),
                 x: r.get("x"),
                 y: r.get("y"),
@@ -96,8 +96,8 @@ pub async fn query_topology(
             .map(|r| TopologyLinkRow {
                 link_seq: r.get("link_seq"),
                 name: r.get("name"),
-                src_sync_name: r.get("src_sync_name"),
-                dst_sync_name: r.get("dst_sync_name"),
+                src_node: r.get("src_node"),
+                dst_node: r.get("dst_node"),
                 styles_json: r.get("styles_json"),
             })
             .collect(),
@@ -110,14 +110,14 @@ pub async fn load_and_verify_topology(
     session_id: &str,
 ) -> Result<crate::topology_verify::VerifyResult, String> {
     let node_rows = sqlx::query(
-        "SELECT sync_name, name, node_type FROM topology_nodes WHERE session_id = ? ORDER BY insert_order, sync_name",
+        "SELECT mid, name, node_type FROM topology_nodes WHERE session_id = ? ORDER BY insert_order, mid",
     )
     .bind(session_id)
     .fetch_all(pool)
     .await
     .map_err(|e| format!("查询节点失败：{e}"))?;
     let link_rows = sqlx::query(
-        "SELECT link_seq, src_sync_name, dst_sync_name, styles_json FROM topology_links WHERE session_id = ? ORDER BY link_seq",
+        "SELECT link_seq, src_node, dst_node, styles_json FROM topology_links WHERE session_id = ? ORDER BY link_seq",
     )
     .bind(session_id)
     .fetch_all(pool)
@@ -127,7 +127,7 @@ pub async fn load_and_verify_topology(
     let nodes: Vec<crate::topology_verify::VerifyNode> = node_rows
         .into_iter()
         .map(|r| crate::topology_verify::VerifyNode {
-            sync_name: r.get("sync_name"),
+            mid: r.get("mid"),
             name: r.get("name"),
             node_type: r.get("node_type"),
         })
@@ -136,8 +136,8 @@ pub async fn load_and_verify_topology(
         .into_iter()
         .map(|r| crate::topology_verify::VerifyLink {
             link_seq: r.get("link_seq"),
-            src_sync_name: r.get("src_sync_name"),
-            dst_sync_name: r.get("dst_sync_name"),
+            src_node: r.get("src_node"),
+            dst_node: r.get("dst_node"),
             styles_json: r.get("styles_json"),
         })
         .collect();
@@ -189,17 +189,17 @@ mod tests {
     fn query_topology_returns_ordered_nodes_and_links() {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
-            sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) VALUES ('s1', '1', 1.0, 1.0, 1), ('s1', '0', 0.0, 0.0, 0)")
+            sqlx::query("INSERT INTO topology_nodes (session_id, mid, x, y, insert_order) VALUES ('s1', '1', 1.0, 1.0, 1), ('s1', '0', 0.0, 0.0, 0)")
                 .execute(&pool).await.unwrap();
-            sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) VALUES ('s1', 0, '0', '1', '{}')")
+            sqlx::query("INSERT INTO topology_links (session_id, link_seq, src_node, dst_node, styles_json) VALUES ('s1', 0, '0', '1', '{}')")
                 .execute(&pool).await.unwrap();
 
             // 直接调用底层 query 路径（bypass Tauri State 包装）
-            let nodes = sqlx::query("SELECT sync_name, x, y, node_type, insert_order FROM topology_nodes WHERE session_id = 's1' ORDER BY insert_order, sync_name")
+            let nodes = sqlx::query("SELECT mid, x, y, node_type, insert_order FROM topology_nodes WHERE session_id = 's1' ORDER BY insert_order, mid")
                 .fetch_all(&pool).await.unwrap();
             assert_eq!(nodes.len(), 2);
-            assert_eq!(nodes[0].get::<String, _>("sync_name"), "0"); // insert_order=0 排前
-            assert_eq!(nodes[1].get::<String, _>("sync_name"), "1");
+            assert_eq!(nodes[0].get::<String, _>("mid"), "0"); // insert_order=0 排前
+            assert_eq!(nodes[1].get::<String, _>("mid"), "1");
         });
     }
 
@@ -207,9 +207,9 @@ mod tests {
     fn verify_passes_for_legal_topology() {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
-            sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, node_type, x, y, insert_order) VALUES ('s1', '0', 'switch', 0, 0, 0), ('s1', '1', 'endSystem', 1, 1, 1)")
+            sqlx::query("INSERT INTO topology_nodes (session_id, mid, node_type, x, y, insert_order) VALUES ('s1', '0', 'switch', 0, 0, 0), ('s1', '1', 'endSystem', 1, 1, 1)")
                 .execute(&pool).await.unwrap();
-            sqlx::query(r#"INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) VALUES ('s1', 0, '0', '1', '{"leftLabel":"0","rightLabel":"0"}')"#)
+            sqlx::query(r#"INSERT INTO topology_links (session_id, link_seq, src_node, dst_node, styles_json) VALUES ('s1', 0, '0', '1', '{"leftLabel":"0","rightLabel":"0"}')"#)
                 .execute(&pool).await.unwrap();
             let r = load_and_verify_topology(&pool, "s1").await.unwrap();
             assert!(r.ok, "errors: {:?}", r.errors);
@@ -221,9 +221,9 @@ mod tests {
     fn verify_blocks_dangling_link() {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
-            sqlx::query("INSERT INTO topology_nodes (session_id, sync_name, node_type, x, y, insert_order) VALUES ('s1', '0', 'switch', 0, 0, 0), ('s1', '1', 'endSystem', 1, 1, 1)")
+            sqlx::query("INSERT INTO topology_nodes (session_id, mid, node_type, x, y, insert_order) VALUES ('s1', '0', 'switch', 0, 0, 0), ('s1', '1', 'endSystem', 1, 1, 1)")
                 .execute(&pool).await.unwrap();
-            sqlx::query(r#"INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) VALUES ('s1', 0, '0', '1', '{"leftLabel":"0","rightLabel":"0"}'), ('s1', 1, '0', '99', '{"leftLabel":"1","rightLabel":"0"}')"#)
+            sqlx::query(r#"INSERT INTO topology_links (session_id, link_seq, src_node, dst_node, styles_json) VALUES ('s1', 0, '0', '1', '{"leftLabel":"0","rightLabel":"0"}'), ('s1', 1, '0', '99', '{"leftLabel":"1","rightLabel":"0"}')"#)
                 .execute(&pool).await.unwrap();
             let r = load_and_verify_topology(&pool, "s1").await.unwrap();
             assert!(!r.ok);

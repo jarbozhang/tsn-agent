@@ -43,7 +43,12 @@ pub struct RouteState {
     pub last_validated_ok: Arc<Mutex<HashMap<String, u64>>>,
 }
 
-fn structured_error(status: StatusCode, code: &str, message: &str, retryable: bool) -> Response {
+pub(crate) fn structured_error(
+    status: StatusCode,
+    code: &str,
+    message: &str,
+    retryable: bool,
+) -> Response {
     let body = serde_json::json!({
         "ok": false,
         "code": code,
@@ -53,7 +58,7 @@ fn structured_error(status: StatusCode, code: &str, message: &str, retryable: bo
     (status, Json(body)).into_response()
 }
 
-fn ok_summary(summary: Value) -> Response {
+pub(crate) fn ok_summary(summary: Value) -> Response {
     (
         StatusCode::OK,
         Json(serde_json::json!({ "ok": true, "summary": summary })),
@@ -239,20 +244,9 @@ pub async fn initialize(
     ok_summary(summary_value)
 }
 
-/// canonical 节点类型 → 持久层 node_type 字符串。端系统统一存 endSystem
-/// （历史上曾用 networkcard，已由 migration v5 收敛）。未知类型兜底 endSystem。
-fn legacy_node_type(canonical: &str) -> &'static str {
-    match canonical {
-        "switch" => "switch",
-        "endSystem" => "endSystem",
-        "server" => "server",
-        _ => "endSystem",
-    }
-}
-
 /// 把 initialize 计算出的 IntermediateTopology 重建到该 session 的 P0 表。
-/// 节点键 sync_name = numericId；连线两端引用 sync_name。Qunee 专有的 imac/sync_type
-/// 不再落库，需要时由 build_artifacts 从节点+node_type 现导。
+/// 节点键 mid = numericId；连线两端引用 mid。node_type 直写 canonical 字符串
+/// （switch/endSystem/server）。
 async fn persist_initialized_topology(
     pool: &sqlx::Pool<sqlx::Sqlite>,
     session_id: &str,
@@ -265,9 +259,13 @@ async fn persist_initialized_topology(
     let conn: &mut sqlx::SqliteConnection = &mut tx;
 
     // 写前快照：在同事务、三表 DELETE 之前留 pre-image（整图重置可撤）。
-    crate::topology_undo::snapshot_pre_image(&mut *conn, session_id)
-        .await
-        .map_err(|e| format!("undo snapshot failed: {e}"))?;
+    crate::topology_undo::snapshot_pre_image(
+        &mut *conn,
+        session_id,
+        crate::topology_undo::TOPOLOGY_DOMAIN,
+    )
+    .await
+    .map_err(|e| format!("undo snapshot failed: {e}"))?;
 
     for table in ["topology_nodes", "topology_links"] {
         sqlx::query(&format!("DELETE FROM {table} WHERE session_id = ?"))
@@ -281,31 +279,42 @@ async fn persist_initialized_topology(
         topology.nodes.iter().collect();
     sorted_nodes.sort_by_key(|node| node.numeric_id);
 
-    let mut sync_name_by_node_id: std::collections::HashMap<&str, String> =
+    let mut mid_by_node_id: std::collections::HashMap<&str, String> =
         std::collections::HashMap::new();
     for (index, node) in sorted_nodes.iter().enumerate() {
-        let sync_name = node.numeric_id.to_string();
+        let mid = node.numeric_id.to_string();
         let type_str = match node.node_type {
             IntermediateNodeType::Switch => "switch",
             IntermediateNodeType::EndSystem => "endSystem",
             IntermediateNodeType::Server => "server",
         };
+        // U3：mac/ip 确定性分配，ordinal 取节点 numeric_id（= mid）。
+        let mac = crate::topology_intermediate::assign_mac(node.numeric_id);
+        let ip = crate::topology_intermediate::assign_ip(node.numeric_id);
+        // 显式写 port_count = 该节点真实端口数（不落 schema DEFAULT 8，避免与导出
+        // build_topology_json 的 portCount=ports.len() 分叉、timesync 端口越界判错值）；
+        // queue_count 与导出 queueCount=3 对齐。
+        let port_count = node.ports.len() as i64;
         sqlx::query(
             r#"INSERT INTO topology_nodes
-               (session_id, sync_name, name, x, y, node_type, insert_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+               (session_id, mid, name, x, y, node_type, mac, ip, port_count, queue_count, insert_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(session_id)
-        .bind(&sync_name)
+        .bind(&mid)
         .bind(&node.name)
         .bind(node.position.x)
         .bind(node.position.y)
-        .bind(legacy_node_type(type_str))
+        .bind(type_str)
+        .bind(&mac)
+        .bind(&ip)
+        .bind(port_count)
+        .bind(crate::topology_compute::EXPORT_QUEUE_COUNT)
         .bind(index as i64)
         .execute(&mut *conn)
         .await
         .map_err(|e| format!("topology_nodes insert failed: {e}"))?;
-        sync_name_by_node_id.insert(node.id.as_str(), sync_name);
+        mid_by_node_id.insert(node.id.as_str(), mid);
     }
 
     let mut sorted_links: Vec<&crate::topology_intermediate::IntermediateLink> =
@@ -313,11 +322,11 @@ async fn persist_initialized_topology(
     sorted_links.sort_by_key(|link| link.numeric_id);
 
     for (index, link) in sorted_links.iter().enumerate() {
-        let src_sync_name = sync_name_by_node_id
+        let src_node = mid_by_node_id
             .get(link.source.node_id.as_str())
             .ok_or_else(|| format!("link {} references unknown source node", link.id))?
             .clone();
-        let dst_sync_name = sync_name_by_node_id
+        let dst_node = mid_by_node_id
             .get(link.target.node_id.as_str())
             .ok_or_else(|| format!("link {} references unknown target node", link.id))?
             .clone();
@@ -336,14 +345,14 @@ async fn persist_initialized_topology(
         let styles_json = styles.to_string();
         sqlx::query(
             r#"INSERT INTO topology_links
-               (session_id, link_seq, name, src_sync_name, dst_sync_name, styles_json)
+               (session_id, link_seq, name, src_node, dst_node, styles_json)
                VALUES (?, ?, ?, ?, ?, ?)"#,
         )
         .bind(session_id)
         .bind(index as i64)
         .bind(&link.id)
-        .bind(&src_sync_name)
-        .bind(&dst_sync_name)
+        .bind(&src_node)
+        .bind(&dst_node)
         .bind(&styles_json)
         .execute(&mut *conn)
         .await
@@ -362,7 +371,7 @@ pub struct InspectRequest {
 }
 
 /// DB-backed 全量 rows：agent 一次 inspect 拿到构造 ops batch 所需的全部细节
-/// （syncName/linkSeq/stylesJson 原文）。无 selector —— 模型直接在 rows 里按 syncName，
+/// （mid/linkSeq/stylesJson 原文）。无 selector —— 模型直接在 rows 里按 mid，
 /// 模型直接在 rows 里定位目标。出向规模有界：数据只能经 initialize（compute 校验
 /// ≤200 节点）与 apply_operations（单批 ≤32 op）进入。
 /// SQL 与排序镜像 `topology_query_command.rs`（UI 读路径），行 shape 直接复用其
@@ -389,10 +398,10 @@ pub async fn inspect(
         }
     };
     let node_rows = sqlx::query(
-        r#"SELECT sync_name, name, x, y, node_type, insert_order
+        r#"SELECT mid, name, x, y, node_type, insert_order
            FROM topology_nodes
            WHERE session_id = ?
-           ORDER BY insert_order, sync_name"#,
+           ORDER BY insert_order, mid"#,
     )
     .bind(&req.session_id)
     .fetch_all(&mut *tx)
@@ -409,7 +418,7 @@ pub async fn inspect(
         }
     };
     let link_rows = sqlx::query(
-        r#"SELECT link_seq, name, src_sync_name, dst_sync_name, styles_json
+        r#"SELECT link_seq, name, src_node, dst_node, styles_json
            FROM topology_links
            WHERE session_id = ?
            ORDER BY link_seq"#,
@@ -434,7 +443,7 @@ pub async fn inspect(
     let nodes: Vec<TopologyNodeRow> = node_rows
         .into_iter()
         .map(|r| TopologyNodeRow {
-            sync_name: r.get("sync_name"),
+            mid: r.get("mid"),
             name: r.get("name"),
             x: r.get("x"),
             y: r.get("y"),
@@ -447,8 +456,8 @@ pub async fn inspect(
         .map(|r| TopologyLinkRow {
             link_seq: r.get("link_seq"),
             name: r.get("name"),
-            src_sync_name: r.get("src_sync_name"),
-            dst_sync_name: r.get("dst_sync_name"),
+            src_node: r.get("src_node"),
+            dst_node: r.get("dst_node"),
             styles_json: r.get("styles_json"),
         })
         .collect();
@@ -688,7 +697,13 @@ pub async fn apply_operations(
 
     // 写前快照：在同事务、首个 apply_op 之前留 pre-image。dry-run 分支
     // rollback 时此快照随事务一并丢弃，无需额外清理（R4）。
-    if let Err(e) = crate::topology_undo::snapshot_pre_image(&mut tx, &req.session_id).await {
+    if let Err(e) = crate::topology_undo::snapshot_pre_image(
+        &mut tx,
+        &req.session_id,
+        crate::topology_undo::TOPOLOGY_DOMAIN,
+    )
+    .await
+    {
         let _ = tx.rollback().await;
         return structured_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -783,7 +798,13 @@ pub async fn undo(State(state): State<Arc<RouteState>>, Json(req): Json<UndoRequ
         return resp;
     }
 
-    match crate::topology_undo::restore_pre_image(&state.pool, &req.session_id).await {
+    match crate::topology_undo::restore_pre_image(
+        &state.pool,
+        &req.session_id,
+        crate::topology_undo::TOPOLOGY_DOMAIN,
+    )
+    .await
+    {
         Ok(true) => {
             let record = state
                 .mutation_buffer
@@ -822,7 +843,7 @@ pub async fn undo(State(state): State<Arc<RouteState>>, Json(req): Json<UndoRequ
 
 // ---------- helpers ----------
 
-async fn require_session(
+pub(crate) async fn require_session(
     pool: &sqlx::Pool<sqlx::Sqlite>,
     session_id: &str,
 ) -> Result<(), Response> {
@@ -909,6 +930,143 @@ mod tests {
                 names,
                 vec![Some("SW-1".to_string()), Some("ES-1".to_string())]
             );
+        });
+    }
+
+    /// U3：initialize 落库后每节点 mac/ip 非空、按 numeric_id 确定性分配。
+    #[test]
+    fn persist_fills_mac_ip_columns() {
+        tauri::async_runtime::block_on(async {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql())
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1', 't', 'now', 'now', '{}')")
+                .execute(&pool)
+                .await
+                .unwrap();
+
+            let topology: crate::topology_intermediate::IntermediateTopology =
+                serde_json::from_value(serde_json::json!({
+                    "schemaVersion": "tsn-agent.topology.intermediate.v0",
+                    "metadata": { "templateId": "hop-linear", "layout": "line", "source": "template" },
+                    "nodes": [
+                        { "id": "SW-1", "numericId": 0, "name": "SW-1", "type": "switch",
+                          "ports": [], "position": { "x": 0.0, "y": 0.0 } },
+                        { "id": "ES-1", "numericId": 1, "name": "ES-1", "type": "endSystem",
+                          "ports": [], "position": { "x": 1.0, "y": 1.0 } }
+                    ],
+                    "links": [],
+                    "diagnostics": []
+                }))
+                .unwrap();
+
+            super::persist_initialized_topology(&pool, "s1", &topology)
+                .await
+                .unwrap();
+
+            let rows = sqlx::query(
+                "SELECT mid, mac, ip FROM topology_nodes WHERE session_id = 's1' ORDER BY insert_order",
+            )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+            assert_eq!(rows.len(), 2);
+            for row in &rows {
+                let mid: String = row.get("mid");
+                let mac: Option<String> = row.get("mac");
+                let ip: Option<String> = row.get("ip");
+                let ordinal = mid.parse::<i64>().unwrap();
+                assert_eq!(
+                    mac.as_deref(),
+                    Some(crate::topology_intermediate::assign_mac(ordinal).as_str())
+                );
+                assert_eq!(
+                    ip.as_deref(),
+                    Some(crate::topology_intermediate::assign_ip(ordinal).as_str())
+                );
+            }
+        });
+    }
+
+    /// 修复 2：initialize 落库 port_count = 该节点真实端口数（不落 schema DEFAULT 8），
+    /// queue_count 与导出 queueCount=3 对齐——否则 timesync 端口越界判会信错值、导出分叉。
+    #[test]
+    fn persist_writes_real_port_count_and_export_queue_count() {
+        tauri::async_runtime::block_on(async {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            sqlx::query(&crate::db::safety_net_schema_sql())
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) VALUES ('s1', 't', 'now', 'now', '{}')")
+                .execute(&pool)
+                .await
+                .unwrap();
+
+            // 节点 0 有 4 端口、节点 1 有 2 端口（都 ≠ schema DEFAULT 8）。
+            let topology: crate::topology_intermediate::IntermediateTopology =
+                serde_json::from_value(serde_json::json!({
+                    "schemaVersion": "tsn-agent.topology.intermediate.v0",
+                    "metadata": { "templateId": "hop-linear", "layout": "line", "source": "template" },
+                    "nodes": [
+                        { "id": "sw1", "numericId": 0, "name": "SW-1", "type": "switch",
+                          "ports": [
+                            { "id": "P0", "name": "eth0", "index": 0 },
+                            { "id": "P1", "name": "eth1", "index": 1 },
+                            { "id": "P2", "name": "eth2", "index": 2 },
+                            { "id": "P3", "name": "eth3", "index": 3 }
+                          ],
+                          "position": { "x": 0.0, "y": 0.0 } },
+                        { "id": "es1", "numericId": 1, "name": "ES-1", "type": "endSystem",
+                          "ports": [
+                            { "id": "P0", "name": "eth0", "index": 0 },
+                            { "id": "P1", "name": "eth1", "index": 1 }
+                          ],
+                          "position": { "x": 1.0, "y": 1.0 } }
+                    ],
+                    "links": [],
+                    "diagnostics": []
+                }))
+                .unwrap();
+
+            super::persist_initialized_topology(&pool, "s1", &topology)
+                .await
+                .unwrap();
+
+            let rows = sqlx::query(
+                "SELECT mid, port_count, queue_count FROM topology_nodes WHERE session_id = 's1' ORDER BY insert_order",
+            )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+            assert_eq!(rows.len(), 2);
+            assert_eq!(
+                rows[0].get::<i64, _>("port_count"),
+                4,
+                "节点0 port_count = ports.len()"
+            );
+            assert_eq!(
+                rows[1].get::<i64, _>("port_count"),
+                2,
+                "节点1 port_count = ports.len()"
+            );
+            for row in &rows {
+                assert_eq!(
+                    row.get::<i64, _>("queue_count"),
+                    crate::topology_compute::EXPORT_QUEUE_COUNT,
+                    "queue_count 与导出 queueCount 对齐"
+                );
+            }
         });
     }
 

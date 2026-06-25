@@ -17,7 +17,7 @@ function snapshotFor(sessionId: string, nodeCount: number): TopologyRowSnapshot 
   return {
     sessionId,
     nodes: Array.from({ length: nodeCount }, (_, index) => ({
-      syncName: String(index),
+      mid: String(index),
       name: null,
       x: 0,
       y: 0,

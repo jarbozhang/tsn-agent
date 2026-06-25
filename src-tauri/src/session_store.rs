@@ -245,6 +245,12 @@ pub async fn connect_app_database(app: &tauri::AppHandle) -> Result<Pool<Sqlite>
         .await
         .map_err(db_error)?;
 
+    // U1+U2 表演进：sync_name→mid + 节点四列 + 连线端口/speed 拆列（幂等，见 db.rs）。
+    // 排在 imac→sync_name 之后：老库先 imac→sync_name 再 sync_name→mid，两守卫条件互斥。
+    crate::db::ensure_topology_rekey_mid_and_ports(&pool)
+        .await
+        .map_err(db_error)?;
+
     Ok(pool)
 }
 
@@ -345,6 +351,8 @@ mod tests {
         "topology_nodes",
         "topology_links",
         "topology_undo_snapshots",
+        "timesync_domain",
+        "timesync_nodes",
     ];
 
     #[test]
@@ -473,7 +481,7 @@ mod tests {
                 VALUES ('s1', 100, '0', 'SW-0', 0, 0, '{"_classPath":"Q.Graphs.exchanger2"}', 'switch', 0),
                        ('s1', 101, '1', 'ES-1', 10, 10, '{"_classPath":"Q.Graphs.node"}', 'endSystem', 1);
             INSERT INTO topology_links (session_id, link_seq, name, src_imac, dst_imac, styles_json)
-                VALUES ('s1', 0, '0:0-1:0', 100, 101, '{}');
+                VALUES ('s1', 0, '0:0-1:0', 100, 101, '{"leftLabel":"P1","rightLabel":"2","speed":1000}');
             "#,
         )
         .execute(&pool)
@@ -482,43 +490,62 @@ mod tests {
         pool
     }
 
+    /// 全链路：imac → sync_name → mid 两守卫串跑（生产 connect 顺序），最终态须是
+    /// mid 键 + src/dst_node + 端口拆列。
     #[tokio::test]
-    async fn rekey_promotes_sync_name_drops_imac_and_remaps_links() {
+    async fn rekey_chain_imac_to_sync_name_to_mid_remaps_links_and_splits_ports() {
         let pool = legacy_imac_pool().await;
         crate::db::ensure_topology_rekey_to_sync_name(&pool)
             .await
-            .expect("rekey");
+            .expect("imac→sync_name rekey");
+        crate::db::ensure_topology_rekey_mid_and_ports(&pool)
+            .await
+            .expect("sync_name→mid rekey");
 
-        // imac / sync_type 列消失
-        let imac_cols: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM pragma_table_info('topology_nodes') WHERE name IN ('imac','sync_type')")
-                .fetch_one(&pool).await.unwrap();
-        assert_eq!(imac_cols, 0, "imac/sync_type 应已删除");
+        // imac / sync_type / sync_name 列消失，mid + 四列在
+        let stale_cols: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('topology_nodes') WHERE name IN ('imac','sync_type','sync_name')",
+        )
+        .fetch_one(&pool).await.unwrap();
+        assert_eq!(stale_cols, 0, "imac/sync_type/sync_name 应已删除");
+        let new_cols: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('topology_nodes') WHERE name IN ('mid','mac','ip','port_count','queue_count')",
+        )
+        .fetch_one(&pool).await.unwrap();
+        assert_eq!(new_cols, 5, "mid + mac/ip/port_count/queue_count 应齐全");
 
-        // 节点按 sync_name 可查、名字/坐标保留
-        let (name, x): (Option<String>, f64) = sqlx::query_as(
-            "SELECT name, x FROM topology_nodes WHERE session_id='s1' AND sync_name='1'",
+        // 节点按 mid 可查、名字/坐标保留；port_count/queue_count 默认 8、mac/ip 留空
+        let (name, x, pc, qc, mac): (Option<String>, f64, i64, i64, Option<String>) = sqlx::query_as(
+            "SELECT name, x, port_count, queue_count, mac FROM topology_nodes WHERE session_id='s1' AND mid='1'",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
         assert_eq!(name.as_deref(), Some("ES-1"));
         assert_eq!(x, 10.0);
+        assert_eq!((pc, qc), (8, 8));
+        assert!(mac.is_none(), "mac 本单元留空（U3 回填）");
 
-        // 连线端点由 imac 重映射为 sync_name
-        let (src, dst): (String, String) =
-            sqlx::query_as("SELECT src_sync_name, dst_sync_name FROM topology_links WHERE session_id='s1' AND link_seq=0")
+        // 连线端点由 imac 重映射为 mid（→ src/dst_node），端口从 styles_json 拆出
+        let (src, dst, sp, dp, speed): (String, String, Option<i64>, Option<i64>, Option<i64>) =
+            sqlx::query_as("SELECT src_node, dst_node, src_port, dst_port, speed FROM topology_links WHERE session_id='s1' AND link_seq=0")
                 .fetch_one(&pool).await.unwrap();
         assert_eq!((src.as_str(), dst.as_str()), ("0", "1"));
+        assert_eq!(sp, Some(1), "leftLabel \"P1\" → src_port 1");
+        assert_eq!(dp, Some(2), "rightLabel \"2\" → dst_port 2");
+        assert_eq!(speed, Some(1000), "styles_json.speed → speed 列");
     }
 
     #[tokio::test]
     async fn rekey_is_noop_on_already_migrated_db() {
-        // 新结构库（safety_net 直接建出新 schema）再跑 re-key 应 no-op、不报错。
+        // 新结构库（safety_net 直接建出新 schema）再跑两守卫应 no-op、不报错。
         let pool = fresh_memory_pool().await;
         crate::db::ensure_topology_rekey_to_sync_name(&pool)
             .await
-            .expect("rekey noop");
+            .expect("imac rekey noop");
+        crate::db::ensure_topology_rekey_mid_and_ports(&pool)
+            .await
+            .expect("mid rekey noop");
         let imac_cols: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM pragma_table_info('topology_nodes') WHERE name='imac'",
         )
@@ -526,6 +553,14 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(imac_cols, 0);
+        // 新库直建即带 mid 列，mid 守卫 no-op（不重建）。
+        let mid_cols: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('topology_nodes') WHERE name='mid'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(mid_cols, 1);
     }
 
     async fn fresh_memory_pool() -> Pool<Sqlite> {
@@ -572,14 +607,14 @@ mod tests {
                 .await
                 .expect("initial insert");
             sqlx::query(
-                "INSERT INTO topology_nodes (session_id, sync_name, x, y, insert_order) \
+                "INSERT INTO topology_nodes (session_id, mid, x, y, insert_order) \
                  VALUES ('s1', '0', 0.0, 0.0, 0)",
             )
             .execute(&pool)
             .await
             .expect("seed topology node");
             sqlx::query(
-                "INSERT INTO topology_links (session_id, link_seq, src_sync_name, dst_sync_name, styles_json) \
+                "INSERT INTO topology_links (session_id, link_seq, src_node, dst_node, styles_json) \
                  VALUES ('s1', 0, '0', '0', '{}')",
             )
             .execute(&pool)

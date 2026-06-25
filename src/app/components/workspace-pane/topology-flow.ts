@@ -103,21 +103,18 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): {
 } {
   // 端口标签序数：按 DB 初始坐标统计每个节点每个方位的边数（linkSeq 序确定性）。
   const centers = new Map(
-    snapshot.nodes.map((node) => [
-      node.syncName,
-      { x: node.x + NODE_W / 2, y: node.y + NODE_H / 2 },
-    ]),
+    snapshot.nodes.map((node) => [node.mid, { x: node.x + NODE_W / 2, y: node.y + NODE_H / 2 }]),
   );
   const sideCounter = new Map<string, number>();
   const pairCounts = new Map<string, number>();
   const pairCounter = new Map<string, number>();
-  const takeOrd = (syncName: string, otherSyncName: string): number => {
-    const from = centers.get(syncName);
-    const to = centers.get(otherSyncName);
+  const takeOrd = (mid: string, otherMid: string): number => {
+    const from = centers.get(mid);
+    const to = centers.get(otherMid);
     if (!from || !to) {
       return 0;
     }
-    const key = `${syncName}:${roughSide(from, to)}`;
+    const key = `${mid}:${roughSide(from, to)}`;
     const ord = sideCounter.get(key) ?? 0;
     sideCounter.set(key, ord + 1);
     return ord;
@@ -131,43 +128,67 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): {
   };
 
   for (const link of snapshot.links) {
-    const key = pairKey(link.srcSyncName, link.dstSyncName);
+    const key = pairKey(link.srcNode, link.dstNode);
     pairCounts.set(key, (pairCounts.get(key) ?? 0) + 1);
   }
 
   return {
     nodes: snapshot.nodes.map((node) => ({
-      id: node.syncName,
+      id: node.mid,
       type: "tsnNode",
       position: { x: node.x, y: node.y },
       data: {
         label: nodeRowLabel(node),
         nodeType: nodeTypeToken(node.nodeType),
-        syncName: node.syncName,
+        mid: node.mid,
       },
     })),
     edges: snapshot.links.map((link) => {
       const meta = parseLinkStyles(link.stylesJson);
-      const parallelSlot = takeParallelSlot(link.srcSyncName, link.dstSyncName);
+      const parallelSlot = takeParallelSlot(link.srcNode, link.dstNode);
       const data: TsnEdgeData = {
         leftLabel: meta.leftLabel,
         rightLabel: meta.rightLabel,
         // 仅有标签的端点占用层级槽位，无标签端不推远后续标签。
-        leftOrd: meta.leftLabel ? takeOrd(link.srcSyncName, link.dstSyncName) : 0,
-        rightOrd: meta.rightLabel ? takeOrd(link.dstSyncName, link.srcSyncName) : 0,
+        leftOrd: meta.leftLabel ? takeOrd(link.srcNode, link.dstNode) : 0,
+        rightOrd: meta.rightLabel ? takeOrd(link.dstNode, link.srcNode) : 0,
         parallelIndex: parallelSlot.index,
         parallelCount: parallelSlot.count,
       };
       return {
         id: linkRowId(link),
-        source: link.srcSyncName,
-        target: link.dstSyncName,
+        source: link.srcNode,
+        target: link.dstNode,
         type: "tsnFloating",
         className: planeClassName(meta.plane),
         data,
       };
     }),
   };
+}
+
+import type { TimesyncNodeRole } from "../../../sessions/timesync-snapshot";
+
+/** time-sync 阶段画布注入到 React Flow 节点 data 的时钟树角色（拓扑阶段为 undefined）。 */
+export interface TsnNodeTimesync {
+  role: TimesyncNodeRole;
+  masterCount: number;
+  slaveCount: number;
+  isGm: boolean;
+}
+
+/** 时钟树角色 → 节点徽标短文（画布上 GM/被同步/旁路/未覆盖一目了然）。 */
+export function timesyncRoleBadge(role: TimesyncNodeRole): string {
+  switch (role) {
+    case "gm":
+      return "GM";
+    case "synced":
+      return "同步";
+    case "passive":
+      return "旁路";
+    default:
+      return "未覆盖";
+  }
 }
 
 const NODE_KIND_PREFIX: Record<TsnNodeKind, string> = {
@@ -182,7 +203,7 @@ export function nodeRowLabel(node: TopologyNodeRow): string {
     return node.name;
   }
 
-  return `${NODE_KIND_PREFIX[nodeTypeToken(node.nodeType)]}-${node.syncName}`;
+  return `${NODE_KIND_PREFIX[nodeTypeToken(node.nodeType)]}-${node.mid}`;
 }
 
 export function linkRowId(link: TopologyLinkRow): string {

@@ -14,7 +14,7 @@ export interface TopologyRowSnapshot {
 
 export interface TopologyNodeRow {
   /** 节点逻辑序号：节点身份 / 画布 id / 选中键。 */
-  syncName: string;
+  mid: string;
   /** 逻辑节点名（如 ES-1），initialize 写入；缺失时画布回退派生名。 */
   name: string | null;
   x: number;
@@ -26,8 +26,8 @@ export interface TopologyNodeRow {
 export interface TopologyLinkRow {
   linkSeq: number;
   name: string | null;
-  srcSyncName: string;
-  dstSyncName: string;
+  srcNode: string;
+  dstNode: string;
   stylesJson: string;
 }
 

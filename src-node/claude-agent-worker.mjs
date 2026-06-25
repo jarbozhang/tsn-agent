@@ -19,6 +19,16 @@ export const TOPOLOGY_MCP_ALLOWED_TOOLS = [
   "mcp__tsn_topology__topology_validate_artifacts",
   "mcp__tsn_topology__topology_apply_operations",
 ];
+// timesync 工具同住 tsn_topology stdio server，仅在 time-sync 阶段放行（见
+// buildAllowedToolsForStage）。worker 是纯 ESM、不能 import TS registry，故此处镜像
+// topology-tools.ts 的 TIMESYNC_MCP_ALLOWED_TOOLS；测试断言两者一致防漂移。
+export const TIMESYNC_MCP_ALLOWED_TOOLS = [
+  "mcp__tsn_topology__timesync_set_gm",
+  "mcp__tsn_topology__timesync_toggle_link",
+  "mcp__tsn_topology__timesync_set_params",
+  "mcp__tsn_topology__timesync_inspect",
+  "mcp__tsn_topology__timesync_undo",
+];
 
 // U1（独立编排能力）：切阶段工具独立于四个阶段，用 SDK in-process 自定义工具承载，
 // 不连 sidecar、不写状态、不做合法性判断（合法性在应用层 agent-adapter）。它只把
@@ -202,7 +212,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     // AskUserQuestion 在 dontAsk 模式下必然被拒（无终端 UI），硬禁省掉模型
     // 尝试浪费的 turn；prompt 交互规则 1 告知替代路径（中文数字编号选项）。
     disallowedTools: ["AskUserQuestion"],
-    skills: ["tsn-topology", "tsn-flow-planning"],
+    skills: ["tsn-topology", "tsn-time-sync", "tsn-flow-planning"],
     // tsn_workflow（切阶段工具，in-process）始终注册；tsn_topology 仅在 server 路径存在时注册。
     mcpServers: { ...(topologyMcpConfig ?? {}), [WORKFLOW_MCP_SERVER_NAME]: workflowMcpServer },
     env: {
@@ -506,9 +516,13 @@ export function buildAllowedToolsForStage(stageRunnerInput, hasTopologyMcpConfig
     // 拓扑写工具只在拓扑阶段开放：非拓扑阶段直接写库的结果不会被对账（提取按 stage 门槛），
     // 会让右侧工程与 workflow 状态静默分叉。改拓扑须先经切阶段工具回到拓扑阶段。
     ...(hasTopologyMcpConfig && stage === "topology" ? TOPOLOGY_MCP_ALLOWED_TOOLS : []),
+    // U10：timesync 工具只在时间同步阶段开放。与 topology 工具同住 tsn_topology stdio
+    // server，故同样门控 hasTopologyMcpConfig（server 没注册就别白名单它们）。timesync 写库
+    // 走 sidecar、前端靠查库渲染，不经 stageResult 对账，但 stage 门控仍防跨阶段误写。
+    ...(hasTopologyMcpConfig && stage === "time-sync" ? TIMESYNC_MCP_ALLOWED_TOOLS : []),
     // U6：撤销工具只在拓扑阶段开放（不像 request_stage_change 全阶段）——本期只撤 topology，
     // 在时间同步 / 流量规划阶段撤销会错误回退拓扑。撤销 in-process 不依赖拓扑 stdio server，
-    // 故只门控 stage（不门控 hasTopologyMcpConfig）。
+    // 故只门控 stage（不门控 hasTopologyMcpConfig）。time-sync 阶段撤销走 timesync.undo 工具。
     ...(stage === "topology" ? [UNDO_TOOL_NAME] : []),
   ];
 }
@@ -520,7 +534,7 @@ export function buildAllowedToolsForStage(stageRunnerInput, hasTopologyMcpConfig
 // 不进可编辑 skill 文件。迁移自 SKILL.md：①initialize 后不复检 validate；
 // ②apply_operations 超时重试逐字节复用（重新分配 linkSeq 会产生重复平行链路）。
 const SYSTEM_PROMPT_SKELETON =
-  "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。工程状态只接受结构化校验结果。拓扑初始化、校验、artifact 构建、inspect 和 apply_operations 必须通过 tsn_topology MCP 工具调用 sidecar，所有工具结果都已是结构化领域响应。artifact、端口表、MAC 表和完整 changeSet 不得再在自然语言里复述。不要写 TSN_AGENT_STAGE_RESULT_PATH，不要用自然语言重新构建拓扑。固定阶段顺序是拓扑、时间同步、流量规划、配置下发。前进到下一阶段由用户点「确认并继续」按钮完成，你不要自行宣称已进入下一阶段。用户在当前阶段提出的需求其实属于之前已完成的阶段（改拓扑、验时间同步）时，调用 request_stage_change 工具（参数：目标阶段 targetStage、理由 reason）表达需要切回。这一轮只做意图判断：只说明要切回哪个阶段及原因、等用户确认，不要在这一轮追问或规划具体怎么改、也不要承诺立即执行。切回会让其后的阶段重做。用户确认切回后，会用其原话在目标阶段继续处理修改；那时若需求有歧义（如有多台交换机、该删哪台不明），先用中文编号选项问清楚再动手，不要擅自替用户选。不要用该工具前进。已有拓扑用 tsn_topology inspect + apply_operations 增量编辑，initialize 仅用于从 0 生成或换模板（误用会整表重排已确认拓扑）。initialize 已校验并落库，之后无需对 initialize 结果复检；apply_operations 改动拓扑后，其返回已自动带库内结构校验结论（validation 字段），据此把中文结论告诉用户、有问题如实说。apply_operations 超时重试时逐字节复用上一次的同一 operations（相同 syncName/linkSeq），不要重新分配——重新分配 linkSeq 会产生重复的平行链路。最终工程状态只接受应用层合成的结构化结果，不要自行编写 stage result。";
+  "你是 TSN Agent 的规划助手。你面向懂一点 TSN 但不了解具体参数的新手用户。回复必须是简体中文，保持工程化、具体、可执行。工程状态只接受结构化校验结果。拓扑初始化、校验、artifact 构建、inspect 和 apply_operations 必须通过 tsn_topology MCP 工具调用 sidecar，所有工具结果都已是结构化领域响应。artifact、端口表、MAC 表和完整 changeSet 不得再在自然语言里复述。不要写 TSN_AGENT_STAGE_RESULT_PATH，不要用自然语言重新构建拓扑。固定阶段顺序是拓扑、时间同步、流量规划、配置下发。前进到下一阶段由用户点「确认并继续」按钮完成，你不要自行宣称已进入下一阶段。用户在当前阶段提出的需求其实属于之前已完成的阶段（改拓扑、验时间同步）时，调用 request_stage_change 工具（参数：目标阶段 targetStage、理由 reason）表达需要切回。这一轮只做意图判断：只说明要切回哪个阶段及原因、等用户确认，不要在这一轮追问或规划具体怎么改、也不要承诺立即执行。切回会让其后的阶段重做。用户确认切回后，会用其原话在目标阶段继续处理修改；那时若需求有歧义（如有多台交换机、该删哪台不明），先用中文编号选项问清楚再动手，不要擅自替用户选。不要用该工具前进。已有拓扑用 tsn_topology inspect + apply_operations 增量编辑，initialize 仅用于从 0 生成或换模板（误用会整表重排已确认拓扑）。initialize 已校验并落库，之后无需对 initialize 结果复检；apply_operations 改动拓扑后，其返回已自动带库内结构校验结论（validation 字段），据此把中文结论告诉用户、有问题如实说。apply_operations 超时重试时逐字节复用上一次的同一 operations（相同 mid/linkSeq），不要重新分配——重新分配 linkSeq 会产生重复的平行链路。最终工程状态只接受应用层合成的结构化结果，不要自行编写 stage result。";
 
 // SKILL.md 正文每次运行注入骨架之后，用固定 sentinel 分隔，便于切分骨架段与注入段。
 const SKILL_GUIDANCE_SENTINEL = "<<<SKILL_GUIDANCE>>>";
@@ -530,8 +544,19 @@ const SCENARIO_REFERENCE_SENTINEL = "<<<SCENARIO_REFERENCE>>>";
 // 未知/缺失场景回退到通用场景（与 SKILL.md 场景路由表一致）。
 const FALLBACK_SCENARIO_ID = "generic-tsn";
 
+// 阶段 → 注入哪个 SKILL.md 目录。time-sync 注入 tsn-time-sync，其余（topology/未知）
+// 注入 tsn-topology。注入始终是单字符串拼接（绝不 string[]——string[] 会崩 redactSecrets）。
+function skillDirForStage(stageRunnerInput) {
+  const stage =
+    isRecord(stageRunnerInput) && typeof stageRunnerInput.stage === "string"
+      ? stageRunnerInput.stage
+      : undefined;
+  return stage === "time-sync" ? "tsn-time-sync" : "tsn-topology";
+}
+
 async function buildSystemPromptForStage(stageRunnerInput, skillRoot) {
-  const skillPath = join(skillRoot, "tsn-topology", "SKILL.md");
+  const skillDir = skillDirForStage(stageRunnerInput);
+  const skillPath = join(skillRoot, skillDir, "SKILL.md");
 
   let guidance;
   try {
@@ -545,6 +570,14 @@ async function buildSystemPromptForStage(stageRunnerInput, skillRoot) {
         skillPath,
         error: normalizeError(error),
       },
+    };
+  }
+
+  // 场景 reference 注入只属于拓扑阶段（references/ 是拓扑场景模板细则）。其它阶段
+  // （time-sync）只注入骨架 + 该阶段 SKILL.md 正文，不做场景分隔。
+  if (skillDir !== "tsn-topology") {
+    return {
+      systemPrompt: `${SYSTEM_PROMPT_SKELETON}\n\n${SKILL_GUIDANCE_SENTINEL}\n${guidance}`,
     };
   }
 

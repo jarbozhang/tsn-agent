@@ -1,11 +1,10 @@
-//! 拓扑阶段结构验证（第一批，不依赖 INET）。读库内拓扑（节点以 sync_name 标识、
-//! 连线以 src/dst_sync_name 引用）做确定性图论 + MAC 可达校验，返回
+//! 拓扑阶段结构验证（第一批，不依赖 INET）。读库内拓扑（节点以 mid 标识、
+//! 连线以 src/dst_node 引用）做确定性图论 + MAC 可达校验，返回
 //! `{ok, errors[], caliber}`。纯函数、可单测；不碰网络、不跑仿真。
 //!
 //! 口径恒 `structural_only`：只验结构连通/可达，不代表时延或可调度性（INET 验证是第二批）。
 //!
-//! MAC 可达性说明：转发表由"无向图最短路 BFS 取首跳"派生（见 topology_compute
-//! build_legacy_mac_forwarding_table / find_first_egress_port），按构造即无环、
+//! MAC 可达性说明：转发表由"无向图最短路 BFS 取首跳"派生，按构造即无环、
 //! 每目的唯一出端口。因此 MAC 现算现验在本模块归结为一条**连通性**判定：全图单连通
 //! ⇔ 每个端系统对其它节点全可达 ⇔ 转发表可派生。两条 BFS 跑同一条无向边集，可达性
 //! 结论按构造一致（见测试 reachability_matches_connectivity）。
@@ -52,7 +51,7 @@ pub struct VerifyResult {
 /// 校验入参（镜像库内行，保持最小以便纯函数单测）。
 #[derive(Debug, Clone)]
 pub struct VerifyNode {
-    pub sync_name: String,
+    pub mid: String,
     pub name: Option<String>,
     pub node_type: Option<String>,
 }
@@ -60,12 +59,12 @@ pub struct VerifyNode {
 #[derive(Debug, Clone)]
 pub struct VerifyLink {
     pub link_seq: i64,
-    pub src_sync_name: String,
-    pub dst_sync_name: String,
+    pub src_node: String,
+    pub dst_node: String,
     pub styles_json: String,
 }
 
-/// 节点展示名：优先用 name 列（如 SW-1/ES-1），缺失时按类型前缀 + sync_name 派生，
+/// 节点展示名：优先用 name 列（如 SW-1/ES-1），缺失时按类型前缀 + mid 派生，
 /// 与前端显示名映射一致，让结论里的节点引用对用户可读。
 fn display_name(node: &VerifyNode) -> String {
     if let Some(name) = node.name.as_deref()
@@ -79,7 +78,7 @@ fn display_name(node: &VerifyNode) -> String {
         Some(NODE_TYPE_SERVER) => "SRV",
         _ => "节点",
     };
-    format!("{prefix}-{}", node.sync_name)
+    format!("{prefix}-{}", node.mid)
 }
 
 fn is_known_role(node_type: Option<&str>) -> bool {
@@ -107,17 +106,16 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
         };
     }
 
-    let by_sync: HashMap<&str, &VerifyNode> =
-        nodes.iter().map(|n| (n.sync_name.as_str(), n)).collect();
+    let by_sync: HashMap<&str, &VerifyNode> = nodes.iter().map(|n| (n.mid.as_str(), n)).collect();
 
     // 1. 节点编号重复。
     let mut seen_sync: HashSet<&str> = HashSet::new();
     for node in nodes {
-        if !seen_sync.insert(node.sync_name.as_str()) {
+        if !seen_sync.insert(node.mid.as_str()) {
             errors.push(VerifyError::new(
                 "DUPLICATE_NODE",
-                format!("节点编号 {} 重复了。", node.sync_name),
-                Some(node.sync_name.clone()),
+                format!("节点编号 {} 重复了。", node.mid),
+                Some(node.mid.clone()),
             ));
         }
     }
@@ -131,7 +129,7 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
                     "{} 的类型未知，无法判断它是交换机还是端系统。",
                     display_name(node)
                 ),
-                Some(node.sync_name.clone()),
+                Some(node.mid.clone()),
             ));
         }
     }
@@ -155,9 +153,9 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
                 "NODE_NAME_PREFIX",
                 format!(
                     "{}（编号 {}）的名字 {} 不规范，应以 {} 开头。",
-                    role_label, node.sync_name, name, prefix
+                    role_label, node.mid, name, prefix
                 ),
-                Some(node.sync_name.clone()),
+                Some(node.mid.clone()),
             ));
         }
     }
@@ -174,7 +172,7 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
             errors.push(VerifyError::new(
                 "DUPLICATE_NAME",
                 format!("有多个节点都叫 {name}，名字要唯一（改其中一个再继续）。"),
-                Some(node.sync_name.clone()),
+                Some(node.mid.clone()),
             ));
         }
     }
@@ -193,13 +191,13 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
 
     // 4. 悬空链路（端点不存在）+ 5. 端口配对（styles_json 须有 leftLabel/rightLabel）。
     for link in links {
-        let src_ok = by_sync.contains_key(link.src_sync_name.as_str());
-        let dst_ok = by_sync.contains_key(link.dst_sync_name.as_str());
+        let src_ok = by_sync.contains_key(link.src_node.as_str());
+        let dst_ok = by_sync.contains_key(link.dst_node.as_str());
         if !src_ok || !dst_ok {
             let missing = if !src_ok {
-                &link.src_sync_name
+                &link.src_node
             } else {
-                &link.dst_sync_name
+                &link.dst_node
             };
             errors.push(VerifyError::new(
                 "DANGLING_LINK",
@@ -221,11 +219,11 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
     // 6. 孤立节点（度为 0）。
     let degree = node_degrees(nodes, links, &by_sync);
     for node in nodes {
-        if degree.get(node.sync_name.as_str()).copied().unwrap_or(0) == 0 {
+        if degree.get(node.mid.as_str()).copied().unwrap_or(0) == 0 {
             errors.push(VerifyError::new(
                 "ISOLATED_NODE",
                 format!("{} 没连任何线，是个孤立节点。", display_name(node)),
-                Some(node.sync_name.clone()),
+                Some(node.mid.clone()),
             ));
         }
     }
@@ -247,17 +245,17 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
     let has_dangling = errors.iter().any(|e| e.code == "DANGLING_LINK");
     if !has_dangling && nodes.len() > 1 {
         let adjacency = build_adjacency(nodes, links);
-        let start = nodes[0].sync_name.as_str();
+        let start = nodes[0].mid.as_str();
         let reached = reachable_from(start, &adjacency);
         for node in nodes {
-            if !reached.contains(node.sync_name.as_str()) {
+            if !reached.contains(node.mid.as_str()) {
                 errors.push(VerifyError::new(
                     "UNREACHABLE",
                     format!(
                         "{} 和拓扑其余部分不连通，转发到不了它。",
                         display_name(node)
                     ),
-                    Some(node.sync_name.clone()),
+                    Some(node.mid.clone()),
                 ));
             }
         }
@@ -277,11 +275,7 @@ fn endpoint_label(link: &VerifyLink, by_sync: &HashMap<&str, &VerifyNode>) -> St
             .map(|n| display_name(n))
             .unwrap_or_else(|| sync.to_string())
     };
-    format!(
-        "{}↔{}",
-        name_of(&link.src_sync_name),
-        name_of(&link.dst_sync_name)
-    )
+    format!("{}↔{}", name_of(&link.src_node), name_of(&link.dst_node))
 }
 
 /// styles_json 是 JSON 串，端口在 leftLabel/rightLabel；两者皆有非空值才算配对。
@@ -303,48 +297,43 @@ fn node_degrees<'a>(
     links: &[VerifyLink],
     by_sync: &HashMap<&str, &VerifyNode>,
 ) -> HashMap<&'a str, usize> {
-    let mut degree: HashMap<&str, usize> = nodes
-        .iter()
-        .map(|n| (n.sync_name.as_str(), 0usize))
-        .collect();
+    let mut degree: HashMap<&str, usize> = nodes.iter().map(|n| (n.mid.as_str(), 0usize)).collect();
     for link in links {
-        if !by_sync.contains_key(link.src_sync_name.as_str())
-            || !by_sync.contains_key(link.dst_sync_name.as_str())
+        if !by_sync.contains_key(link.src_node.as_str())
+            || !by_sync.contains_key(link.dst_node.as_str())
         {
             continue; // 悬空链路不计度（已单独报）。
         }
-        if let Some(d) = degree.get_mut(link.src_sync_name.as_str()) {
+        if let Some(d) = degree.get_mut(link.src_node.as_str()) {
             *d += 1;
         }
-        if let Some(d) = degree.get_mut(link.dst_sync_name.as_str()) {
+        if let Some(d) = degree.get_mut(link.dst_node.as_str()) {
             *d += 1;
         }
     }
     degree
 }
 
-/// 从 src/dst_sync_name 行建无向邻接（与 topology_compute build_adjacency 同规则：
+/// 从 src/dst_node 行建无向邻接（与 topology_compute build_adjacency 同规则：
 /// 每条链路加两向边）。可达性只取决于边集，与端口无关，故结论与转发表 BFS 一致。
 fn build_adjacency<'a>(
     nodes: &'a [VerifyNode],
     links: &'a [VerifyLink],
 ) -> HashMap<&'a str, Vec<&'a str>> {
-    let mut adjacency: HashMap<&str, Vec<&str>> = nodes
-        .iter()
-        .map(|n| (n.sync_name.as_str(), Vec::new()))
-        .collect();
+    let mut adjacency: HashMap<&str, Vec<&str>> =
+        nodes.iter().map(|n| (n.mid.as_str(), Vec::new())).collect();
     for link in links {
-        if adjacency.contains_key(link.src_sync_name.as_str())
-            && adjacency.contains_key(link.dst_sync_name.as_str())
+        if adjacency.contains_key(link.src_node.as_str())
+            && adjacency.contains_key(link.dst_node.as_str())
         {
             adjacency
-                .entry(link.src_sync_name.as_str())
+                .entry(link.src_node.as_str())
                 .or_default()
-                .push(link.dst_sync_name.as_str());
+                .push(link.dst_node.as_str());
             adjacency
-                .entry(link.dst_sync_name.as_str())
+                .entry(link.dst_node.as_str())
                 .or_default()
-                .push(link.src_sync_name.as_str());
+                .push(link.src_node.as_str());
         }
     }
     adjacency
@@ -376,7 +365,7 @@ mod tests {
 
     fn node(sync: &str, ty: &str) -> VerifyNode {
         VerifyNode {
-            sync_name: sync.into(),
+            mid: sync.into(),
             name: None,
             node_type: Some(ty.into()),
         }
@@ -384,8 +373,8 @@ mod tests {
     fn link(seq: i64, src: &str, dst: &str) -> VerifyLink {
         VerifyLink {
             link_seq: seq,
-            src_sync_name: src.into(),
-            dst_sync_name: dst.into(),
+            src_node: src.into(),
+            dst_node: dst.into(),
             styles_json: r#"{"leftLabel":"0","rightLabel":"0"}"#.into(),
         }
     }
@@ -394,7 +383,7 @@ mod tests {
     }
     fn named_node(sync: &str, ty: &str, name: &str) -> VerifyNode {
         VerifyNode {
-            sync_name: sync.into(),
+            mid: sync.into(),
             name: Some(name.into()),
             node_type: Some(ty.into()),
         }
@@ -477,7 +466,7 @@ mod tests {
     fn unknown_node_role_blocks() {
         let mut nodes = vec![node("0", "switch"), node("1", "endSystem")];
         nodes.push(VerifyNode {
-            sync_name: "2".into(),
+            mid: "2".into(),
             name: None,
             node_type: None,
         });
@@ -561,7 +550,7 @@ mod tests {
             named_node("0", "switch", "SW-1"),
             named_node("1", "endSystem", "ES-1"),
             VerifyNode {
-                sync_name: "2".into(),
+                mid: "2".into(),
                 name: Some("FOO-1".into()),
                 node_type: None,
             },
@@ -578,7 +567,7 @@ mod tests {
 
     #[test]
     fn duplicate_name_blocks() {
-        // review 闭环：两个不同 syncName 节点同名 → DUPLICATE_NAME（inspect 按 name 匹配依赖唯一）。
+        // review 闭环：两个不同 mid 节点同名 → DUPLICATE_NAME（inspect 按 name 匹配依赖唯一）。
         let nodes = vec![
             named_node("0", "switch", "SW-1"),
             named_node("1", "switch", "SW-1"),
@@ -619,8 +608,8 @@ mod tests {
         let nodes = vec![node("0", "switch"), node("1", "endSystem")];
         let links = vec![VerifyLink {
             link_seq: 0,
-            src_sync_name: "0".into(),
-            dst_sync_name: "1".into(),
+            src_node: "0".into(),
+            dst_node: "1".into(),
             styles_json: "{}".into(), // 无 leftLabel/rightLabel
         }];
         let r = verify_topology(&nodes, &links);
@@ -629,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_sync_name_and_link_seq_block() {
+    fn duplicate_mid_and_link_seq_block() {
         let nodes = vec![node("0", "switch"), node("0", "endSystem")];
         let links = vec![link(0, "0", "0"), link(0, "0", "0")];
         let r = verify_topology(&nodes, &links);

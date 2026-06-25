@@ -119,6 +119,7 @@ vi.mock("@xyflow/react", () => ({
   },
 }));
 
+import type { TimesyncSnapshot } from "../../../sessions/timesync-snapshot";
 import type { TopologyNodeRow, TopologyRowSnapshot } from "../../../sessions/topology-snapshot";
 import {
   nodeRowLabel,
@@ -126,6 +127,7 @@ import {
   parseLinkStyles,
   planeClassName,
   type TsnEdgeData,
+  timesyncRoleBadge,
   topologySnapshotToReactFlow,
   WorkspacePane,
   type WorkspacePaneProps,
@@ -142,10 +144,10 @@ function sampleSnapshot(): TopologyRowSnapshot {
   return {
     sessionId: "s1",
     nodes: [
-      { syncName: "1", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
-      { syncName: "2", name: null, x: 160, y: 0, nodeType: null, insertOrder: 1 },
+      { mid: "1", name: null, x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
+      { mid: "2", name: null, x: 160, y: 0, nodeType: null, insertOrder: 1 },
     ],
-    links: [{ linkSeq: 0, name: "uplink", srcSyncName: "1", dstSyncName: "2", stylesJson: "{}" }],
+    links: [{ linkSeq: 0, name: "uplink", srcNode: "1", dstNode: "2", stylesJson: "{}" }],
   };
 }
 
@@ -278,7 +280,7 @@ describe("WorkspacePane 拖动持久化（U4）", () => {
     await waitFor(() => expect(commitNodePosition).toHaveBeenCalledTimes(1));
     expect(commitNodePosition).toHaveBeenCalledWith({
       sessionId: "s1",
-      syncName: "2",
+      mid: "2",
       x: 480,
       y: 96,
       expectedMutationId: 7,
@@ -579,7 +581,7 @@ describe("WorkspacePane 画布配置与视口（R9/R12）", () => {
 describe("nodeRowLabel", () => {
   function nodeRow(overrides: Partial<TopologyNodeRow> = {}): TopologyNodeRow {
     return {
-      syncName: "2",
+      mid: "2",
       name: null,
       x: 0,
       y: 0,
@@ -591,13 +593,13 @@ describe("nodeRowLabel", () => {
 
   it("画布标签优先用逻辑名，与 agent 对话命名一致", () => {
     expect(nodeRowLabel(nodeRow({ name: "ES-1" }))).toBe("ES-1");
-    expect(nodeRowLabel(nodeRow({ name: "SW-1", nodeType: "switch", syncName: "0" }))).toBe("SW-1");
+    expect(nodeRowLabel(nodeRow({ name: "SW-1", nodeType: "switch", mid: "0" }))).toBe("SW-1");
   });
 
   it("逻辑名缺失（增量节点/历史数据）回退「前缀-同步名」派生", () => {
     expect(nodeRowLabel(nodeRow())).toBe("ES-2");
-    expect(nodeRowLabel(nodeRow({ nodeType: "switch", syncName: "0" }))).toBe("SW-0");
-    expect(nodeRowLabel(nodeRow({ nodeType: "controller", syncName: "9" }))).toBe("CTRL-9");
+    expect(nodeRowLabel(nodeRow({ nodeType: "switch", mid: "0" }))).toBe("SW-0");
+    expect(nodeRowLabel(nodeRow({ nodeType: "controller", mid: "9" }))).toBe("CTRL-9");
   });
 });
 
@@ -654,7 +656,7 @@ describe("planeClassName（R3）", () => {
 describe("topologySnapshotToReactFlow（U3 映射）", () => {
   function node(id: number, x: number, y: number): TopologyNodeRow {
     return {
-      syncName: String(id),
+      mid: String(id),
       name: null,
       x,
       y,
@@ -671,18 +673,18 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
         {
           linkSeq: 0,
           name: null,
-          srcSyncName: "10",
-          dstSyncName: "1",
+          srcNode: "10",
+          dstNode: "1",
           stylesJson: '{"plane":"A","leftLabel":"P0","rightLabel":"P0"}',
         },
         {
           linkSeq: 1,
           name: null,
-          srcSyncName: "10",
-          dstSyncName: "1",
+          srcNode: "10",
+          dstNode: "1",
           stylesJson: '{"leftLabel":"p1","rightLabel":"p2"}',
         },
-        { linkSeq: 2, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: "broken" },
+        { linkSeq: 2, name: null, srcNode: "10", dstNode: "1", stylesJson: "broken" },
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
@@ -704,18 +706,18 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
         {
           linkSeq: 0,
           name: null,
-          srcSyncName: "10",
-          dstSyncName: "1",
+          srcNode: "10",
+          dstNode: "1",
           stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}',
         },
         {
           linkSeq: 1,
           name: null,
-          srcSyncName: "10",
-          dstSyncName: "1",
+          srcNode: "10",
+          dstNode: "1",
           stylesJson: '{"leftLabel":"P1","rightLabel":"P1"}',
         },
-        { linkSeq: 2, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: "broken" },
+        { linkSeq: 2, name: null, srcNode: "10", dstNode: "1", stylesJson: "broken" },
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
@@ -733,22 +735,22 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
         {
           linkSeq: 0,
           name: null,
-          srcSyncName: "10",
-          dstSyncName: "1",
+          srcNode: "10",
+          dstNode: "1",
           stylesJson: '{"leftLabel":"P0","rightLabel":"P0"}',
         },
         {
           linkSeq: 1,
           name: null,
-          srcSyncName: "10",
-          dstSyncName: "1",
+          srcNode: "10",
+          dstNode: "1",
           stylesJson: '{"leftLabel":"P1","rightLabel":"P1"}',
         },
         {
           linkSeq: 2,
           name: null,
-          srcSyncName: "2",
-          dstSyncName: "3",
+          srcNode: "2",
+          dstNode: "3",
           stylesJson: "{}",
         },
       ],
@@ -765,8 +767,8 @@ describe("topologySnapshotToReactFlow（U3 映射）", () => {
       sessionId: "s1",
       nodes: [node(1, 120, 300), node(10, 90, 60)],
       links: [
-        { linkSeq: 0, name: null, srcSyncName: "10", dstSyncName: "1", stylesJson: "{}" },
-        { linkSeq: 1, name: null, srcSyncName: "1", dstSyncName: "10", stylesJson: "{}" },
+        { linkSeq: 0, name: null, srcNode: "10", dstNode: "1", stylesJson: "{}" },
+        { linkSeq: 1, name: null, srcNode: "1", dstNode: "10", stylesJson: "{}" },
       ],
     };
     const { edges } = topologySnapshotToReactFlow(snapshot);
@@ -940,5 +942,135 @@ describe("floatingEdgeAnchors（U3 交点纯函数）", () => {
     expect(portLabelPoint(100, 50, "top" as never, 1)).toEqual({ x: 100, y: 23 });
     expect(portLabelPoint(100, 50, "bottom" as never, 2)).toEqual({ x: 100, y: 90 });
     expect(portLabelPoint(100, 50, "right" as never, 1)).toEqual({ x: 136, y: 50 });
+  });
+});
+
+// U11：time-sync 阶段时钟树视图（GM 高亮、端口角色、未覆盖告警）。
+describe("WorkspacePane 时钟同步视图（U11）", () => {
+  // 线性 SW-1(0) — ES-2(1)，GM=0：0 master=[0]，1 slave=[0]。
+  function timesyncFor(gmMid: string | null): TimesyncSnapshot {
+    return {
+      sessionId: "s1",
+      domain: gmMid
+        ? { gmMid, oneStepMode: 0, freSwitch: 0, disabledLinkSeqs: [] }
+        : { gmMid: null, oneStepMode: 0, freSwitch: 0, disabledLinkSeqs: [] },
+      nodes: gmMid
+        ? [
+            {
+              mid: "1",
+              masterPort: [0],
+              slavePort: [],
+              portPtpEnabled: [0],
+              syncPeriod: 128,
+              measurePeriod: 1024,
+              reportEnable: 1,
+              meanLinkDelayThresh: 64,
+              offsetThreshold: 1000,
+            },
+            {
+              mid: "2",
+              masterPort: [],
+              slavePort: [0],
+              portPtpEnabled: [0],
+              syncPeriod: 128,
+              measurePeriod: 1024,
+              reportEnable: 1,
+              meanLinkDelayThresh: 64,
+              offsetThreshold: 1000,
+            },
+          ]
+        : [],
+    };
+  }
+
+  function namedSnapshot(): TopologyRowSnapshot {
+    return {
+      sessionId: "s1",
+      nodes: [
+        { mid: "1", name: "SW-1", x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
+        { mid: "2", name: "ES-2", x: 160, y: 0, nodeType: "endSystem", insertOrder: 1 },
+      ],
+      links: [{ linkSeq: 0, name: null, srcNode: "1", dstNode: "2", stylesJson: "{}" }],
+    };
+  }
+
+  it("topology 阶段不显示时钟同步栏", () => {
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: namedSnapshot(),
+          workflowStep: "topology",
+          timesyncSnapshot: timesyncFor("1"),
+        })}
+      />,
+    );
+    expect(screen.queryByLabelText("时钟同步")).not.toBeInTheDocument();
+  });
+
+  it("time-sync 阶段显示时钟同步栏与 GM 显示名", () => {
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: namedSnapshot(),
+          workflowStep: "time-sync",
+          timesyncSnapshot: timesyncFor("1"),
+        })}
+      />,
+    );
+    const bar = screen.getByLabelText("时钟同步");
+    expect(bar).toHaveTextContent("时钟同步树");
+    // GM = mid "1" → 显示名 SW-1。
+    expect(bar).toHaveTextContent("SW-1");
+  });
+
+  it("time-sync 阶段未设 GM 时提示未指定", () => {
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: namedSnapshot(),
+          workflowStep: "time-sync",
+          timesyncSnapshot: timesyncFor(null),
+        })}
+      />,
+    );
+    expect(screen.getByLabelText("时钟同步")).toHaveTextContent("未指定时钟主节点");
+  });
+
+  it("time-sync 阶段未覆盖节点进告警", () => {
+    // GM=1 落库但 ES-2 不在 timesync_nodes（不连通）→ 未覆盖告警含 ES-2。
+    const partial: TimesyncSnapshot = {
+      sessionId: "s1",
+      domain: { gmMid: "1", oneStepMode: 0, freSwitch: 0, disabledLinkSeqs: [] },
+      nodes: [
+        {
+          mid: "1",
+          masterPort: [],
+          slavePort: [],
+          portPtpEnabled: [],
+          syncPeriod: 128,
+          measurePeriod: 1024,
+          reportEnable: 1,
+          meanLinkDelayThresh: 64,
+          offsetThreshold: 1000,
+        },
+      ],
+    };
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: namedSnapshot(),
+          workflowStep: "time-sync",
+          timesyncSnapshot: partial,
+        })}
+      />,
+    );
+    expect(screen.getByText(/未覆盖/)).toHaveTextContent("ES-2");
+  });
+
+  it("timesyncRoleBadge 文案映射", () => {
+    expect(timesyncRoleBadge("gm")).toBe("GM");
+    expect(timesyncRoleBadge("synced")).toBe("同步");
+    expect(timesyncRoleBadge("passive")).toBe("旁路");
+    expect(timesyncRoleBadge("uncovered")).toBe("未覆盖");
   });
 });
