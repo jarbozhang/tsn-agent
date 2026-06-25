@@ -18,8 +18,35 @@ jobs:
       - name: Run legacy-types scan
         run: bash scripts/check-no-legacy-types.sh
 
+  test:
+    name: Tests (vitest + Playwright e2e)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # vitest 用源码 TS（不读 src-node/dist），无需 build:worker。
+      - name: Unit tests (vitest)
+        run: npm test
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # web 预览（非 Tauri）fail-closed smoke；webServer 由 playwright 自动起 vite。
+      - name: E2E (Playwright)
+        run: npm run e2e
+
   lint:
-    name: Lint (Biome + Rust)
+    name: Lint + Rust tests (Biome + Rust)
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -73,3 +100,8 @@ jobs:
 
       - name: clippy -D warnings
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      # clippy --all-targets 已编译测试目标，cargo test 在同 job 内增量复用、不重复全量编译。
+      # dist 占位同 clippy 所需（build script 校验 resources 路径）。
+      - name: cargo test
+        run: cargo test --manifest-path src-tauri/Cargo.toml
