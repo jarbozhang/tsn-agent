@@ -910,8 +910,9 @@ describe("App", () => {
     expect(header?.textContent).not.toMatch(/已运行/);
     expect(container.querySelector(".agent-run-status")).toBeNull();
 
-    // 状态文案下沉到输入框区，发送键切成终止键。
-    expect(container.querySelector(".composer-run-status")?.textContent).toMatch(/已运行 \d+ 秒/);
+    // 状态文案下沉到输入框 placeholder，发送键切成终止键。
+    const textarea = screen.getByLabelText("输入你的 TSN 需求");
+    expect(textarea.getAttribute("placeholder")).toMatch(/已运行 \d+ 秒/);
     expect(screen.getByRole("button", { name: "终止推理" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "生成规划草案" })).toBeNull();
 

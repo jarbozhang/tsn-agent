@@ -254,7 +254,7 @@ describe("ChatPane", () => {
     expect(screen.queryByRole("button", { name: "终止推理" })).toBeNull();
   });
 
-  it("shows the phase message and elapsed seconds in the composer status line while running (U3)", () => {
+  it("shows the phase message and elapsed seconds in the textarea placeholder while running (U3)", () => {
     const { rerender } = render(
       <ChatPane
         {...baseProps({
@@ -264,11 +264,14 @@ describe("ChatPane", () => {
         })}
       />,
     );
-    expect(screen.getByText(/正在持续推理/)).toBeInTheDocument();
-    expect(screen.getByText(/已运行 5 秒/)).toBeInTheDocument();
+    // 推理态：运行状态走 textarea placeholder（复用闲置的 placeholder 空间）。
+    expect(screen.getByPlaceholderText(/正在持续推理/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/已运行 5 秒/)).toBeInTheDocument();
 
     rerender(<ChatPane {...baseProps({ isAgentRunning: false })} />);
-    expect(screen.queryByText(/已运行/)).toBeNull();
+    // 非推理态：placeholder 退回场景示例。
+    expect(screen.queryByPlaceholderText(/已运行/)).toBeNull();
+    expect(screen.getByPlaceholderText(/例如：/)).toBeInTheDocument();
   });
 
   it("keeps the textarea editable while running and shows the terminate button (U3, R3)", async () => {
@@ -285,7 +288,7 @@ describe("ChatPane", () => {
     expect(onInputChange).toHaveBeenCalled();
   });
 
-  it("keeps the stage-confirmation card alongside the status line and terminate button (U3)", () => {
+  it("keeps the stage-confirmation card alongside the running placeholder and terminate button (U3)", () => {
     const workflow = createInitialWorkflowState();
     const waitingStage = {
       ...workflow.stages[workflow.currentStep],
@@ -305,6 +308,6 @@ describe("ChatPane", () => {
 
     expect(screen.getByRole("button", { name: "确认并继续" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "终止推理" })).toBeInTheDocument();
-    expect(screen.getByText(/已运行 3 秒/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/已运行 3 秒/)).toBeInTheDocument();
   });
 });

@@ -198,16 +198,17 @@ export function ChatPane({
           </div>
         )}
         <div className="composer-box">
-          {isAgentRunning && agentRunPhase && (
-            <div className="composer-run-status" role="status">
-              {getAgentRunStatusMessage(agentRunPhase)} · 已运行 {agentRunElapsedSeconds ?? 0} 秒
-            </div>
-          )}
           <textarea
             id="intent"
             aria-label="输入你的 TSN 需求"
             value={input}
-            placeholder={`例如：${scenarioConfig.exampleIntent}`}
+            // 推理态复用 placeholder 显示运行状态（首次指引后 placeholder 即闲置）；
+            // 输入框为空时可见，用户开始打字则让位给输入内容（「终止」按钮仍指示运行中）。
+            placeholder={
+              isAgentRunning && agentRunPhase
+                ? `${getAgentRunStatusMessage(agentRunPhase)} · 已运行 ${agentRunElapsedSeconds ?? 0} 秒`
+                : `例如：${scenarioConfig.exampleIntent}`
+            }
             onChange={(event) => onInputChange(event.target.value)}
             onKeyDown={(event) => {
               // IME 选词中的 Enter 是确认候选，不发送。

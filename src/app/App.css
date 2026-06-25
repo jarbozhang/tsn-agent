@@ -1608,13 +1608,6 @@ textarea:focus-visible {
   box-shadow: 0 6px 16px rgba(250, 84, 28, 0.28);
 }
 
-.composer-run-status {
-  margin-bottom: 7px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
 .composer-box button.is-terminate {
   background: var(--error);
 }
