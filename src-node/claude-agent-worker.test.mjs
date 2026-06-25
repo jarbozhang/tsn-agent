@@ -1208,6 +1208,119 @@ describe("claude-agent-worker", () => {
     });
   });
 
+  it("U3/U4: appends a raw eval record with native output blocks and apply/validate label", async () => {
+    const evalDir = await mkdtemp(join(tmpdir(), "tsn-agent-eval-test-"));
+    const query = async function* (_input) {
+      yield { type: "system", session_id: "sdk-session-eval" };
+      yield {
+        type: "assistant",
+        session_id: "sdk-session-eval",
+        message: {
+          content: [
+            { type: "text", text: "我先应用修改" },
+            {
+              type: "tool_use",
+              id: "toolu-eval",
+              name: "mcp__tsn_topology__topology_apply_operations",
+              input: { operations: [], dryRun: false },
+            },
+          ],
+        },
+      };
+      yield {
+        type: "user",
+        session_id: "sdk-session-eval",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu-eval",
+              content: JSON.stringify({
+                ok: true,
+                summary: { mutationId: 2 },
+                validation: { ran: true, valid: true, caliber: "structural_only", errors: [] },
+              }),
+            },
+          ],
+        },
+      };
+      yield { type: "result", session_id: "sdk-session-eval", result: "已应用" };
+    };
+
+    await runClaude(
+      "把端系统改成 6 个 sk-ant-SECRET123",
+      {
+        evalDir,
+        appSessionId: "session-eval",
+        runId: "agent-run-eval",
+        skillRoot: "/tmp/tsn-agent-eval-skill-root",
+        stageRunnerInput: {
+          userIntent: "改端系统",
+          stage: "topology",
+          scenarioConfigId: "generic-tsn",
+        },
+      },
+      query,
+    );
+
+    const lines = (await readFile(join(evalDir, "eval.jsonl"), "utf8")).trim().split("\n");
+    expect(lines).toHaveLength(1);
+    const record = JSON.parse(lines[0]);
+
+    expect(record.schemaVersion).toBe("tsn-agent.eval-record.v1");
+    expect(record.runId).toBe("agent-run-eval");
+    expect(record.sessionId).toBe("session-eval");
+    expect(record.claudeSessionId).toBe("sdk-session-eval");
+    expect(record.stage).toBe("topology");
+    expect(record.scenarioConfigId).toBe("generic-tsn");
+    // input.system 为 raw（含骨架）；input.messages 历史标记有损。
+    expect(record.input.system).toContain("你是 TSN Agent 的规划助手");
+    expect(record.input.lossyHistory).toBe(true);
+    expect(record.input.messages[0].content[0].text).toContain("把端系统改成 6 个");
+    // input 侧 raw：密钥原文不脱敏。
+    expect(record.input.messages[0].content[0].text).toContain("sk-ant-SECRET123");
+    // output 为原生 blocks（text + tool_use + tool_result），未截断。
+    const assistantBlocks = record.output.messages.find((m) => m.role === "assistant").content;
+    expect(assistantBlocks.some((b) => b.type === "tool_use")).toBe(true);
+    const userBlocks = record.output.messages.find((m) => m.role === "user").content;
+    expect(userBlocks[0].type).toBe("tool_result");
+    // label 取自 apply_operations 的 verification。
+    expect(record.label).toEqual({ ok: true, caliber: "structural_only", errors: [] });
+    // 指纹：未读到 SKILL.md → skillHash null；骨架 hash 非空。
+    expect(record.fingerprint.skillHash).toBeNull();
+    expect(record.fingerprint.skeletonVersion).toMatch(/^sha256:/);
+    expect(record.fingerprint.model).toBe("claude-sonnet-4-6");
+    expect(typeof record.input.toolsHash).toBe("string");
+  });
+
+  it("U3/U4: eval record label is null for runs without apply/validate", async () => {
+    const evalDir = await mkdtemp(join(tmpdir(), "tsn-agent-eval-nolabel-"));
+    const query = async function* (_input) {
+      yield { type: "system", session_id: "sdk-session-nolabel" };
+      yield {
+        type: "assistant",
+        session_id: "sdk-session-nolabel",
+        message: { content: [{ type: "text", text: "好的" }] },
+      };
+      yield { type: "result", session_id: "sdk-session-nolabel", result: "好的" };
+    };
+
+    await runClaude(
+      "随便聊聊",
+      {
+        evalDir,
+        appSessionId: "session-nolabel",
+        runId: "agent-run-nolabel",
+        skillRoot: "/tmp/tsn-agent-eval-skill-root",
+        stageRunnerInput: { userIntent: "聊", stage: "topology", scenarioConfigId: "generic-tsn" },
+      },
+      query,
+    );
+
+    const record = JSON.parse((await readFile(join(evalDir, "eval.jsonl"), "utf8")).trim());
+    expect(record.label).toBeNull();
+  });
+
   it("writes a per-session audit log with prompt, result, and tool traces", async () => {
     const auditDir = await mkdtemp(join(tmpdir(), "tsn-agent-audit-test-"));
     const query = async function* (_input) {

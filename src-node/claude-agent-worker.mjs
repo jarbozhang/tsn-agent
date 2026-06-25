@@ -1,11 +1,13 @@
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { createTopologyWorkflowStageResult } from "../src/agent/topology-workflow-stage-result";
+import { buildEvalRecord, serializeEvalRecordLine } from "./eval/eval-record";
+import { buildFingerprint, computeToolsHash } from "./eval/fingerprint";
 import { fetchSidecar } from "./mcp/sidecar-client";
 
 const TOPOLOGY_MCP_SERVER_NAME = "tsn_topology";
@@ -106,6 +108,8 @@ export const responseSchema = {
 
 export async function runClaude(userPrompt, options = {}, queryFn = query) {
   const resolvedOptions = typeof options === "string" ? { cwd: options } : options;
+  // Plan 2026-06-25-002 U3：eval 记录起始时刻（durationMs）。
+  const evalStartedAt = Date.now();
   const cwd =
     typeof resolvedOptions.cwd === "string" && resolvedOptions.cwd.length > 0
       ? resolvedOptions.cwd
@@ -184,8 +188,13 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     stageResultPath,
     resolvedOptions.stageRunnerInput,
   );
-  const { systemPrompt, skillReadWarning, scenarioReference, scenarioReferenceWarning } =
-    await buildSystemPromptForStage(resolvedOptions.stageRunnerInput, skillRoot);
+  const {
+    systemPrompt,
+    skillContent,
+    skillReadWarning,
+    scenarioReference,
+    scenarioReferenceWarning,
+  } = await buildSystemPromptForStage(resolvedOptions.stageRunnerInput, skillRoot);
   const finalPrompt = buildPrompt(
     userPrompt,
     resolvedOptions.conversationContext,
@@ -251,6 +260,60 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
   if (scenarioReferenceWarning) {
     recordAuditTimeline(auditLog, scenarioReferenceWarning);
   }
+
+  // Plan 2026-06-25-002 U3/U4：eval 捕获——版本指纹、原生 output blocks 累加器、
+  // apply/validate 弱标签。input.system + output.* 为 raw（不脱敏）；input.messages
+  // 历史侧只有 worker 持有的 finalPrompt（含 conversationContext 有损摘要，KTD3）。
+  const evalStageInput = resolvedOptions.stageRunnerInput;
+  const evalStage =
+    isRecord(evalStageInput) && typeof evalStageInput.stage === "string"
+      ? evalStageInput.stage
+      : null;
+  const evalScenarioId =
+    isRecord(evalStageInput) && typeof evalStageInput.scenarioConfigId === "string"
+      ? evalStageInput.scenarioConfigId
+      : null;
+  const evalFingerprint = buildFingerprint({
+    skillContent,
+    skeleton: SYSTEM_PROMPT_SKELETON,
+    scenarioId: evalScenarioId,
+    model: sdkOptions.model,
+  });
+  const evalToolsHash = computeToolsHash(
+    Array.isArray(sdkOptions.allowedTools) ? sdkOptions.allowedTools : [],
+  );
+  const evalOutputMessages = [];
+  let evalLabel = null;
+  const finalizeEval = async (finalText) => {
+    await writeEvalRecord({
+      evalDir: resolvedOptions.evalDir,
+      runId: resolvedOptions.runId,
+      appSessionId: resolvedOptions.appSessionId,
+      claudeSessionId: sessionId,
+      stage: evalStage,
+      scenarioConfigId: evalScenarioId,
+      model: sdkOptions.model,
+      durationMs: Date.now() - evalStartedAt,
+      fingerprint: evalFingerprint,
+      system: systemPrompt,
+      toolsHash: evalToolsHash,
+      inputMessages: [{ role: "user", content: [{ type: "text", text: finalPrompt }] }],
+      outputMessages: evalOutputMessages,
+      finalText: typeof finalText === "string" ? finalText : "",
+      label: evalLabel,
+    });
+  };
+  const recordEvalOutput = (role, message) => {
+    const blocks = collectContentBlocks(message);
+    if (blocks.length > 0) {
+      evalOutputMessages.push({ role, content: blocks });
+    }
+    const label = extractEvalLabel(blocks, toolUseNamesById);
+    if (label) {
+      evalLabel = label;
+    }
+  };
+
   const currentPromptRunId = "initial";
   const handleSdkMessage = (message) => {
     if (message.type === "system" && message.session_id) {
@@ -271,6 +334,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
       collectToolCalls(message);
       captureTopologyStageResults(message);
       captureStageChangeRequests(message);
+      recordEvalOutput("assistant", message);
 
       if (emittedText.length === 0) {
         for (const text of extractAssistantTextBlocks(message)) {
@@ -301,6 +365,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
       collectToolCalls(message);
       captureTopologyStageResults(message);
       captureStageChangeRequests(message);
+      recordEvalOutput("user", message);
     }
 
     if (message.type === "result") {
@@ -442,6 +507,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
         error,
         recovered: true,
       });
+      await finalizeEval(recoveredText);
 
       return {
         assistantText: recoveredText,
@@ -458,6 +524,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
       stageResults,
       error,
     });
+    await finalizeEval(assistantText);
     throw error;
   }
 
@@ -482,6 +549,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
       stageResults: finalStageResults,
       error,
     });
+    await finalizeEval(assistantText);
     throw error;
   }
 
@@ -491,6 +559,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     sessionId,
     stageResults: finalStageResults,
   });
+  await finalizeEval(finalAssistantText);
 
   return {
     assistantText: finalAssistantText,
@@ -584,6 +653,7 @@ async function buildSystemPromptForStage(stageRunnerInput, skillRoot) {
   if (skillDir !== "tsn-topology") {
     return {
       systemPrompt: `${SYSTEM_PROMPT_SKELETON}\n\n${SKILL_GUIDANCE_SENTINEL}\n${guidance}`,
+      skillContent: guidance,
     };
   }
 
@@ -649,6 +719,7 @@ async function buildSystemPromptForStage(stageRunnerInput, skillRoot) {
   if (referenceBody === null) {
     return {
       systemPrompt: `${SYSTEM_PROMPT_SKELETON}\n\n${SKILL_GUIDANCE_SENTINEL}\n${guidance}`,
+      skillContent: guidance,
       scenarioReference,
       scenarioReferenceWarning,
     };
@@ -671,6 +742,7 @@ async function buildSystemPromptForStage(stageRunnerInput, skillRoot) {
 
   return {
     systemPrompt: `${SYSTEM_PROMPT_SKELETON}\n\n${SKILL_GUIDANCE_SENTINEL}\n${guidance}\n\n${SCENARIO_REFERENCE_SENTINEL}\n${referenceBody}${pathTable}`,
+    skillContent: guidance,
     scenarioReference,
     scenarioReferenceWarning,
   };
@@ -914,6 +986,95 @@ async function finalizeAgentRunAudit(auditLog, output) {
   } catch {
     return undefined;
   }
+}
+
+// Plan 2026-06-25-002 U3/U4：把一条 raw eval 记录 append 到注入的 eval/ 目录（JSONL）。
+// 未注入 evalDir（dev/test）或写盘失败均降级——不阻断本轮 agent（R5）。文件首建设 0600。
+async function writeEvalRecord(input) {
+  const evalDir = input.evalDir;
+  if (typeof evalDir !== "string" || !evalDir.trim()) {
+    return undefined;
+  }
+  try {
+    await mkdir(evalDir, { recursive: true });
+    const filePath = join(evalDir, "eval.jsonl");
+    const existed = existsSync(filePath);
+    const record = buildEvalRecord({
+      runId: input.runId,
+      appSessionId: input.appSessionId,
+      claudeSessionId: input.claudeSessionId,
+      stage: input.stage,
+      scenarioConfigId: input.scenarioConfigId,
+      model: input.model,
+      createdAt: new Date().toISOString(),
+      durationMs: input.durationMs,
+      fingerprint: input.fingerprint,
+      system: input.system,
+      toolsHash: input.toolsHash,
+      inputMessages: input.inputMessages,
+      outputMessages: input.outputMessages,
+      finalText: input.finalText,
+      label: input.label,
+    });
+    await appendFile(filePath, serializeEvalRecordLine(record), "utf8");
+    if (!existed) {
+      try {
+        await chmod(filePath, 0o600);
+      } catch {
+        // Windows 等不支持 chmod，忽略。
+      }
+    }
+    return filePath;
+  } catch {
+    return undefined;
+  }
+}
+
+// label 取 worker 内 apply/validate 工具结果的 verification（KTD4）；拓扑外/无则 null。
+const EVAL_LABEL_TOOLS = new Set([
+  "mcp__tsn_topology__topology_apply_operations",
+  "mcp__tsn_topology__topology_validate",
+]);
+
+function extractEvalLabel(blocks, toolUseNamesById) {
+  for (const block of blocks) {
+    if (block?.type !== "tool_result") {
+      continue;
+    }
+    const toolUseId = typeof block.tool_use_id === "string" ? block.tool_use_id : undefined;
+    const toolName = toolUseId ? toolUseNamesById.get(toolUseId) : undefined;
+    if (!toolName || !EVAL_LABEL_TOOLS.has(toolName)) {
+      continue;
+    }
+    const label = normalizeEvalLabel(extractJsonFromToolResultBlock(block));
+    if (label) {
+      return label;
+    }
+  }
+  return null;
+}
+
+function normalizeEvalLabel(result) {
+  if (!isRecord(result)) {
+    return null;
+  }
+  // apply_operations 返回带 validation 子对象；validate 直接是 VerifyResult。
+  const verification = isRecord(result.validation) ? result.validation : result;
+  const ok =
+    typeof verification.ok === "boolean"
+      ? verification.ok
+      : typeof verification.valid === "boolean"
+        ? verification.valid
+        : undefined;
+  const caliber = typeof verification.caliber === "string" ? verification.caliber : undefined;
+  if (ok === undefined && caliber === undefined) {
+    return null;
+  }
+  return {
+    ok: ok ?? false,
+    caliber: caliber ?? "structural_only",
+    errors: Array.isArray(verification.errors) ? verification.errors : [],
+  };
 }
 
 function summarizeSdkOptionsForAudit(options) {
@@ -1857,6 +2018,7 @@ export async function runWorker(rawInput) {
     appSessionId: typeof input.appSessionId === "string" ? input.appSessionId : undefined,
     runId: typeof input.runId === "string" ? input.runId : undefined,
     auditDir: typeof input.auditDir === "string" ? input.auditDir : undefined,
+    evalDir: typeof input.evalDir === "string" ? input.evalDir : undefined,
     skillRoot: typeof input.skillRoot === "string" ? input.skillRoot : undefined,
     claudeBinaryPath:
       typeof input.claudeBinaryPath === "string" ? input.claudeBinaryPath : undefined,

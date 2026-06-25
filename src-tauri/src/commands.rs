@@ -209,6 +209,7 @@ fn run_claude_agent_blocking(
     let run_id = request.run_id.clone().unwrap_or_else(create_run_id);
     let app_session_id = request.app_session_id.clone();
     let audit_dir = agent_audit_dir(&app).map(strip_verbatim_prefix);
+    let eval_dir = eval_store_dir(&app).map(strip_verbatim_prefix);
     // 打包态：随 app 分发的 claude binary 路径（dev 态 None → SDK 默认用 node_modules 平台包）。
     let claude_binary_path = find_claude_binary(Some(&app));
     // 同源（R2）：worker 与编辑器消费同一有效 skill 根决策（含 app-data 懒播种）。
@@ -281,6 +282,7 @@ fn run_claude_agent_blocking(
         "runId": run_id,
         "appSessionId": request.app_session_id,
         "auditDir": audit_dir,
+        "evalDir": eval_dir,
         "skillRoot": skill_root,
         "claudeBinaryPath": claude_binary_path,
         "resumeSessionId": request.resume_session_id,
@@ -658,6 +660,16 @@ fn agent_audit_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
         .app_data_dir()
         .ok()
         .map(|path| path.join("agent-runs"))
+}
+
+/// Plan 2026-06-25-002 U4：raw eval store 目录。放 app-config 下 `eval/`——与 sessions.db、
+/// logs/ 同源（非 iCloud/Dropbox/TimeMachine 默认同步目录，KTD6），独立于会话生命周期、
+/// 排除在既有 session 导出之外（见 session_export）。
+pub fn eval_store_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|path| path.join("eval"))
 }
 
 fn log_worker_event(
