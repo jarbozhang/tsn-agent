@@ -419,7 +419,7 @@ pub fn parse_link_ports_and_speed(styles_json: &str) -> (Option<i64>, Option<i64
 
 /// 端口标签数字提取：只认 `P<digits>`（大小写 P，如 `"P1"`→1）或纯数字（`"1"`→1）。
 /// 其余（`"eth0"`/`"GE0/1"`/空）→ None，避免跳过任意前缀误把 `"eth0"` 解析成 0。
-fn parse_port_label(label: &str) -> Option<i64> {
+pub(crate) fn parse_port_label(label: &str) -> Option<i64> {
     let digits = label.strip_prefix(['P', 'p']).unwrap_or(label);
     if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
         None
