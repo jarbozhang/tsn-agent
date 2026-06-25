@@ -187,6 +187,8 @@ mod tests {
             link_seq: seq,
             src_node: src.into(),
             dst_node: dst.into(),
+            src_port: Some(0),
+            dst_port: Some(0),
             styles_json: r#"{"leftLabel":"0","rightLabel":"0","speed":1000}"#.into(),
         }
     }
@@ -284,6 +286,8 @@ mod tests {
             link_seq: 0,
             src_node: "0".into(),
             dst_node: "1".into(),
+            src_port: Some(0),
+            dst_port: Some(0),
             styles_json: r#"{"speed":"0; import evil"}"#.into(),
         };
         let b = build_inet_bundle(&nodes, &[bad], "s1", 1).unwrap();

@@ -61,6 +61,9 @@ pub struct VerifyLink {
     pub link_seq: i64,
     pub src_node: String,
     pub dst_node: String,
+    /// 端口配对的结构事实源（KTD1）：两列非 NULL = 配对。不再读 styles_json.leftLabel。
+    pub src_port: Option<i64>,
+    pub dst_port: Option<i64>,
     pub styles_json: String,
 }
 
@@ -206,7 +209,7 @@ pub fn verify_topology(nodes: &[VerifyNode], links: &[VerifyLink]) -> VerifyResu
             ));
             continue;
         }
-        if !link_ports_paired(&link.styles_json) {
+        if !link_ports_paired(link.src_port, link.dst_port) {
             let label = endpoint_label(link, &by_sync);
             errors.push(VerifyError::new(
                 "PORT_UNPAIRED",
@@ -278,18 +281,9 @@ fn endpoint_label(link: &VerifyLink, by_sync: &HashMap<&str, &VerifyNode>) -> St
     format!("{}↔{}", name_of(&link.src_node), name_of(&link.dst_node))
 }
 
-/// styles_json 是 JSON 串，端口在 leftLabel/rightLabel；两者皆有非空值才算配对。
-fn link_ports_paired(styles_json: &str) -> bool {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(styles_json) else {
-        return false;
-    };
-    let has = |key: &str| {
-        value
-            .get(key)
-            .map(|v| !v.is_null() && *v != "\"\"")
-            .unwrap_or(false)
-    };
-    has("leftLabel") && has("rightLabel")
+/// 端口配对：src_port/dst_port 两列皆非 NULL 才算配对（KTD1，列是结构事实源）。
+fn link_ports_paired(src_port: Option<i64>, dst_port: Option<i64>) -> bool {
+    src_port.is_some() && dst_port.is_some()
 }
 
 fn node_degrees<'a>(
@@ -375,7 +369,9 @@ mod tests {
             link_seq: seq,
             src_node: src.into(),
             dst_node: dst.into(),
-            styles_json: r#"{"leftLabel":"0","rightLabel":"0"}"#.into(),
+            src_port: Some(0),
+            dst_port: Some(0),
+            styles_json: "{}".into(),
         }
     }
     fn codes(r: &VerifyResult) -> Vec<&str> {
@@ -610,11 +606,44 @@ mod tests {
             link_seq: 0,
             src_node: "0".into(),
             dst_node: "1".into(),
-            styles_json: "{}".into(), // 无 leftLabel/rightLabel
+            src_port: Some(0),
+            dst_port: None, // 一端口列 NULL → 未配对
+            styles_json: "{}".into(),
         }];
         let r = verify_topology(&nodes, &links);
         assert!(!r.ok);
         assert!(codes(&r).contains(&"PORT_UNPAIRED"));
+    }
+
+    // U7/AE10（verify 侧）：端口列齐全但 styles_json 无 leftLabel → 仍配对（不再依赖 styles_json）。
+    #[test]
+    fn paired_ports_without_leftlabel_pass() {
+        let nodes = vec![
+            node("0", "switch"),
+            node("1", "endSystem"),
+            node("2", "endSystem"),
+        ];
+        let links = vec![
+            VerifyLink {
+                link_seq: 0,
+                src_node: "0".into(),
+                dst_node: "1".into(),
+                src_port: Some(1),
+                dst_port: Some(0),
+                styles_json: r#"{"plane":"A"}"#.into(),
+            },
+            VerifyLink {
+                link_seq: 1,
+                src_node: "0".into(),
+                dst_node: "2".into(),
+                src_port: Some(2),
+                dst_port: Some(0),
+                styles_json: r#"{"plane":"A"}"#.into(),
+            },
+        ];
+        let r = verify_topology(&nodes, &links);
+        assert!(r.ok, "errors: {:?}", r.errors);
+        assert!(!codes(&r).contains(&"PORT_UNPAIRED"));
     }
 
     #[test]
