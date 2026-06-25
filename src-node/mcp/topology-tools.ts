@@ -404,10 +404,21 @@ export function applyOperationsInputSchema(): z.ZodRawShape {
       name: z.string().optional(),
       srcNode: z.string(),
       dstNode: z.string(),
+      srcPort: z
+        .number()
+        .int()
+        .describe(
+          "链路在 srcNode 上占用的端口号（端口是结构事实源、直写列）。新生成拓扑端口 P0 起编，填两端节点实际端口；必传——缺省会被拒绝（端口不再从 stylesJson 解析）",
+        ),
+      dstPort: z
+        .number()
+        .int()
+        .describe("链路在 dstNode 上占用的端口号；必传——缺省会被拒绝"),
+      speed: z.number().int().optional().describe("链路速率 Mbps（可选，缺省由 bundle 取默认）"),
       stylesJson: z
         .string()
         .describe(
-          "复制 inspect 返回的既有链路 stylesJson 作为格式参照（leftLabel/rightLabel/speed；模板链路可能另含 plane/role）。plane 表示平面归属（A/B），新链路须按两端节点实际平面填写或直接省略该键——抄错平面会让画布配色误导用户。leftLabel/rightLabel 会作为端口号渲染在连线两端（源端/目标端），新链路应填两端节点实际端口（新生成拓扑为 P0 起编）或省略，不要照抄参照链路的值",
+          "仅承载显示属性：plane（平面归属 A/B，决定画布配色，按两端节点实际平面填写或省略该键——抄错平面会让画布配色误导用户）、role（角色）。端口号/速率不再放这里，走 srcPort/dstPort/speed 显式字段",
         ),
     })
     .strict();

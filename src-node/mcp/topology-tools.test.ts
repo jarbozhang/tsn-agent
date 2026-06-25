@@ -650,14 +650,20 @@ describe("applyOperationsInputSchema", () => {
         linkSeq: 23,
         srcNode: "0",
         dstNode: "24",
-        stylesJson: '{"leftLabel":"P1","rightLabel":"P1","speed":1000}',
+        srcPort: 1,
+        dstPort: 1,
+        speed: 1000,
+        stylesJson: '{"plane":"A","role":"master"}',
       },
       {
         op: "link_add",
         linkSeq: 24,
         srcNode: "24",
         dstNode: "1",
-        stylesJson: '{"leftLabel":"P2","rightLabel":"P1","speed":1000}',
+        srcPort: 2,
+        dstPort: 1,
+        speed: 1000,
+        stylesJson: '{"plane":"A","role":"slave"}',
       },
     ],
   };
@@ -665,6 +671,22 @@ describe("applyOperationsInputSchema", () => {
   it("accepts a legal insert-switch batch", () => {
     const result = schema.safeParse(insertSwitchBatch);
     expect(result.success).toBe(true);
+  });
+
+  // U6/KTD4：link_add 端口走显式必填字段——缺 srcPort/dstPort 在 MCP 层即被拒。
+  it("U6: link_add rejects missing srcPort/dstPort", () => {
+    const result = schema.safeParse({
+      operations: [
+        {
+          op: "link_add",
+          linkSeq: 23,
+          srcNode: "0",
+          dstNode: "24",
+          stylesJson: '{"plane":"A"}',
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
   });
 
   it("U9: node_add accepts optional name (omitted still valid)", () => {

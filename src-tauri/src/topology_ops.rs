@@ -63,6 +63,15 @@ pub struct LinkAddArgs {
     pub name: Option<String>,
     pub src_node: String,
     pub dst_node: String,
+    /// 链路在 src_node 上占用的端口号——显式直写列（KTD1/R25）。缺省 → 硬校验拒绝（KTD4，boss 定 B）。
+    #[serde(default)]
+    pub src_port: Option<i64>,
+    /// 链路在 dst_node 上占用的端口号。缺省 → 硬校验拒绝。
+    #[serde(default)]
+    pub dst_port: Option<i64>,
+    /// 链路速率（Mbps）；可选，缺省由 bundle 取默认。
+    #[serde(default)]
+    pub speed: Option<i64>,
     pub styles_json: String,
 }
 
@@ -246,10 +255,16 @@ pub async fn apply_op(
                     a.link_seq, a.src_node, a.dst_node
                 )));
             }
-            // 端口/速率从 styles_json 的 leftLabel/rightLabel/speed 解析进独立列——
-            // 与 initialize 路径同源（compute_clock_tree 读这些列分配时钟角色；漏填则
-            // 新增节点的链路端口为 NULL，进不了时钟树）。
-            let (src_port, dst_port, speed) = crate::db::parse_link_ports_and_speed(&a.styles_json);
+            // KTD4（boss 定 B）：端口走显式字段直写列；任一端口缺省 → 硬校验拒绝，
+            // 不再 parse styles_json 兜底（拒绝即新 NULL 守卫，防列 NULL→时钟树断）。
+            // styles_json 现仅承载 plane/role 显示属性。
+            let (Some(src_port), Some(dst_port)) = (a.src_port, a.dst_port) else {
+                return Err(OpError::LinkPortMissing(format!(
+                    "link.add(link_seq={}) 缺 srcPort/dstPort：端口须经显式字段传入（styles_json 仅存 plane/role）；补全端口后重试",
+                    a.link_seq
+                )));
+            };
+            let speed = a.speed;
             // 三态写入：同 node.add，冲突时读回只比对请求提供的字段。
             let res = sqlx::query(
                 r#"INSERT INTO topology_links
@@ -271,7 +286,7 @@ pub async fn apply_op(
             .map_err(|e| OpError::Database(e.to_string()))?;
             if res.rows_affected() == 0 {
                 let row = sqlx::query(
-                    r#"SELECT name, src_node, dst_node, styles_json
+                    r#"SELECT name, src_node, dst_node, src_port, dst_port, speed, styles_json
                        FROM topology_links WHERE session_id = ? AND link_seq = ?"#,
                 )
                 .bind(session_id)
@@ -281,10 +296,13 @@ pub async fn apply_op(
                 .map_err(|e| OpError::Database(e.to_string()))?;
                 let same_provided = row.get::<String, _>("src_node") == a.src_node
                     && row.get::<String, _>("dst_node") == a.dst_node
+                    && row.get::<Option<i64>, _>("src_port") == Some(src_port)
+                    && row.get::<Option<i64>, _>("dst_port") == Some(dst_port)
                     && json_or_string_eq(&row.get::<String, _>("styles_json"), &a.styles_json)
                     && a.name.as_ref().is_none_or(|n| {
                         row.get::<Option<String>, _>("name").as_deref() == Some(n.as_str())
-                    });
+                    })
+                    && a.speed.is_none_or(|s| row.get::<Option<i64>, _>("speed") == Some(s));
                 if !same_provided {
                     return Err(OpError::LinkSeqTaken(format!(
                         "linkSeq={} 已存在且取值不同；新增链路请换未占用 linkSeq（先 inspect），删旧建新请用 link_delete + link_add",
@@ -326,6 +344,8 @@ pub enum OpError {
     MidTaken(String),
     /// link.add 的目标 link_seq 已存在且取值不同（三态写入碰撞）。
     LinkSeqTaken(String),
+    /// link.add 缺显式 srcPort/dstPort（KTD4 硬校验拒绝，防列 NULL→时钟树断）。
+    LinkPortMissing(String),
 }
 
 impl OpError {
@@ -340,7 +360,8 @@ impl OpError {
             | OpError::UnknownNode(_)
             | OpError::NodeHasLinks(_)
             | OpError::MidTaken(_)
-            | OpError::LinkSeqTaken(_) => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            | OpError::LinkSeqTaken(_)
+            | OpError::LinkPortMissing(_) => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
         }
     }
     pub fn code(&self) -> &'static str {
@@ -351,6 +372,7 @@ impl OpError {
             OpError::NodeHasLinks(_) => "NODE_HAS_LINKS",
             OpError::MidTaken(_) => "MID_TAKEN",
             OpError::LinkSeqTaken(_) => "LINK_SEQ_TAKEN",
+            OpError::LinkPortMissing(_) => "LINK_PORT_MISSING",
         }
     }
     pub fn message(&self) -> String {
@@ -360,7 +382,8 @@ impl OpError {
             | OpError::UnknownNode(m)
             | OpError::NodeHasLinks(m)
             | OpError::MidTaken(m)
-            | OpError::LinkSeqTaken(m) => m.clone(),
+            | OpError::LinkSeqTaken(m)
+            | OpError::LinkPortMissing(m) => m.clone(),
         }
     }
 }
@@ -388,30 +411,34 @@ mod tests {
         pool
     }
 
-    // 回归：增量 link.add 必须像 initialize 一样把 styles_json 的 leftLabel/rightLabel/speed
-    // 解析进独立列 src_port/dst_port/speed——否则 compute_clock_tree 读到 NULL，新增节点
-    // 进不了时钟树（真机 bug：拓扑阶段加 ES-5 后时钟树无法纳入）。
+    async fn seed_two_nodes(pool: &sqlx::Pool<sqlx::Sqlite>) {
+        let mut tx = pool.begin().await.unwrap();
+        for mid in ["0", "1"] {
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::NodeAdd(NodeAddArgs {
+                    name: None,
+                    mid: mid.into(),
+                    x: 0.0,
+                    y: 0.0,
+                    node_type: None,
+                    insert_order: 0,
+                }),
+            )
+            .await
+            .unwrap();
+        }
+        tx.commit().await.unwrap();
+    }
+
+    // U6/KTD1/R25：link.add 用显式 srcPort/dstPort/speed 直写列（不经 styles_json parse）。
     #[test]
-    fn link_add_populates_port_columns_from_styles_json() {
+    fn link_add_writes_explicit_port_columns() {
         tauri::async_runtime::block_on(async {
             let pool = fresh_pool().await;
+            seed_two_nodes(&pool).await;
             let mut tx = pool.begin().await.unwrap();
-            for mid in ["0", "1"] {
-                apply_op(
-                    &mut tx,
-                    "s1",
-                    &TopologyOp::NodeAdd(NodeAddArgs {
-                        name: None,
-                        mid: mid.into(),
-                        x: 0.0,
-                        y: 0.0,
-                        node_type: None,
-                        insert_order: 0,
-                    }),
-                )
-                .await
-                .unwrap();
-            }
             apply_op(
                 &mut tx,
                 "s1",
@@ -420,7 +447,10 @@ mod tests {
                     name: None,
                     src_node: "0".into(),
                     dst_node: "1".into(),
-                    styles_json: r#"{"leftLabel":"P2","rightLabel":"P3","speed":1000}"#.into(),
+                    src_port: Some(2),
+                    dst_port: Some(3),
+                    speed: Some(1000),
+                    styles_json: r#"{"plane":"A","role":"master"}"#.into(),
                 }),
             )
             .await
@@ -433,17 +463,80 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-            assert_eq!(
-                row.get::<Option<i64>, _>("src_port"),
-                Some(2),
-                "leftLabel P2 → src_port 2"
-            );
-            assert_eq!(
-                row.get::<Option<i64>, _>("dst_port"),
-                Some(3),
-                "rightLabel P3 → dst_port 3"
-            );
+            assert_eq!(row.get::<Option<i64>, _>("src_port"), Some(2));
+            assert_eq!(row.get::<Option<i64>, _>("dst_port"), Some(3));
             assert_eq!(row.get::<Option<i64>, _>("speed"), Some(1000));
+        });
+    }
+
+    // U6/KTD4（boss 定 B）/AE10：缺 srcPort 或 dstPort → 硬校验拒绝，不写库、不静默 NULL。
+    #[test]
+    fn link_add_rejects_missing_ports() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            seed_two_nodes(&pool).await;
+            let mut tx = pool.begin().await.unwrap();
+            let err = apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_node: "0".into(),
+                    dst_node: "1".into(),
+                    src_port: Some(2),
+                    dst_port: None,
+                    speed: None,
+                    styles_json: r#"{"plane":"A"}"#.into(),
+                }),
+            )
+            .await
+            .unwrap_err();
+            assert!(matches!(err, OpError::LinkPortMissing(_)), "{err:?}");
+            assert_eq!(err.code(), "LINK_PORT_MISSING");
+            // 不写库：链路列空（时钟树不会因静默 NULL 断）。
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM topology_links WHERE session_id='s1' AND link_seq=0",
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+            assert_eq!(count, 0);
+        });
+    }
+
+    // U6：端口齐全但 styles_json 无 leftLabel → 正常写入（证明写路径不再依赖 leftLabel）。
+    #[test]
+    fn link_add_writes_without_leftlabel() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            seed_two_nodes(&pool).await;
+            let mut tx = pool.begin().await.unwrap();
+            apply_op(
+                &mut tx,
+                "s1",
+                &TopologyOp::LinkAdd(LinkAddArgs {
+                    link_seq: 0,
+                    name: None,
+                    src_node: "0".into(),
+                    dst_node: "1".into(),
+                    src_port: Some(4),
+                    dst_port: Some(5),
+                    speed: None,
+                    styles_json: r#"{"plane":"B","role":"slave"}"#.into(),
+                }),
+            )
+            .await
+            .unwrap();
+            tx.commit().await.unwrap();
+            let row = sqlx::query(
+                "SELECT src_port, dst_port FROM topology_links WHERE session_id='s1' AND link_seq=0",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(row.get::<Option<i64>, _>("src_port"), Some(4));
+            assert_eq!(row.get::<Option<i64>, _>("dst_port"), Some(5));
         });
     }
 
@@ -686,6 +779,9 @@ mod tests {
                     name: None,
                     src_node: "0".into(),
                     dst_node: "1".into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
                     styles_json: "{}".into(),
                 }),
             )
@@ -708,6 +804,9 @@ mod tests {
                     name: None,
                     src_node: "0".into(),
                     dst_node: "2".into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
                     styles_json: "{}".into(),
                 }),
                 TopologyOp::LinkAdd(LinkAddArgs {
@@ -715,6 +814,9 @@ mod tests {
                     name: None,
                     src_node: "2".into(),
                     dst_node: "1".into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
                     styles_json: "{}".into(),
                 }),
             ];
@@ -881,6 +983,9 @@ mod tests {
                     name: None,
                     src_node: "0".into(),
                     dst_node: "1".into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
                     styles_json: "{}".into(),
                 }),
             )
@@ -896,6 +1001,9 @@ mod tests {
                     name: None,
                     src_node: "0".into(),
                     dst_node: "2".into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
                     styles_json: "{}".into(),
                 }),
             )
@@ -913,6 +1021,9 @@ mod tests {
                     name: None,
                     src_node: "0".into(),
                     dst_node: "1".into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
                     styles_json: "{}".into(),
                 }),
             )
@@ -951,7 +1062,10 @@ mod tests {
                     name: None,
                     src_node: "0".into(),
                     dst_node: "1".into(),
-                    styles_json: r#"{"leftLabel":"P1","speed":1000}"#.into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
+                    styles_json: r#"{"plane":"A","role":"master"}"#.into(),
                 }),
             )
             .await
@@ -967,7 +1081,10 @@ mod tests {
                     name: None,
                     src_node: "0".into(),
                     dst_node: "1".into(),
-                    styles_json: r#"{ "speed": 1000, "leftLabel": "P1" }"#.into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
+                    styles_json: r#"{ "role": "master", "plane": "A" }"#.into(),
                 }),
             )
             .await
@@ -983,7 +1100,10 @@ mod tests {
                     name: None,
                     src_node: "0".into(),
                     dst_node: "1".into(),
-                    styles_json: r#"{"leftLabel":"P1","speed":100}"#.into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
+                    styles_json: r#"{"plane":"B","role":"master"}"#.into(),
                 }),
             )
             .await
@@ -1020,6 +1140,9 @@ mod tests {
                     name: None,
                     src_node: "0".into(),
                     dst_node: "0".into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
                     styles_json: "{}".into(),
                 }),
             )
@@ -1035,6 +1158,9 @@ mod tests {
                     name: None,
                     src_node: "9".into(),
                     dst_node: "9".into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
                     styles_json: "{}".into(),
                 }),
             )
@@ -1057,6 +1183,9 @@ mod tests {
                     name: None,
                     src_node: "7".into(),
                     dst_node: "8".into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
                     styles_json: "{}".into(),
                 }),
             )
@@ -1096,6 +1225,9 @@ mod tests {
                     name: None,
                     src_node: "0".into(),
                     dst_node: "1".into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
                     styles_json: "{}".into(),
                 }),
             )
@@ -1175,6 +1307,9 @@ mod tests {
                     name: None,
                     src_node: "0".into(),
                     dst_node: "1".into(),
+                    src_port: Some(1),
+                    dst_port: Some(2),
+                    speed: None,
                     styles_json: "{}".into(),
                 }),
             )
