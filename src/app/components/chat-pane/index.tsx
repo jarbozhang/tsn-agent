@@ -37,9 +37,16 @@ export interface ChatPaneProps {
   scrollContainerRef: RefObject<HTMLDivElement | null>;
   input: string;
   isAgentRunning: boolean;
+  /** 推理态文案下沉到输入框区状态行（U3）；非推理态可不传。 */
+  agentRunPhase?: AgentRunPhase;
+  /** 「已运行 N 秒」计时（U3，R8）；非推理态可不传。 */
+  agentRunElapsedSeconds?: number;
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   onConfirm: () => void;
+  /** 终止当前推理（U3 接到推理态发送键切出的「终止」按钮）。required：终止按钮仅在
+   * isAgentRunning 时渲染，漏传会让按钮可点却静默无响应。 */
+  onTerminate: () => void;
 }
 
 export function ChatPane({
@@ -51,9 +58,12 @@ export function ChatPane({
   scrollContainerRef,
   input,
   isAgentRunning,
+  agentRunPhase,
+  agentRunElapsedSeconds,
   onInputChange,
   onSubmit,
   onConfirm,
+  onTerminate,
 }: ChatPaneProps) {
   return (
     <section className="chat-pane" aria-label="对话区">
@@ -192,7 +202,16 @@ export function ChatPane({
             id="intent"
             aria-label="输入你的 TSN 需求"
             value={input}
-            placeholder={`例如：${scenarioConfig.exampleIntent}`}
+            // placeholder 三态：①推理中显示运行状态（含秒数，「终止」按钮另作运行指示）；
+            // ②本会话还没发过需求 → 显示「例如：…」指引（仅教首次如何描述拓扑）；
+            // ③已发过首条需求后即闲置，不再复述指引。
+            placeholder={
+              isAgentRunning && agentRunPhase
+                ? `${getAgentRunStatusMessage(agentRunPhase)} · 已运行 ${agentRunElapsedSeconds ?? 0} 秒`
+                : messages.some((message) => message.role === "user")
+                  ? ""
+                  : `例如：${scenarioConfig.exampleIntent}`
+            }
             onChange={(event) => onInputChange(event.target.value)}
             onKeyDown={(event) => {
               // IME 选词中的 Enter 是确认候选，不发送。
@@ -227,44 +246,28 @@ export function ChatPane({
             }}
             rows={3}
           />
-          <button
-            type="button"
-            aria-label="生成规划草案"
-            onClick={onSubmit}
-            disabled={isAgentRunning || !input.trim()}
-          >
-            <TelegramSendIcon />
-          </button>
+          {isAgentRunning ? (
+            <button
+              type="button"
+              className="is-terminate"
+              aria-label="终止推理"
+              onClick={onTerminate}
+            >
+              <StopIcon />
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label="生成规划草案"
+              onClick={onSubmit}
+              disabled={!input.trim()}
+            >
+              <TelegramSendIcon />
+            </button>
+          )}
         </div>
       </div>
     </section>
-  );
-}
-
-export function AgentRunStatusBar({
-  elapsedSeconds,
-  phase,
-}: {
-  elapsedSeconds: number;
-  phase: AgentRunPhase;
-}) {
-  const message = getAgentRunStatusMessage(phase);
-
-  return (
-    <div
-      className={`agent-run-status ${phase}`}
-      role="status"
-      aria-live="polite"
-      data-testid="agent-run-status"
-    >
-      <span className="agent-waiting-dots" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </span>
-      <span>{message}</span>
-      <span className="agent-run-elapsed mono">已运行 {elapsedSeconds} 秒</span>
-    </div>
   );
 }
 
@@ -340,6 +343,14 @@ function TelegramSendIcon() {
         fill="var(--accent)"
         d="M8.92 12.95 17.8 7.4c.18-.11.36.13.21.28l-7.32 7.04-.29 2.73-1.48-4.5Z"
       />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
     </svg>
   );
 }

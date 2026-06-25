@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Edge, Node } from "@xyflow/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "@xyflow/react/dist/style.css";
-import { runTsnAgent } from "../agent/agent-adapter";
+import { createRunId, runTsnAgent } from "../agent/agent-adapter";
 import type { ToolCallRecord } from "../agent/tool-call-record";
 import tsnAgentMark from "../assets/tsn-agent-mark.png";
 import { logDiagnostic, sessionSummary, userIntentPreview } from "../diagnostics/app-diagnostics";
@@ -22,7 +22,7 @@ import {
 import { isEmptyTopologySnapshot } from "../sessions/topology-snapshot";
 import { ConfirmDialog } from "../ui/confirm-dialog";
 import { redactProviderNamesForDisplay } from "../ui/display-redaction";
-import { AgentRunStatusBar, ChatPane } from "./components/chat-pane";
+import { ChatPane } from "./components/chat-pane";
 import {
   type ConfigTabId,
   type SelectedTopologyItem,
@@ -83,6 +83,11 @@ export function App() {
   const { snapshot: timesyncSnapshot } = useTimesyncSnapshot(currentSession.id);
   const [transferNotice, setTransferNotice] = useState<TransferNotice | undefined>();
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  // 当前这轮推理的 runId（编排层单一拥有，传给 runTsnAgent，前后端同值）。终止时按它调
+  // cancel 命令。用 ref 而非 state：终止编排在 async 闭包里读取，避免读到过期快照。
+  const activeRunIdRef = useRef<string | undefined>(undefined);
+  // 仅当 cancel 命令返回 killed:true 才置位——是「本轮被用户真终止」的唯一依据（KTD3）。
+  const cancelRequestedRef = useRef(false);
 
   useEffect(() => {
     setActiveConfigTab("node-detail");
@@ -152,6 +157,9 @@ export function App() {
     // Plan 2026-06-10-001 U4：流式工具卡片按 id upsert（纯内存，不落库）；
     // done 后由 result.toolCalls 整体覆盖对账（R12），崩溃路径随错误态丢弃（R14）。
     const streamedToolCalls = new Map<string, ToolCallRecord>();
+    // 本轮 runId：编排层生成并留存，传给 runTsnAgent（前后端同一 runId），终止时据此 cancel。
+    const runId = createRunId();
+    activeRunIdRef.current = runId;
 
     setInput((value) => (value.trim() === trimmedInput ? "" : value));
     agentRun.startRun();
@@ -177,9 +185,16 @@ export function App() {
       const result = await runTsnAgent({
         userIntent: trimmedInput,
         action: options.action,
+        runId,
         session: contextSession,
         diagnostics: diagnosticsRepository,
         onChunk: (chunk) => {
+          // 终止成功（cancelRequestedRef 已置）后到达的在途 chunk 一律丢弃，避免覆盖
+          // 即将定型的「已终止」消息。守 cancelRequestedRef 而非塑形后才置的局部标志，
+          // 把守卫提前到「终止生效」的瞬间，关掉 unlisten 与塑形之间的 late-chunk 窗口。
+          if (cancelRequestedRef.current) {
+            return;
+          }
           streamedText += chunk;
           agentRun.markStreaming();
           agentRun.recordChunkAt(Date.now());
@@ -211,6 +226,56 @@ export function App() {
         },
       });
       const completedAt = new Date().toISOString();
+
+      // 终止分支（KTD3）：用户已真终止（cancel 返回 killed:true）「且」本轮确实失败
+      // （runFailed）→ 保留已流式产出 + 标「已终止」，丢弃 result.events（不让
+      // event-agent-failed 混进事件流）、不消费 buildAgentFailureText。
+      // runFailed 闸门挡住竞速：cancel 在 worker 已自然成功（结果含已落库 topologyMutationId）
+      // 后才到达时，result.runFailed 为假 → 走下方正常分支，保住拓扑指针不被误丢。
+      if (cancelRequestedRef.current && result.runFailed) {
+        const redacted = redactProviderNamesForDisplay(streamedText);
+        const terminatedContent = redacted ? `${redacted}\n\n_（已终止）_` : "_（本轮推理已终止）_";
+        const latestTerminatedSession =
+          (await repository.list()).find((session) => session.id === pendingSession.id) ??
+          pendingSession;
+        const terminatedBaseMessages = latestTerminatedSession.messages.some(
+          (message) => message.id === assistantMessage.id,
+        )
+          ? latestTerminatedSession.messages
+          : pendingSession.messages;
+        const terminatedSession: TsnSession = {
+          ...latestTerminatedSession,
+          updatedAt: completedAt,
+          messages: terminatedBaseMessages.map((message) =>
+            message.id === assistantMessage.id
+              ? {
+                  ...message,
+                  content: terminatedContent,
+                  toolCalls: [...streamedToolCalls.values()],
+                }
+              : message,
+          ),
+          workflow: result.workflow,
+        };
+
+        if (!(await sessionExists(terminatedSession.id))) {
+          return;
+        }
+
+        await repository.save(terminatedSession);
+        logDiagnostic(diagnosticsRepository, {
+          sessionId: terminatedSession.id,
+          category: "session",
+          message: "本轮推理被用户终止",
+          details: sessionSummary(terminatedSession),
+        });
+        setCurrentSession((session) =>
+          session.id === terminatedSession.id ? terminatedSession : session,
+        );
+        await reloadSessionsList();
+        return;
+      }
+
       const latestSession =
         (await repository.list()).find((session) => session.id === pendingSession.id) ??
         pendingSession;
@@ -287,9 +352,36 @@ export function App() {
         };
       });
     } finally {
+      activeRunIdRef.current = undefined;
+      cancelRequestedRef.current = false;
       agentRun.finishRun();
     }
   }
+
+  // 终止当前这轮推理（U3 接到发送键切出的「终止」按钮）。按 runId 调后端 cancel 命令，
+  // 仅当返回 killed:true 才置 cancelRequestedRef（KTD3 唯一闸门）——堵住 worker 注册前点击 /
+  // 真崩溃同瞬 / run 已自然收尾这几个误标窗口；killed:false 给一句轻提示、不置脏标志。
+  const handleTerminateRun = useCallback(async () => {
+    const runId = activeRunIdRef.current;
+    // 守 activeRunIdRef（同步写、永远最新）而非 isAgentRunning（state，闭包快照可能
+    // 停留在 startRun 前的旧帧 → 误判没在跑而提前 return）。deps 空，回调引用稳定。
+    // 已终止过本轮（cancelRequestedRef 真）直接 no-op：挡住双击向已清空 registry 发第二次
+    // cancel 而触发 killed:false 误导提示。
+    if (!runId || cancelRequestedRef.current) {
+      return;
+    }
+
+    try {
+      const outcome = await invoke<{ killed: boolean }>("cancel_claude_agent", { runId });
+      if (outcome.killed) {
+        cancelRequestedRef.current = true;
+      } else {
+        setTransferNotice({ kind: "error", text: "本轮推理尚未就绪或已结束，未能终止。" });
+      }
+    } catch {
+      // invoke 自身失败：不留脏标志，照常等本轮结束。
+    }
+  }, []);
 
   async function handleNewSession() {
     await createNewSession();
@@ -397,10 +489,6 @@ export function App() {
         <div className="brand-spacer" />
       </header>
 
-      {isAgentRunning && (
-        <AgentRunStatusBar elapsedSeconds={agentRunElapsedSeconds} phase={agentRunPhase} />
-      )}
-
       <main className="project-layout">
         <WorkspaceTools
           activePanel={activeWorkspacePanel}
@@ -426,9 +514,12 @@ export function App() {
           scrollContainerRef={scrollContainerRef}
           input={input}
           isAgentRunning={isAgentRunning}
+          agentRunPhase={agentRunPhase}
+          agentRunElapsedSeconds={agentRunElapsedSeconds}
           onInputChange={setInput}
           onSubmit={handleSubmit}
           onConfirm={() => submitIntent("继续", { action: "confirm-stage" })}
+          onTerminate={handleTerminateRun}
         />
         <WorkspacePane
           topologySnapshot={topologySnapshot}
