@@ -23,22 +23,27 @@ import {
 } from "../../../sessions/topology-snapshot";
 import { DetailRow, Stat } from "../shared";
 import {
+  classifyTimesyncEdge,
   linkRowId,
   nodeRowLabel,
   nodeTypeToken,
   type TsnNodeKind,
   type TsnNodeTimesync,
+  timesyncEdgeDecoration,
   timesyncRoleBadge,
   topologySnapshotToReactFlow,
 } from "./topology-flow";
 import { TsnFloatingEdge } from "./tsn-floating-edge";
 
-export type { TsnEdgeData, TsnNodeKind } from "./topology-flow";
+export type { TimesyncEdgeKind, TsnEdgeData, TsnNodeKind } from "./topology-flow";
 export {
+  classifyTimesyncEdge,
   nodeRowLabel,
   nodeTypeToken,
   parseLinkStyles,
+  parsePortLabel,
   planeClassName,
+  timesyncEdgeDecoration,
   timesyncRoleBadge,
   topologySnapshotToReactFlow,
 } from "./topology-flow";
@@ -191,6 +196,8 @@ export function WorkspacePane({
       return flow;
     }
     // 富化节点 data：注入时钟树角色，画布 TsnTopologyNode 据此渲染角色徽标 + GM 高亮。
+    // 富化 edges：树边醒目 + 父→子方向箭头，非树边淡化（替换平面着色，本阶段只看树结构）。
+    const linkByEdgeId = new Map(topologySnapshot.links.map((link) => [linkRowId(link), link]));
     return {
       ...flow,
       nodes: flow.nodes.map((node) => {
@@ -202,6 +209,19 @@ export function WorkspacePane({
           isGm: summary.role === "gm",
         };
         return { ...node, data: { ...node.data, timesync } };
+      }),
+      edges: flow.edges.map((edge) => {
+        const link = linkByEdgeId.get(edge.id);
+        if (!link) {
+          return edge;
+        }
+        const decoration = timesyncEdgeDecoration(classifyTimesyncEdge(link, timesyncSnapshot));
+        return {
+          ...edge,
+          className: decoration.className,
+          markerStart: decoration.markerStart,
+          markerEnd: decoration.markerEnd,
+        };
       }),
     };
   }, [topologySnapshot, showClockTree, timesyncSnapshot]);
