@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager, path::BaseDirectory};
 
@@ -13,6 +14,93 @@ const MAX_PROMPT_CHARS: usize = 4_000;
 const MAX_CONTEXT_CHARS: usize = 12_000;
 const CLAUDE_BRIDGE_SYNC_TIMEOUT: Duration = Duration::from_secs(300);
 static CLAUDE_AGENT_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// 正在运行的 worker 句柄：cancel 命令按 runId 比对后据此定位进程组强杀。
+/// 单例锁 `ClaudeAgentRunGuard` 保证同时至多一个 run，故用 `Option` 而非 map。
+#[derive(Debug, Clone)]
+pub struct ActiveWorker {
+    pub run_id: String,
+    #[cfg(unix)]
+    pub pgid: i32,
+    #[cfg(windows)]
+    pub pid: u32,
+}
+
+/// Tauri managed state：`Mutex<Option<ActiveWorker>>`。注册时机与去注册见
+/// `run_claude_agent_blocking`（注册紧贴 spawn、去注册紧贴 reap，压缩误杀窗口）。
+#[derive(Debug, Default)]
+pub struct AgentWorkerRegistry(Mutex<Option<ActiveWorker>>);
+
+/// cancel 命令返回给前端的结果：`killed` 是「真终止」与「没杀到」的唯一闸门。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelOutcome {
+    pub killed: bool,
+}
+
+/// 进程组强杀的单一事实源——超时分支与 cancel 命令共用，杜绝双轨复制。
+/// Unix 先 `kill(-pgid, 0)` 探活，pgid 已不存在（返回 -1）则不发 SIGKILL，
+/// 防 reap 后 pgid 复用误杀第三方进程组。
+fn kill_worker_process_group(worker: &ActiveWorker) {
+    #[cfg(unix)]
+    {
+        // signal 0 探活：0 = 进程组存在且有权限；-1 = 不存在（ESRCH），跳过强杀。
+        if unsafe { libc::kill(-worker.pgid, 0) } == -1 {
+            return;
+        }
+        unsafe {
+            libc::kill(-worker.pgid, libc::SIGKILL);
+        }
+    }
+    // Windows 无 pgid：taskkill /T 按进程树端掉 worker + MCP child（/F 强制）。
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .arg("/F")
+            .arg("/T")
+            .arg("/PID")
+            .arg(worker.pid.to_string())
+            .output();
+    }
+}
+
+/// 拿到 worker 句柄后立即注册并构造此 guard；函数任意返回路径（成功/超时/失败）
+/// Drop 时兜底清空 registry（去注册紧贴 reap 已先清的话此处 take None → no-op）。
+struct AgentWorkerRegistration<'a> {
+    registry: &'a AgentWorkerRegistry,
+}
+
+impl AgentWorkerRegistration<'_> {
+    fn new(registry: &AgentWorkerRegistry, worker: ActiveWorker) -> AgentWorkerRegistration<'_> {
+        registry.0.lock().expect("registry mutex").replace(worker);
+        AgentWorkerRegistration { registry }
+    }
+}
+
+impl Drop for AgentWorkerRegistration<'_> {
+    fn drop(&mut self) {
+        let _ = self.registry.0.lock().expect("registry mutex").take();
+    }
+}
+
+/// 按 runId 终止当前正在跑的 worker：匹配则强杀进程组并去注册，返回 `killed:true`；
+/// 无运行 / runId 不匹配 / run 已自然收尾 → `killed:false`（幂等、非错误）。
+/// 只发信号不 `wait()`（KTD2，zombie 回收由阻塞循环负责）。
+#[tauri::command]
+pub async fn cancel_claude_agent(
+    registry: tauri::State<'_, AgentWorkerRegistry>,
+    run_id: String,
+) -> Result<CancelOutcome, String> {
+    let mut slot = registry.0.lock().expect("registry mutex");
+    if let Some(worker) = slot.as_ref()
+        && worker.run_id == run_id
+    {
+        kill_worker_process_group(worker);
+        slot.take();
+        return Ok(CancelOutcome { killed: true });
+    }
+    Ok(CancelOutcome { killed: false })
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -241,6 +329,19 @@ fn run_claude_agent_blocking(
     #[cfg(unix)]
     let worker_pgid = child.id() as i32;
     let started_at = Instant::now();
+    // 注册时机（硬约束）：拿到句柄后立即注册 + 构造去注册 guard，必须早于下面
+    // stdout/stderr 的 `?` 早返回——否则 take 失败会留下「已 spawn 但未注册」的孤儿 worker。
+    let registry = app
+        .try_state::<AgentWorkerRegistry>()
+        .ok_or_else(|| "worker 注册表未初始化；应用初始化异常".to_string())?;
+    let active_worker = ActiveWorker {
+        run_id: run_id.clone(),
+        #[cfg(unix)]
+        pgid: worker_pgid,
+        #[cfg(windows)]
+        pid: child.id(),
+    };
+    let _registration = AgentWorkerRegistration::new(&registry, active_worker);
     let stdout = child
         .stdout
         .take()
@@ -267,24 +368,22 @@ fn run_claude_agent_blocking(
         drain_plain_lines(&stderr_rx, &mut stderr_lines)?;
 
         match child.try_wait() {
-            Ok(Some(_status)) => break,
+            Ok(Some(_status)) => {
+                // 去注册紧贴 reap：进程已退出、zombie 已收割，立即在锁下 take 去注册，
+                // 把「已 reap 但未去注册」窗口压到几条指令内（防 pgid/pid 复用误杀）。
+                let _ = registry.0.lock().expect("registry mutex").take();
+                break;
+            }
             Ok(None) if started_at.elapsed() > CLAUDE_BRIDGE_SYNC_TIMEOUT => {
-                // 向整个进程组发 SIGKILL：worker + SDK 拉起的 MCP child 一并端掉，
+                // 复用单一强杀 helper：worker + SDK 拉起的 MCP child 一并端掉，
                 // 避免孤儿进程继续持有 sidecar 的 DB_RPC_TOKEN（审计 P1#3）。
-                #[cfg(unix)]
-                unsafe {
-                    libc::kill(-worker_pgid, libc::SIGKILL);
-                }
-                // Windows 无 pgid：taskkill /T 按进程树端掉 worker + MCP child（/F 强制）。
-                #[cfg(windows)]
-                {
-                    let _ = Command::new("taskkill")
-                        .arg("/F")
-                        .arg("/T")
-                        .arg("/PID")
-                        .arg(child.id().to_string())
-                        .output();
-                }
+                kill_worker_process_group(&ActiveWorker {
+                    run_id: run_id.clone(),
+                    #[cfg(unix)]
+                    pgid: worker_pgid,
+                    #[cfg(windows)]
+                    pid: child.id(),
+                });
                 let _ = child.wait();
                 log_worker_event(
                     &app,
@@ -1019,5 +1118,177 @@ mod tests {
             dead,
             "member ({member_pid}) must be killed via process-group SIGKILL"
         );
+    }
+
+    /// 起一个进程组（组长 sh + 子 sleep 当组员），返回 (child, pgid, member_pid)。
+    /// 仿 process_group_kill_terminates_member_process 的搭法。
+    #[cfg(unix)]
+    fn spawn_test_process_group() -> (std::process::Child, i32, i32) {
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("sleep 120 & echo $!; wait")
+            .process_group(0)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn group leader");
+        let pgid = child.id() as i32;
+        let stdout = child.stdout.take().expect("stdout");
+        let mut first_line = String::new();
+        BufReader::new(stdout)
+            .read_line(&mut first_line)
+            .expect("read member pid");
+        let member_pid: i32 = first_line.trim().parse().expect("member pid");
+        (child, pgid, member_pid)
+    }
+
+    /// 轮询确认进程被回收（kill(pid,0) == -1 / ESRCH）。
+    #[cfg(unix)]
+    fn wait_until_dead(pid: i32) -> bool {
+        for _ in 0..100 {
+            if unsafe { libc::kill(pid, 0) } == -1 {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    #[cfg(unix)]
+    fn register(registry: &AgentWorkerRegistry, run_id: &str, pgid: i32) {
+        registry
+            .0
+            .lock()
+            .expect("registry mutex")
+            .replace(ActiveWorker {
+                run_id: run_id.to_string(),
+                pgid,
+            });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_matching_run_id_kills_process_group() {
+        let (mut child, pgid, member_pid) = spawn_test_process_group();
+        let registry = AgentWorkerRegistry::default();
+        register(&registry, "run-cancel", pgid);
+
+        let killed = {
+            let mut slot = registry.0.lock().expect("registry mutex");
+            if let Some(worker) = slot.as_ref()
+                && worker.run_id == "run-cancel"
+            {
+                kill_worker_process_group(worker);
+                slot.take();
+                true
+            } else {
+                false
+            }
+        };
+        let _ = child.wait();
+
+        assert!(killed, "matching runId must report killed");
+        assert!(
+            wait_until_dead(member_pid),
+            "member ({member_pid}) must be reaped via process-group SIGKILL"
+        );
+        assert!(
+            registry.0.lock().expect("registry mutex").is_none(),
+            "slot must be cleared after cancel"
+        );
+        unsafe {
+            libc::kill(member_pid, libc::SIGKILL);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_mismatched_run_id_reports_false_and_spares_process() {
+        let (mut child, pgid, member_pid) = spawn_test_process_group();
+        let registry = AgentWorkerRegistry::default();
+        register(&registry, "run-real", pgid);
+
+        let killed = {
+            let mut slot = registry.0.lock().expect("registry mutex");
+            if let Some(worker) = slot.as_ref()
+                && worker.run_id == "run-WRONG"
+            {
+                kill_worker_process_group(worker);
+                slot.take();
+                true
+            } else {
+                false
+            }
+        };
+
+        assert!(!killed, "mismatched runId must report not killed");
+        assert_eq!(
+            unsafe { libc::kill(member_pid, 0) },
+            0,
+            "member must stay alive when runId does not match"
+        );
+        // 收尾真杀，避免残留 sleep。
+        unsafe {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
+        let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_empty_registry_is_idempotent_false() {
+        let registry = AgentWorkerRegistry::default();
+        let killed = {
+            let mut slot = registry.0.lock().expect("registry mutex");
+            if let Some(worker) = slot.as_ref()
+                && worker.run_id == "anything"
+            {
+                kill_worker_process_group(worker);
+                slot.take();
+                true
+            } else {
+                false
+            }
+        };
+        assert!(!killed, "empty registry cancel must report not killed");
+        assert!(registry.0.lock().expect("registry mutex").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_helper_skips_dead_process_group_via_liveness_probe() {
+        // 起一个进程组再彻底杀掉并 reap，得到一个「已不存在」的 pgid。
+        let (mut child, pgid, member_pid) = spawn_test_process_group();
+        unsafe {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
+        let _ = child.wait();
+        assert!(wait_until_dead(member_pid), "setup: group must be dead");
+
+        // 对已退出的 pgid 调 helper：探活返回不存在 → 不发 SIGKILL、不 panic。
+        kill_worker_process_group(&ActiveWorker {
+            run_id: "stale".to_string(),
+            pgid,
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn registration_drop_on_already_cleared_slot_is_noop() {
+        let registry = AgentWorkerRegistry::default();
+        {
+            let _registration = AgentWorkerRegistration::new(
+                &registry,
+                ActiveWorker {
+                    run_id: "run-reap".to_string(),
+                    pgid: 1,
+                },
+            );
+            assert!(registry.0.lock().expect("registry mutex").is_some());
+            // 模拟 reap 时同锁去注册。
+            let _ = registry.0.lock().expect("registry mutex").take();
+            assert!(registry.0.lock().expect("registry mutex").is_none());
+            // _registration Drop 此处兜底再 take 一次（已 None）——不得 panic。
+        }
+        assert!(registry.0.lock().expect("registry mutex").is_none());
     }
 }

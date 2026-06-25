@@ -60,6 +60,7 @@ pub fn run() {
         )
         .manage(session_store::SessionStore::default())
         .manage(diagnostic_store::DiagnosticStore::default())
+        .manage(commands::AgentWorkerRegistry::default())
         .manage(std::sync::Arc::new(
             topology_mutation_buffer::TopologyMutationBuffer::default(),
         ))
@@ -90,6 +91,7 @@ pub fn run() {
             diagnostic_store::clear_session_diagnostic_logs,
             diagnostic_store::list_diagnostic_logs,
             commands::run_claude_agent,
+            commands::cancel_claude_agent,
             commands::describe_topology_templates,
             session_export::export_session,
             session_export::reveal_in_dir,
