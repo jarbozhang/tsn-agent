@@ -28,6 +28,9 @@ export interface TopologyLinkRow {
   name: string | null;
   srcNode: string;
   dstNode: string;
+  /** U8/KTD1：端口列是事实源（src 端口在 source 端、dst 端口在 target 端）；NULL=未配对。 */
+  srcPort: number | null;
+  dstPort: number | null;
   stylesJson: string;
 }
 

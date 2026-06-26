@@ -1,8 +1,23 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const invokeMock = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn(), open: vi.fn() }));
+
 import { createEmptySession } from "../../../sessions/session-repository";
 import { WorkspaceTools, type WorkspaceToolsProps } from "./index";
+
+beforeEach(() => {
+  invokeMock.mockReset();
+  invokeMock.mockImplementation(async (command: string) => {
+    if (command === "get_inet_host_config") {
+      return { host: "dev.example", user: "zhang", inetEnvCmd: "opp_env run inet-4.6.0" };
+    }
+    return undefined;
+  });
+});
 
 function baseProps(overrides: Partial<WorkspaceToolsProps> = {}): WorkspaceToolsProps {
   const session = createEmptySession();
@@ -133,5 +148,55 @@ describe("WorkspaceTools", () => {
     // 预览取自然语言；不读 toolCalls、不展示卡片内容。
     expect(screen.getByText("已为你生成 4 个交换机的拓扑草案。")).toBeInTheDocument();
     expect(screen.queryByText("topology.initialize")).not.toBeInTheDocument();
+  });
+});
+
+describe("远端仿真主机配置（U5）", () => {
+  it("设置抽屉加载当前配置并展示常驻 known_hosts 提示", async () => {
+    render(<WorkspaceTools {...baseProps({ activePanel: "settings" })} />);
+    await waitFor(() => expect(screen.getByDisplayValue("dev.example")).toBeInTheDocument());
+    expect(screen.getByDisplayValue("zhang")).toBeInTheDocument();
+    expect(screen.getByText("新主机首次连接需先手动 ssh 建立 host key 信任")).toBeInTheDocument();
+  });
+
+  it("点保存 → 显式提交 set_inet_host_config 并关抽屉（非 blur 自动存）", async () => {
+    const user = userEvent.setup();
+    const setActivePanel = vi.fn();
+    render(<WorkspaceTools {...baseProps({ activePanel: "settings", setActivePanel })} />);
+    await waitFor(() => expect(screen.getByDisplayValue("dev.example")).toBeInTheDocument());
+
+    await user.clear(screen.getByDisplayValue("dev.example"));
+    await user.type(screen.getByLabelText("主机"), "new.host");
+    // blur 不应触发保存。
+    expect(invokeMock).not.toHaveBeenCalledWith("set_inet_host_config", expect.anything());
+
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith(
+        "set_inet_host_config",
+        expect.objectContaining({ config: expect.objectContaining({ host: "new.host" }) }),
+      ),
+    );
+    expect(setActivePanel).toHaveBeenCalled();
+  });
+
+  it("保存非法主机 → 后端抛错、展示错误、不关抽屉", async () => {
+    const user = userEvent.setup();
+    const setActivePanel = vi.fn();
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_inet_host_config") {
+        return { host: "dev.example", user: "zhang", inetEnvCmd: "envx" };
+      }
+      if (command === "set_inet_host_config") {
+        throw new Error("主机名含非法字符（仅允许字母/数字/.-_）。");
+      }
+      return undefined;
+    });
+    render(<WorkspaceTools {...baseProps({ activePanel: "settings", setActivePanel })} />);
+    await waitFor(() => expect(screen.getByDisplayValue("dev.example")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(screen.getByText(/主机名含非法字符/)).toBeInTheDocument());
+    expect(setActivePanel).not.toHaveBeenCalled();
   });
 });

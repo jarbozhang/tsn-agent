@@ -5,19 +5,53 @@
 //! `RemoteRunner` trait 抽象（`SshRunner` 默认实现；测试注入 mock，真连留集成验收）。
 //! 阶段无关（KTD4）：本模块只管「发送+跑+回收」，不含拓扑阶段语义，后续阶段可复用。
 
+use serde::{Deserialize, Serialize};
 use std::io;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::inet_bundle::InetBundle;
+/// 远端主机 UI 可配置项（R20）：host/user/inet 路径。落 app_state KV（JSON）。
+/// remote_base_dir 本期不进 UI（保持 env/默认）；base_dir 用户可编辑是 deferred。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InetHostConfig {
+    pub host: String,
+    pub user: String,
+    /// INET 环境命令前缀（见 RemoteConfig.inet_env_cmd）；序列化为 `inetEnvCmd`。
+    pub inet_env_cmd: String,
+}
 
-/// 远端主机配置。本期固定 boss 那台（多主机/UI 配置 deferred）；密钥靠 ssh-agent，不存密码。
+/// host/user 字符集校验（R20 + security-lens）：限 `[a-zA-Z0-9._-]`、非空。
+/// 拦含空格/shell 元字符的值，防 `user@host` 拼进 ssh argv 被注入额外选项（如 `-o ProxyCommand=`）。
+pub fn is_valid_host_or_user(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// 远端执行器消费的 bundle 形状（三文件内容）。定义在执行器侧（inet_remote 保留），
+/// 由 bundle 生成器（inet_sim_bundle）产出——这样删旧的 inet_bundle 不影响执行器。
+#[derive(Debug, Clone)]
+pub struct InetBundle {
+    pub network_ned: String,
+    pub omnetpp_ini: String,
+    pub manifest_json: String,
+}
+
+/// 开发期默认 INET 环境命令前缀（真机校正 2026-06-26）：把任意命令丢进 opp_env 的
+/// OMNeT++/INET 环境里跑（inet 与 opp_scavetool 都在该环境 PATH 上）。app 以
+/// `<inet_env_cmd> -c '<cmd>'` 调用。源自 boss 那台的 `~/.local/bin/inet` wrapper。
+const DEFAULT_INET_ENV_CMD: &str = "source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh && /home/zhang/.local/bin/opp_env run inet-4.6.0 -w /home/zhang/inet-workspace --build-modes=release";
+
+/// 远端主机配置。密钥靠 ssh-agent，不存密码。
 #[derive(Debug, Clone)]
 pub struct RemoteConfig {
     pub host: String,
     pub user: String,
     pub remote_base_dir: String,
-    pub inet_path: String,
+    /// INET 环境命令前缀：以 `<inet_env_cmd> -c '<cmd>'` 在 OMNeT++/INET 环境里跑命令。
+    /// 自用工具、信任用户：这是命令模板、直接执行，不做字符集校验（同 inet_path 的安全口径）。
+    pub inet_env_cmd: String,
     pub timeout: Duration,
 }
 
@@ -28,40 +62,64 @@ impl RemoteConfig {
         let user = std::env::var("TSN_AGENT_INET_USER").unwrap_or_else(|_| "zhang".into());
         let remote_base_dir = std::env::var("TSN_AGENT_INET_BASEDIR")
             .unwrap_or_else(|_| "/home/zhang/tsn-agent-runs".into());
-        let inet_path = std::env::var("TSN_AGENT_INET_PATH")
-            .unwrap_or_else(|_| "/home/zhang/.local/bin/inet".into());
+        let inet_env_cmd =
+            std::env::var("TSN_AGENT_INET_ENV").unwrap_or_else(|_| DEFAULT_INET_ENV_CMD.into());
         Self {
             host,
             user,
             remote_base_dir,
-            inet_path,
+            inet_env_cmd,
             timeout: Duration::from_secs(120),
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct RemoteRunOutcome {
-    /// inet 退出码（None = 未取到，按不可达处理）。
-    pub exit_code: Option<i32>,
-    /// 脱敏 + 截断后的输出尾部，供错误文案。
-    pub output_tail: String,
-}
-
-/// 远端执行失败分类——驱动 U3/U4「连不上(inet_unreachable)」vs「跑不起来(inet_load_failed)」分文案。
+/// 远端执行失败分类——驱动「连不上(inet_unreachable)」vs「跑不起来(inet_load_failed)」分文案。
 #[derive(Debug)]
 pub enum RemoteError {
     /// 连不上 / 超时 / 传输失败 / 找不到 ssh —— 环境问题，非拓扑错。
     Unreachable(String),
 }
 
+/// 软仿运行 + 结果取回产物（U3）：在 RemoteRunOutcome 之外多带回 scavetool 导出的 CSV。
+/// `exit_code` 非 0 → inet 没跑成（caller 判 load_failed）、`csv` 为 None；
+/// `exit_code`=0 但 `csv` 空/None → 结果为空（caller 判「结果为空」，不渲染收敛）。
+#[derive(Debug, Clone)]
+pub struct SimRunOutcome {
+    pub exit_code: Option<i32>,
+    pub output_tail: String,
+    /// scavetool 导出的 timeChanged CSV 原文（成功且非空才 Some）。
+    pub csv: Option<String>,
+    /// scavetool 命令本身失败（非零退出/缺失/连接断）——区别于「跑成功但导出 0 行」，
+    /// 让 caller 给出「工具未安装/执行失败」而非「recording 配置」的诊断（reliability/maintainability review）。
+    pub scavetool_failed: bool,
+}
+
 pub trait RemoteRunner {
-    /// 把 bundle 发到远端、跑 inet、收退出码与输出、清理。
-    fn run_bundle(
+    /// 软仿（U3）：scp bundle → 跑 inet → 跑 opp_scavetool 导出 timeChanged CSV → cat 回传 → 清理。
+    /// `scavetool_filter` 是 `opp_scavetool export -f` 的过滤表达式（由调用方构造、本函数 shell-quote）。
+    fn run_sim_fetch_csv(
         &self,
         bundle: &InetBundle,
         cfg: &RemoteConfig,
-    ) -> Result<RemoteRunOutcome, RemoteError>;
+        scavetool_filter: &str,
+    ) -> Result<SimRunOutcome, RemoteError>;
+}
+
+/// 远端 scavetool 取数命令串：在 inet_env_cmd 的环境里（opp_scavetool 在该环境 PATH 上）
+/// cd 进 run 目录、export timeChanged 到 CSV、再 cat 回传 stdout。filter/路径都过 sh_squote 防注入，
+/// inner 整体再 sh_squote 作为 `-c` 单参（嵌套引号安全）。
+pub fn remote_scavetool_cmd(
+    cfg: &RemoteConfig,
+    remote_dir: &str,
+    scavetool_filter: &str,
+) -> String {
+    let inner = format!(
+        "cd {} && opp_scavetool export -f {} -F CSV-R -o timechanged.csv results/*.vec >/dev/null 2>&1 && cat timechanged.csv",
+        sh_squote(remote_dir),
+        sh_squote(scavetool_filter)
+    );
+    format!("{} -c {}", cfg.inet_env_cmd, sh_squote(&inner))
 }
 
 // ---- 纯函数（可单测）：目录名 / argv / 脱敏 ----
@@ -117,13 +175,14 @@ fn sh_squote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-/// 远端运行命令串：cd 到 bundle 目录跑 inet（路径 shell-quote，KTD8）。
+/// 远端运行命令串：在 inet_env_cmd 的 OMNeT++/INET 环境里 cd 到 bundle 目录跑 inet。
+/// inet 在该环境 PATH 上；inner 整体 sh_squote 后作为 `-c` 的单个参数（嵌套引号安全）。
 pub fn remote_run_cmd(cfg: &RemoteConfig, remote_dir: &str) -> String {
-    format!(
-        "cd {} && {} -u Cmdenv -f omnetpp.ini -n .",
-        sh_squote(remote_dir),
-        sh_squote(&cfg.inet_path)
-    )
+    let inner = format!(
+        "cd {} && inet -u Cmdenv -f omnetpp.ini -n .",
+        sh_squote(remote_dir)
+    );
+    format!("{} -c {}", cfg.inet_env_cmd, sh_squote(&inner))
 }
 
 /// 远端清理命令串：rm -rf 受 is_safe 约束的 run 目录（调用方须先校验 dir 安全）。
@@ -166,11 +225,12 @@ fn tail(s: &str, max: usize) -> String {
 pub struct SshRunner;
 
 impl RemoteRunner for SshRunner {
-    fn run_bundle(
+    fn run_sim_fetch_csv(
         &self,
         bundle: &InetBundle,
         cfg: &RemoteConfig,
-    ) -> Result<RemoteRunOutcome, RemoteError> {
+        scavetool_filter: &str,
+    ) -> Result<SimRunOutcome, RemoteError> {
         let ssh = resolve_remote_bin("ssh", "TSN_AGENT_SSH_PATH");
         let scp = resolve_remote_bin("scp", "TSN_AGENT_SCP_PATH");
 
@@ -180,7 +240,6 @@ impl RemoteRunner for SshRunner {
         }
         let remote_dir = format!("{}/{}", cfg.remote_base_dir, dir_name);
 
-        // 本地落盘 bundle（独立临时目录）。
         let local_dir = std::env::temp_dir().join(format!("tsn-inet-{dir_name}"));
         let gen_dir = local_dir.join("tsnagent").join("generated");
         let write = || -> io::Result<()> {
@@ -193,12 +252,16 @@ impl RemoteRunner for SshRunner {
         if let Err(e) = write() {
             return Err(RemoteError::Unreachable(format!("本地写 bundle 失败：{e}")));
         }
-
         let cleanup_local = || {
             let _ = std::fs::remove_dir_all(&local_dir);
         };
+        let cleanup_remote = || {
+            let _ = run_with_timeout(
+                make_cmd(&ssh, build_ssh_argv(cfg, &remote_cleanup_cmd(&remote_dir))),
+                cfg.timeout,
+            );
+        };
 
-        // 传输步骤（mkdir/scp）：spawn 失败、超时、或远端非零退出都归为「连不上」（环境问题）。
         let transport = |cmd: Command, what: &str| -> Result<(), RemoteError> {
             match run_with_timeout(cmd, cfg.timeout) {
                 Ok(o) if o.status.success() => Ok(()),
@@ -217,7 +280,7 @@ impl RemoteRunner for SshRunner {
             }
         };
 
-        // 1) 远端建目录。
+        // 1) 建目录 + 2) scp。
         let mkdir_cmd = format!("mkdir -p {}", sh_squote(&remote_dir));
         if let Err(e) = transport(
             make_cmd(&ssh, build_ssh_argv(cfg, &mkdir_cmd)),
@@ -226,56 +289,91 @@ impl RemoteRunner for SshRunner {
             cleanup_local();
             return Err(e);
         }
-        // 2) scp 传内容。
         let local_src = format!("{}/.", local_dir.display());
         if let Err(e) = transport(
             make_cmd(&scp, build_scp_argv(cfg, &local_src, &remote_dir)),
             "传输 bundle",
         ) {
-            let _ = run_with_timeout(
-                make_cmd(&ssh, build_ssh_argv(cfg, &remote_cleanup_cmd(&remote_dir))),
-                cfg.timeout,
-            );
+            cleanup_remote();
             cleanup_local();
             return Err(e);
         }
+
         // 3) 跑 inet。
         let run_res = run_with_timeout(
             make_cmd(&ssh, build_ssh_argv(cfg, &remote_run_cmd(cfg, &remote_dir))),
             cfg.timeout,
         );
-        // 4) best-effort 清理远端。
-        let _ = run_with_timeout(
-            make_cmd(&ssh, build_ssh_argv(cfg, &remote_cleanup_cmd(&remote_dir))),
+        let inet_output = match run_res {
+            Ok(o) => o,
+            Err(e) => {
+                cleanup_remote();
+                cleanup_local();
+                return Err(RemoteError::Unreachable(format!(
+                    "远端运行 inet 失败：{}",
+                    redact_remote(&e.to_string(), cfg)
+                )));
+            }
+        };
+        let code = inet_output.status.code();
+        let mut combined = String::from_utf8_lossy(&inet_output.stdout).to_string();
+        combined.push_str(&String::from_utf8_lossy(&inet_output.stderr));
+        let redacted = redact_remote(&combined, cfg);
+        if code == Some(255) || code.is_none() {
+            cleanup_remote();
+            cleanup_local();
+            return Err(RemoteError::Unreachable(format!(
+                "连不上远端 INET（ssh 退出码 {}）：{}",
+                code.map(|c| c.to_string()).unwrap_or_else(|| "未知".into()),
+                tail(&redacted, 2000)
+            )));
+        }
+        // inet 非 0 退出 → load_failed：不取数，回 csv=None 让 caller 分型。
+        if code != Some(0) {
+            cleanup_remote();
+            cleanup_local();
+            return Ok(SimRunOutcome {
+                exit_code: code,
+                output_tail: tail(&redacted, 2000),
+                csv: None,
+                scavetool_failed: false,
+            });
+        }
+
+        // 4) scavetool 导出 timeChanged CSV 并 cat 回传。
+        // 区分「命令失败」（非零退出/缺失/断连）与「成功但导出 0 行」——前者 scavetool_failed=true。
+        let (csv, scavetool_failed) = match run_with_timeout(
+            make_cmd(
+                &ssh,
+                build_ssh_argv(
+                    cfg,
+                    &remote_scavetool_cmd(cfg, &remote_dir, scavetool_filter),
+                ),
+            ),
             cfg.timeout,
-        );
+        ) {
+            Ok(o) if o.status.success() => {
+                let out = String::from_utf8_lossy(&o.stdout).to_string();
+                if out.trim().is_empty() {
+                    (None, false) // 跑成功但无 timeChanged 行 → 真·结果为空
+                } else {
+                    (Some(out), false)
+                }
+            }
+            // scavetool 非零退出/缺失/断连 → 命令失败（与结果为空区分）。
+            _ => (None, true),
+        };
+
+        // 5) best-effort 清理。
+        cleanup_remote();
         cleanup_local();
 
-        match run_res {
-            Ok(output) => {
-                let code = output.status.code();
-                let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
-                combined.push_str(&String::from_utf8_lossy(&output.stderr));
-                let redacted = redact_remote(&combined, cfg);
-                // ssh 对自身传输失败（连不上 / 认证 / host key 未登记）保留退出码 255；
-                // inet 真加载失败是 1..254。255 或拿不到退出码 → 判「连不上」，不诬陷拓扑。
-                if code == Some(255) || code.is_none() {
-                    return Err(RemoteError::Unreachable(format!(
-                        "连不上远端 INET（ssh 退出码 {}）：{}",
-                        code.map(|c| c.to_string()).unwrap_or_else(|| "未知".into()),
-                        tail(&redacted, 2000)
-                    )));
-                }
-                Ok(RemoteRunOutcome {
-                    exit_code: code,
-                    output_tail: tail(&redacted, 2000),
-                })
-            }
-            Err(e) => Err(RemoteError::Unreachable(format!(
-                "远端运行 inet 失败：{}",
-                redact_remote(&e.to_string(), cfg)
-            ))),
-        }
+        Ok(SimRunOutcome {
+            exit_code: code,
+            output_tail: tail(&redacted, 2000),
+            csv,
+            scavetool_failed,
+        })
     }
 }
 
@@ -381,7 +479,7 @@ mod tests {
             host: "100.104.38.106".into(),
             user: "zhang".into(),
             remote_base_dir: "/home/zhang/tsn-agent-runs".into(),
-            inet_path: "/home/zhang/.local/bin/inet".into(),
+            inet_env_cmd: "OPPENV run inet-4.6.0 --build-modes=release".into(),
             timeout: Duration::from_secs(120),
         }
     }
@@ -396,8 +494,23 @@ mod tests {
         assert!(argv.iter().any(|a| a == "BatchMode=yes"));
         assert!(argv.iter().any(|a| a == "zhang@100.104.38.106"));
         let last = argv.last().unwrap();
-        assert!(last.contains("cd '/home/zhang/tsn-agent-runs/run-ab'"));
-        assert!(last.contains("-u Cmdenv -f omnetpp.ini -n ."));
+        // inet 在 inet_env_cmd 环境里跑：`<env> -c '<inner>'`，inner 含 cd run 目录 + inet。
+        assert!(last.starts_with("OPPENV run inet-4.6.0 --build-modes=release -c "));
+        assert!(last.contains("run-ab"));
+        assert!(last.contains("inet -u Cmdenv -f omnetpp.ini -n ."));
+    }
+
+    #[test]
+    fn scavetool_cmd_runs_in_inet_env() {
+        // 取数也走 inet_env_cmd 环境（opp_scavetool 在该环境 PATH 上）；filter 经 sh_squote。
+        let cmd = remote_scavetool_cmd(
+            &cfg(),
+            "/home/zhang/tsn-agent-runs/run-x",
+            "name=~timeChanged",
+        );
+        assert!(cmd.starts_with("OPPENV run inet-4.6.0 --build-modes=release -c "));
+        assert!(cmd.contains("opp_scavetool export -f"));
+        assert!(cmd.contains("cat timechanged.csv"));
     }
 
     #[test]
@@ -448,6 +561,34 @@ mod tests {
         let s = "网络拓扑".repeat(300);
         let t = tail(&s, 50); // 不 panic 即通过；String 本身保证合法 UTF-8。
         assert!(t.starts_with('…'));
+    }
+
+    #[test]
+    fn inet_host_config_uses_camelcase_inet_env_cmd() {
+        // 前端 get/set_inet_host_config 读 inetEnvCmd（camelCase），非 inet_env_cmd。
+        let cfg = InetHostConfig {
+            host: "h".into(),
+            user: "u".into(),
+            inet_env_cmd: "opp_env run inet-4.6.0".into(),
+        };
+        let v: serde_json::Value = serde_json::to_value(&cfg).unwrap();
+        assert!(v.get("inetEnvCmd").is_some(), "inetEnvCmd camelCase");
+        assert!(v.get("inet_env_cmd").is_none());
+        // 回程：前端发 camelCase → 反序列化回结构。
+        let back: InetHostConfig =
+            serde_json::from_str(r#"{"host":"h2","user":"u2","inetEnvCmd":"x"}"#).unwrap();
+        assert_eq!(back.inet_env_cmd, "x");
+    }
+
+    #[test]
+    fn host_user_validation_rejects_injection_chars() {
+        assert!(is_valid_host_or_user("100.104.38.106"));
+        assert!(is_valid_host_or_user("zhang"));
+        assert!(is_valid_host_or_user("dev-box_1"));
+        assert!(!is_valid_host_or_user("")); // 空
+        assert!(!is_valid_host_or_user("zhang -o ProxyCommand=x")); // 空格 + 选项注入
+        assert!(!is_valid_host_or_user("a;rm -rf")); // shell 元字符
+        assert!(!is_valid_host_or_user("a@b")); // @ 不允许
     }
 
     #[cfg(unix)]

@@ -47,6 +47,9 @@ pub struct TopologyLinkRow {
     pub name: Option<String>,
     pub src_node: String,
     pub dst_node: String,
+    /// 端口列（结构事实源，KTD1/R24）：画布按 source/target 端点渲染、不再读 styles_json.leftLabel。
+    pub src_port: Option<i64>,
+    pub dst_port: Option<i64>,
     pub styles_json: String,
 }
 
@@ -68,7 +71,7 @@ pub async fn query_topology(
     .await
     .map_err(|e| format!("查询节点失败：{e}"))?;
     let links = sqlx::query(
-        r#"SELECT link_seq, name, src_node, dst_node, styles_json
+        r#"SELECT link_seq, name, src_node, dst_node, src_port, dst_port, styles_json
            FROM topology_links
            WHERE session_id = ?
            ORDER BY link_seq"#,
@@ -98,6 +101,8 @@ pub async fn query_topology(
                 name: r.get("name"),
                 src_node: r.get("src_node"),
                 dst_node: r.get("dst_node"),
+                src_port: r.get("src_port"),
+                dst_port: r.get("dst_port"),
                 styles_json: r.get("styles_json"),
             })
             .collect(),
@@ -117,7 +122,7 @@ pub async fn load_and_verify_topology(
     .await
     .map_err(|e| format!("查询节点失败：{e}"))?;
     let link_rows = sqlx::query(
-        "SELECT link_seq, src_node, dst_node, styles_json FROM topology_links WHERE session_id = ? ORDER BY link_seq",
+        "SELECT link_seq, src_node, dst_node, src_port, dst_port, speed, styles_json FROM topology_links WHERE session_id = ? ORDER BY link_seq",
     )
     .bind(session_id)
     .fetch_all(pool)
@@ -138,6 +143,9 @@ pub async fn load_and_verify_topology(
             link_seq: r.get("link_seq"),
             src_node: r.get("src_node"),
             dst_node: r.get("dst_node"),
+            src_port: r.get("src_port"),
+            dst_port: r.get("dst_port"),
+            speed: r.get("speed"),
             styles_json: r.get("styles_json"),
         })
         .collect();
@@ -209,7 +217,7 @@ mod tests {
             let pool = fresh_pool().await;
             sqlx::query("INSERT INTO topology_nodes (session_id, mid, node_type, x, y, insert_order) VALUES ('s1', '0', 'switch', 0, 0, 0), ('s1', '1', 'endSystem', 1, 1, 1)")
                 .execute(&pool).await.unwrap();
-            sqlx::query(r#"INSERT INTO topology_links (session_id, link_seq, src_node, dst_node, styles_json) VALUES ('s1', 0, '0', '1', '{"leftLabel":"0","rightLabel":"0"}')"#)
+            sqlx::query(r#"INSERT INTO topology_links (session_id, link_seq, src_node, dst_node, src_port, dst_port, styles_json) VALUES ('s1', 0, '0', '1', 0, 0, '{"plane":"A"}')"#)
                 .execute(&pool).await.unwrap();
             let r = load_and_verify_topology(&pool, "s1").await.unwrap();
             assert!(r.ok, "errors: {:?}", r.errors);

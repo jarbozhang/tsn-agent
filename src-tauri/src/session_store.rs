@@ -247,6 +247,12 @@ pub async fn connect_app_database(app: &tauri::AppHandle) -> Result<Pool<Sqlite>
         .await
         .map_err(db_error)?;
 
+    // U9：删 leftLabel（U8）前的存量端口审计——二次回填可 parse 的行、审计不可恢复行（幂等，见 db.rs）。
+    // 排在 mid/端口拆列之后，确保端口列已存在。best-effort：审计失败（如个别行锁住）不应 brick 启动。
+    if let Err(e) = crate::db::audit_and_backfill_link_ports(&pool).await {
+        eprintln!("U9 端口审计失败（非致命，跳过）：{e}");
+    }
+
     Ok(pool)
 }
 

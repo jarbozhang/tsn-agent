@@ -385,6 +385,31 @@ textarea:focus-visible {
   gap: 8px;
 }
 
+/* U5：远端仿真主机配置表单。 */
+.settings-host-form {
+  margin-top: 16px;
+}
+
+.host-form-fields {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.host-form-fields input {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  background: #ffffff;
+}
+
+.host-form-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .master-detail-layout {
   display: grid;
   grid-template-columns: minmax(150px, 0.84fr) minmax(220px, 1.16fr);
@@ -2065,6 +2090,135 @@ textarea:focus-visible {
   min-height: 250px;
   border-top: 1px solid var(--border);
   background: var(--bg-secondary);
+}
+
+/* U10：底部 handle 条，常驻、切换弹出框显隐（与选中解耦）。 */
+.config-handle {
+  flex: 0 0 auto;
+  padding: 6px 16px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-align: left;
+  background: var(--bg-secondary);
+  cursor: pointer;
+}
+
+.config-handle:hover {
+  color: var(--text-primary);
+}
+
+/* U11/U12/U13：时钟同步软仿面板。 */
+.sim-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sim-hint {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.sim-override {
+  margin-bottom: 12px;
+}
+
+.sim-override-toggle {
+  border: 0;
+  padding: 4px 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sim-override-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.sim-field {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sim-field select,
+.sim-field input {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  background: #ffffff;
+}
+
+.sim-overall {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sim-overall.converged {
+  border: 1px solid rgba(22, 163, 74, 0.3);
+  color: #15803d;
+  background: rgba(236, 253, 245, 0.95);
+}
+
+.sim-overall.warn {
+  border: 1px solid rgba(217, 119, 6, 0.3);
+  color: #b45309;
+  background: rgba(255, 251, 235, 0.95);
+}
+
+.sim-message {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.sim-table {
+  width: 100%;
+}
+
+.sim-badge {
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.sim-badge.ok {
+  color: #15803d;
+  background: rgba(236, 253, 245, 0.95);
+}
+
+.sim-badge.bad {
+  color: #b91c1c;
+  background: rgba(254, 242, 242, 0.95);
+}
+
+.sim-explain {
+  margin-top: 12px;
+}
+
+.sim-explain-body {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  background: #ffffff;
 }
 
 .config-tabs {

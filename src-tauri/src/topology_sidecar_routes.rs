@@ -424,7 +424,7 @@ pub async fn inspect(
         }
     };
     let link_rows = sqlx::query(
-        r#"SELECT link_seq, name, src_node, dst_node, styles_json
+        r#"SELECT link_seq, name, src_node, dst_node, src_port, dst_port, styles_json
            FROM topology_links
            WHERE session_id = ?
            ORDER BY link_seq"#,
@@ -464,6 +464,8 @@ pub async fn inspect(
             name: r.get("name"),
             src_node: r.get("src_node"),
             dst_node: r.get("dst_node"),
+            src_port: r.get("src_port"),
+            dst_port: r.get("dst_port"),
             styles_json: r.get("styles_json"),
         })
         .collect();

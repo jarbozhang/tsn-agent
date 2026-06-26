@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Edge, Node } from "@xyflow/react";
+import type { Node } from "@xyflow/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import "@xyflow/react/dist/style.css";
 import { createRunId, runTsnAgent } from "../agent/agent-adapter";
@@ -18,11 +18,7 @@ import { isEmptyTopologySnapshot } from "../sessions/topology-snapshot";
 import { ConfirmDialog } from "../ui/confirm-dialog";
 import { redactProviderNamesForDisplay } from "../ui/display-redaction";
 import { ChatPane } from "./components/chat-pane";
-import {
-  type ConfigTabId,
-  type SelectedTopologyItem,
-  WorkspacePane,
-} from "./components/workspace-pane";
+import { type ConfigTabId, type SimUiState, WorkspacePane } from "./components/workspace-pane";
 import { type WorkspaceToolPanel, WorkspaceTools } from "./components/workspace-tools";
 import { useAgentRunController } from "./hooks/use-agent-run-controller";
 import { useSessionRepository } from "./hooks/use-session-repository";
@@ -65,10 +61,12 @@ export function App() {
     scrollContainerRef,
     actions: agentRun,
   } = useAgentRunController({ scrollDeps: [currentSession.id, currentSession.messages] });
-  const [activeConfigTab, setActiveConfigTab] = useState<ConfigTabId>("node-detail");
-  const [selectedTopologyItem, setSelectedTopologyItem] = useState<
-    SelectedTopologyItem | undefined
-  >();
+  // U10：弹出框显隐由独立 expand 驱动（与选中解耦）；面板可在无选中节点时打开。
+  const [configPanelExpanded, setConfigPanelExpanded] = useState(false);
+  const [activeConfigTab, setActiveConfigTab] = useState<ConfigTabId>("node-props");
+  const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>();
+  // U11：软仿运行态持于 App 级（非 tab 组件内）——切 tab 不取消命令、切回按 simStatus 恢复。
+  const [simState, setSimState] = useState<SimUiState>({ status: "idle" });
   const {
     snapshot: topologySnapshot,
     refetch: refetchTopology,
@@ -83,9 +81,13 @@ export function App() {
   // 仅当 cancel 命令返回 killed:true 才置位——是「本轮被用户真终止」的唯一依据（KTD3）。
   const cancelRequestedRef = useRef(false);
 
+  // U10（doc-review 决定）：会话切换时三态归零——收起、回 node-props、清选中，防 PR#23 id 污染。
+  // U11：软仿运行态也随会话切换重置（不跨会话保留结果）。
   useEffect(() => {
-    setActiveConfigTab("node-detail");
-    setSelectedTopologyItem(undefined);
+    setConfigPanelExpanded(false);
+    setActiveConfigTab("node-props");
+    setSelectedNodeId(undefined);
+    setSimState({ status: "idle" });
   }, [currentSession.id]);
 
   const workflow = currentSession.workflow;
@@ -95,19 +97,15 @@ export function App() {
   const hasTopology = !isEmptyTopologySnapshot(topologySnapshot);
 
   useEffect(() => {
-    if (!topologySnapshot || !selectedTopologyItem) {
+    if (!topologySnapshot || !selectedNodeId) {
       return;
     }
 
-    const stillExists =
-      selectedTopologyItem.kind === "node"
-        ? topologySnapshot.nodes.some((node) => node.mid === selectedTopologyItem.id)
-        : topologySnapshot.links.some((link) => `link-${link.linkSeq}` === selectedTopologyItem.id);
-
+    const stillExists = topologySnapshot.nodes.some((node) => node.mid === selectedNodeId);
     if (!stillExists) {
-      setSelectedTopologyItem(undefined);
+      setSelectedNodeId(undefined);
     }
-  }, [topologySnapshot, selectedTopologyItem]);
+  }, [topologySnapshot, selectedNodeId]);
 
   async function handleSubmit() {
     await submitIntent(input);
@@ -362,18 +360,11 @@ export function App() {
     await deleteSession();
   }
 
+  // U10：点节点 → 展开面板 + 切到「节点属性」tab（显隐与选中解耦：选中只是顺带展开）。
   function handleNodeSelect(_event: unknown, node: Node) {
-    setSelectedTopologyItem({ kind: "node", id: node.id });
-    setActiveConfigTab("node-detail");
-  }
-
-  function handleLinkSelect(_event: unknown, edge: Edge) {
-    setSelectedTopologyItem({ kind: "link", id: edge.id });
-    setActiveConfigTab("link-detail");
-  }
-
-  function handleClearTopologySelection() {
-    setSelectedTopologyItem(undefined);
+    setSelectedNodeId(node.id);
+    setActiveConfigTab("node-props");
+    setConfigPanelExpanded(true);
   }
 
   // U8/U7：画布撤销成功后置一次性回退通知标志。该标志须落在喂给下一轮 agent 的
@@ -467,17 +458,20 @@ export function App() {
         />
         <WorkspacePane
           topologySnapshot={topologySnapshot}
-          selectedTopologyItem={selectedTopologyItem}
+          selectedNodeId={selectedNodeId}
+          configPanelExpanded={configPanelExpanded}
           activeConfigTab={activeConfigTab}
           isAgentRunning={isAgentRunning}
           hasUserInteraction={hasUserInteraction}
           lastMutationId={lastMutationId}
           workflowStep={workflow.currentStep}
           timesyncSnapshot={timesyncSnapshot}
+          sessionId={currentSession.id}
+          simState={simState}
+          onSimStateChange={setSimState}
+          onToggleConfigPanel={() => setConfigPanelExpanded((value) => !value)}
           onSelectConfigTab={setActiveConfigTab}
           onNodeSelect={handleNodeSelect}
-          onLinkSelect={handleLinkSelect}
-          onClearSelection={handleClearTopologySelection}
           onRefreshTopology={() => void refetchTopology()}
           onUndone={handleTopologyUndone}
         />

@@ -22,6 +22,8 @@ import {
   type TopologyRowSnapshot,
 } from "../../../sessions/topology-snapshot";
 import { DetailRow, Stat } from "../shared";
+import { TimeSyncPanel } from "./time-sync-panel";
+import type { SimUiState } from "./timesync-sim";
 import {
   classifyTimesyncEdge,
   linkRowId,
@@ -34,26 +36,24 @@ import {
 } from "./topology-flow";
 import { TsnFloatingEdge } from "./tsn-floating-edge";
 
+export type { SimUiState } from "./timesync-sim";
 export type { TimesyncEdgeKind, TsnEdgeData, TsnNodeKind } from "./topology-flow";
 export {
   classifyTimesyncEdge,
   nodeRowLabel,
   nodeTypeToken,
   parseLinkStyles,
-  parsePortLabel,
   planeClassName,
   timesyncEdgeDecoration,
   timesyncRoleBadge,
   topologySnapshotToReactFlow,
 } from "./topology-flow";
 
-export type ConfigTabId = "node-detail" | "link-detail";
-
-export type SelectedTopologyItem = { kind: "node"; id: string } | { kind: "link"; id: string };
+export type ConfigTabId = "node-props" | "time-sync";
 
 const CONFIG_TABS: Array<{ id: ConfigTabId; label: string }> = [
-  { id: "node-detail", label: "节点详情" },
-  { id: "link-detail", label: "链路详情" },
+  { id: "node-props", label: "节点属性" },
+  { id: "time-sync", label: "时钟同步" },
 ];
 
 const nodeTypes = {
@@ -143,7 +143,10 @@ function topologyViewportResetKey(
 
 export interface WorkspacePaneProps {
   topologySnapshot: TopologyRowSnapshot | undefined;
-  selectedTopologyItem: SelectedTopologyItem | undefined;
+  /** U10：当前选中节点 mid（链路选中已移除）。 */
+  selectedNodeId: string | undefined;
+  /** U10：弹出框显隐（独立 expand，与选中解耦）。 */
+  configPanelExpanded: boolean;
   activeConfigTab: ConfigTabId;
   isAgentRunning: boolean;
   hasUserInteraction: boolean;
@@ -153,11 +156,15 @@ export interface WorkspacePaneProps {
   workflowStep?: WorkflowStep;
   /** U11：时钟同步配置快照（time-sync 阶段渲染时钟树用；其它阶段忽略）。 */
   timesyncSnapshot?: TimesyncSnapshot;
+  /** U11：当前会话 id（软仿命令入参）。 */
+  sessionId: string;
+  /** U11：App 级软仿运行态。 */
+  simState: SimUiState;
+  onSimStateChange: (state: SimUiState) => void;
+  /** U10：底部 handle 条切换弹出框显隐。 */
+  onToggleConfigPanel: () => void;
   onSelectConfigTab: (tab: ConfigTabId) => void;
   onNodeSelect: (event: unknown, node: Node) => void;
-  onLinkSelect: (event: unknown, edge: Edge) => void;
-  /** 清除选中：详情面板随选中态显隐（点画布空白或关闭按钮触发）。 */
-  onClearSelection: () => void;
   /** 写入失败/陈旧时的回正：重拉快照覆盖本地（R10/R11）。 */
   onRefreshTopology: () => void;
   /** U8：撤销成功后置一次性回退通知标志（下一轮注入），由 App 经 setCurrentSession 实现。 */
@@ -168,17 +175,20 @@ export interface WorkspacePaneProps {
 
 export function WorkspacePane({
   topologySnapshot,
-  selectedTopologyItem,
+  selectedNodeId,
+  configPanelExpanded,
   activeConfigTab,
   isAgentRunning,
   hasUserInteraction,
   lastMutationId,
   workflowStep,
   timesyncSnapshot,
+  sessionId,
+  simState,
+  onSimStateChange,
+  onToggleConfigPanel,
   onSelectConfigTab,
   onNodeSelect,
-  onLinkSelect,
-  onClearSelection,
   onRefreshTopology,
   onUndone,
   commitNodePosition = invokeCommitNodePosition,
@@ -541,26 +551,15 @@ export function WorkspacePane({
   const switchCount = topologySnapshot ? countSwitches(topologySnapshot) : 0;
   const endSystemCount = topologySnapshot ? countEndSystems(topologySnapshot) : 0;
   const linkCount = topologySnapshot?.links.length ?? 0;
-  const selectedNodeRow =
-    selectedTopologyItem?.kind === "node"
-      ? topologySnapshot?.nodes.find((node) => node.mid === selectedTopologyItem.id)
-      : undefined;
+  const selectedNodeRow = selectedNodeId
+    ? topologySnapshot?.nodes.find((node) => node.mid === selectedNodeId)
+    : undefined;
   // 详情面板坐标优先读 overlay（R9：拖毕即显示新坐标，无确认窗口跳变）。
   const selectedNode = selectedNodeRow
     ? (() => {
         const pending = pendingPositions.get(selectedNodeRow.mid);
         return pending ? { ...selectedNodeRow, x: pending.x, y: pending.y } : selectedNodeRow;
       })()
-    : undefined;
-  const selectedLink =
-    selectedTopologyItem?.kind === "link"
-      ? topologySnapshot?.links.find((link) => linkRowId(link) === selectedTopologyItem.id)
-      : undefined;
-  const selectedLinkSourceNode = selectedLink
-    ? topologySnapshot?.nodes.find((node) => node.mid === selectedLink.srcNode)
-    : undefined;
-  const selectedLinkTargetNode = selectedLink
-    ? topologySnapshot?.nodes.find((node) => node.mid === selectedLink.dstNode)
     : undefined;
 
   // U11：时钟同步信息栏派生数据（GM 显示名、未覆盖节点）。只在 time-sync 阶段用。
@@ -640,8 +639,6 @@ export function WorkspacePane({
               onNodeDragStart={handleNodeDragStart}
               onNodeDragStop={handleNodeDragStop}
               onNodeClick={onNodeSelect}
-              onEdgeClick={onLinkSelect}
-              onPaneClick={onClearSelection}
             >
               <Background />
               <Controls showInteractive={false} />
@@ -680,8 +677,8 @@ export function WorkspacePane({
         )}
       </div>
 
-      {/* 详情面板默认隐藏，点击节点/链路打开（流功能后续在此承载）。 */}
-      {selectedTopologyItem && (
+      {/* U10：弹出框显隐由独立 expand 驱动；底部 handle 条常驻，可在无选中节点时展开。 */}
+      {configPanelExpanded && (
         <div className="config-panel">
           <div className="config-tabs" role="tablist" aria-label="工程详情">
             {CONFIG_TABS.map((tab) => (
@@ -703,24 +700,24 @@ export function WorkspacePane({
             <button
               type="button"
               className="config-close"
-              aria-label="关闭详情"
-              onClick={onClearSelection}
+              aria-label="收起配置"
+              onClick={onToggleConfigPanel}
             >
               ×
             </button>
           </div>
 
           <div className="config-body">
-            {activeConfigTab === "node-detail" && (
+            {activeConfigTab === "node-props" && (
               <section
                 className="detail-panel"
-                id="config-panel-node-detail"
+                id="config-panel-node-props"
                 role="tabpanel"
-                aria-label="节点详情"
+                aria-label="节点属性"
               >
                 <div className="panel-heading">
                   <div>
-                    <h2>节点详情</h2>
+                    <h2>节点属性</h2>
                     <p>
                       {selectedNode
                         ? nodeRowLabel(selectedNode)
@@ -745,50 +742,28 @@ export function WorkspacePane({
               </section>
             )}
 
-            {activeConfigTab === "link-detail" && (
-              <section
-                className="detail-panel"
-                id="config-panel-link-detail"
-                role="tabpanel"
-                aria-label="链路详情"
-              >
-                <div className="panel-heading">
-                  <div>
-                    <h2>链路详情</h2>
-                    <p>
-                      {selectedLink ? linkRowId(selectedLink) : "在拓扑画布选择一条链路查看端点。"}
-                    </p>
-                  </div>
-                </div>
-                {selectedLink ? (
-                  <div className="detail-grid">
-                    <DetailRow label="链路序号" value={selectedLink.linkSeq} />
-                    <DetailRow label="名称" value={selectedLink.name ?? "无"} />
-                    <DetailRow
-                      label="源端点"
-                      value={
-                        selectedLinkSourceNode
-                          ? nodeRowLabel(selectedLinkSourceNode)
-                          : `节点 ${selectedLink.srcNode}`
-                      }
-                    />
-                    <DetailRow
-                      label="目标端点"
-                      value={
-                        selectedLinkTargetNode
-                          ? nodeRowLabel(selectedLinkTargetNode)
-                          : `节点 ${selectedLink.dstNode}`
-                      }
-                    />
-                  </div>
-                ) : (
-                  <div className="empty-panel mono">请选择拓扑画布中的链路</div>
-                )}
-              </section>
+            {activeConfigTab === "time-sync" && (
+              <TimeSyncPanel
+                key={sessionId}
+                inTimeSyncStage={showClockTree}
+                treeConfirmed={Boolean(timesyncSnapshot?.domain?.gmMid)}
+                sessionId={sessionId}
+                simState={simState}
+                onSimStateChange={onSimStateChange}
+              />
             )}
           </div>
         </div>
       )}
+      <button
+        type="button"
+        className="config-handle"
+        aria-label={configPanelExpanded ? "收起配置面板" : "展开配置面板"}
+        aria-expanded={configPanelExpanded}
+        onClick={onToggleConfigPanel}
+      >
+        {configPanelExpanded ? "▾ 配置" : "▴ 配置"}
+      </button>
     </section>
   );
 }

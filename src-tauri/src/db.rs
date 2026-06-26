@@ -394,6 +394,73 @@ pub async fn ensure_topology_rekey_mid_and_ports(
     Ok(())
 }
 
+/// U9（2026-06-25）：删 styles_json.leftLabel（U8）前的存量端口审计守卫。
+/// U6 把 link_add 改为硬校验拒绝、列成端口唯一事实源后，仍可能有存量行
+/// `src_port`/`dst_port` 为 NULL（早期数据，或当年 rekey 时 label 非数字置 NULL）。
+/// 本守卫在删 leftLabel 前先兜一道：
+///   ① 二次回填：端口列 NULL 但 styles_json 有可 parse 的 leftLabel/rightLabel → 补列；
+///   ② 审计剩余不可恢复行（非数字 label→永久 NULL）记 warn，不静默丢。
+/// 幂等：回填后端口非 NULL 的行不再入选、不重复写；不可恢复行保持 NULL（每次启动再 warn）。
+/// dual-plane 旧库（boss 定不迁移）同样纳入：plane 留 styles_json 显示不受影响，
+/// 端口若仅源自旧 leftLabel 也走本审计。表缺失（极简测试库）则 no-op。
+pub async fn audit_and_backfill_link_ports(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+) -> Result<(), sqlx::Error> {
+    use sqlx::Row;
+    let has_links_table: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='topology_links'",
+    )
+    .fetch_one(pool)
+    .await?;
+    if has_links_table == 0 {
+        return Ok(());
+    }
+
+    let rows = sqlx::query(
+        "SELECT session_id, link_seq, src_port, dst_port, styles_json FROM topology_links \
+         WHERE src_port IS NULL OR dst_port IS NULL",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut backfilled: u64 = 0;
+    let mut unrecoverable: u64 = 0;
+    for row in &rows {
+        let session_id: String = row.get("session_id");
+        let link_seq: i64 = row.get("link_seq");
+        let cur_src: Option<i64> = row.get("src_port");
+        let cur_dst: Option<i64> = row.get("dst_port");
+        let styles_json: String = row.get("styles_json");
+        let (parsed_src, parsed_dst, _speed) = parse_link_ports_and_speed(&styles_json);
+        // 仅补缺的列（已有值不覆盖）；parse 不到则保持 NULL。
+        let new_src = cur_src.or(parsed_src);
+        let new_dst = cur_dst.or(parsed_dst);
+        if new_src != cur_src || new_dst != cur_dst {
+            sqlx::query(
+                "UPDATE topology_links SET src_port = ?, dst_port = ? \
+                 WHERE session_id = ? AND link_seq = ?",
+            )
+            .bind(new_src)
+            .bind(new_dst)
+            .bind(&session_id)
+            .bind(link_seq)
+            .execute(pool)
+            .await?;
+            backfilled += 1;
+        }
+        if new_src.is_none() || new_dst.is_none() {
+            unrecoverable += 1;
+        }
+    }
+
+    if backfilled > 0 || unrecoverable > 0 {
+        eprintln!(
+            "U9 端口审计：从 styles_json 回填 {backfilled} 行；{unrecoverable} 行端口仍为 NULL（label 非数字、不可恢复，需手动重连该链路）"
+        );
+    }
+    Ok(())
+}
+
 /// 从 styles_json best-effort 解析 (src_port, dst_port, speed)。
 /// 解析失败（非法 JSON）三者全 None；逐字段：
 /// - src_port ← leftLabel 的数字前缀（`"P1"`→1、`"1"`→1、非数字→None）
@@ -733,6 +800,73 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(n, 2);
+    }
+
+    // U9：删 leftLabel 前的存量端口审计——可 parse 的行回填、不可恢复行保持 NULL、已有端口不覆盖、幂等。
+    #[tokio::test]
+    async fn link_port_audit_backfills_parseable_and_keeps_unrecoverable_null() {
+        let opts = SqliteConnectOptions::new()
+            .in_memory(true)
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE sessions (id TEXT PRIMARY KEY NOT NULL);
+            CREATE TABLE topology_links (
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                link_seq INTEGER NOT NULL, name TEXT,
+                src_node TEXT NOT NULL, dst_node TEXT NOT NULL,
+                src_port INTEGER, dst_port INTEGER, speed INTEGER,
+                styles_json TEXT NOT NULL,
+                PRIMARY KEY (session_id, link_seq)
+            );
+            INSERT INTO sessions (id) VALUES ('s1');
+            INSERT INTO topology_links (session_id, link_seq, src_node, dst_node, src_port, dst_port, speed, styles_json)
+                VALUES ('s1', 0, '0', '1', NULL, NULL, NULL, '{"leftLabel":"P2","rightLabel":"3","plane":"A"}'),
+                       ('s1', 1, '0', '2', NULL, NULL, NULL, '{"leftLabel":"weird","plane":"A"}'),
+                       ('s1', 2, '0', '3', 5, 6, NULL, '{"plane":"B"}');
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        audit_and_backfill_link_ports(&pool).await.unwrap();
+
+        // link0：可 parse → 回填。
+        let l0: (Option<i64>, Option<i64>) =
+            sqlx::query_as("SELECT src_port, dst_port FROM topology_links WHERE link_seq=0")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(l0, (Some(2), Some(3)));
+        // link1：leftLabel 非数字 + 缺 rightLabel → 仍 NULL（不可恢复）。
+        let l1: (Option<i64>, Option<i64>) =
+            sqlx::query_as("SELECT src_port, dst_port FROM topology_links WHERE link_seq=1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(l1, (None, None));
+        // link2：已有端口不被覆盖。
+        let l2: (Option<i64>, Option<i64>) =
+            sqlx::query_as("SELECT src_port, dst_port FROM topology_links WHERE link_seq=2")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(l2, (Some(5), Some(6)));
+
+        // 幂等：重跑不改值。
+        audit_and_backfill_link_ports(&pool).await.unwrap();
+        let l0b: (Option<i64>, Option<i64>) =
+            sqlx::query_as("SELECT src_port, dst_port FROM topology_links WHERE link_seq=0")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(l0b, (Some(2), Some(3)));
     }
 
     #[tokio::test]

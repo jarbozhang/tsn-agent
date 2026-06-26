@@ -579,7 +579,7 @@ describe("App", () => {
     );
   });
 
-  it("shows node and link details for canvas selections", async () => {
+  it("shows node props on node selection; link clicks do nothing (U10)", async () => {
     enableTauriRuntime();
     invokeMock.mockImplementation(
       async (command: string, args?: { request?: { sessionId?: string } }) => {
@@ -610,16 +610,16 @@ describe("App", () => {
       expect(screen.getByText("3 nodes / 2 edges")).toBeInTheDocument();
     });
 
+    // 点节点 → 弹出框展开 + 停在「节点属性」tab。
     await user.click(screen.getByRole("button", { name: "选择节点 1" }));
-    const nodePanel = screen.getByRole("tabpanel", { name: "节点详情" });
+    const nodePanel = screen.getByRole("tabpanel", { name: "节点属性" });
     expect(within(nodePanel).getByText("SW-1")).toBeInTheDocument();
     expect(within(nodePanel).getByText("交换机")).toBeInTheDocument();
 
+    // 点链路无响应：链路选中已移除，不再出现「链路详情」tab。
     await user.click(screen.getByRole("button", { name: "选择链路 link-1" }));
-    const linkPanel = screen.getByRole("tabpanel", { name: "链路详情" });
-    expect(within(linkPanel).getByText("uplink")).toBeInTheDocument();
-    expect(within(linkPanel).getByText("SW-0")).toBeInTheDocument();
-    expect(within(linkPanel).getByText("ES-2")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "链路详情" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "时钟同步" })).toBeInTheDocument();
   });
 
   it("creates and deletes sessions with confirmation while the drawer stays open", async () => {

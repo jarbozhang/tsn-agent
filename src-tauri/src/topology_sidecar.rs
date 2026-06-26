@@ -1395,9 +1395,9 @@ mod tests {
                   "x": 150.0, "y": 40.0, "nodeType": "switch",
                   "insertOrder": new_order },
                 { "op": "link_add", "linkSeq": new_seq, "srcNode": sw1, "dstNode": new_sync,
-                  "stylesJson": styles },
+                  "srcPort": 9, "dstPort": 0, "stylesJson": styles },
                 { "op": "link_add", "linkSeq": new_seq + 1, "srcNode": new_sync, "dstNode": sw2,
-                  "stylesJson": styles },
+                  "srcPort": 1, "dstPort": 9, "stylesJson": styles },
             ]);
             let (status, parsed) = apply_ops(router.clone(), &token, "s1", batch).await;
             assert_eq!(status, StatusCode::OK);
@@ -1486,9 +1486,9 @@ mod tests {
                       "x": 150.0, "y": 40.0, "nodeType": "switch",
                       "insertOrder": new_order },
                     { "op": "link_add", "linkSeq": seq_a, "srcNode": sw1, "dstNode": new_sync,
-                      "stylesJson": styles },
+                      "srcPort": 9, "dstPort": 0, "stylesJson": styles },
                     { "op": "link_add", "linkSeq": seq_b, "srcNode": new_sync, "dstNode": sw2,
-                      "stylesJson": styles },
+                      "srcPort": 1, "dstPort": 9, "stylesJson": styles },
                 ])
             };
 

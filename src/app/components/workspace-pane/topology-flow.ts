@@ -13,11 +13,12 @@ import type {
 
 export interface LinkStyleMeta {
   plane?: "A" | "B";
-  leftLabel?: string;
-  rightLabel?: string;
 }
 
-/** R7（origin 2026-06-10）：stylesJson 容错解析——缺失、非法值、解析失败一律回退空 meta，不抛错。 */
+/**
+ * R7（origin 2026-06-10）：stylesJson 容错解析——缺失、非法值、解析失败一律回退空 meta，不抛错。
+ * U8/KTD1：styles_json 收敛为纯显示（仅 plane/role）；端口标签改读 src_port/dst_port 列，不再读 leftLabel/rightLabel。
+ */
 export function parseLinkStyles(stylesJson: string): LinkStyleMeta {
   try {
     const parsed: unknown = JSON.parse(stylesJson);
@@ -29,12 +30,6 @@ export function parseLinkStyles(stylesJson: string): LinkStyleMeta {
     const meta: LinkStyleMeta = {};
     if (record.plane === "A" || record.plane === "B") {
       meta.plane = record.plane;
-    }
-    if (typeof record.leftLabel === "string" && record.leftLabel !== "") {
-      meta.leftLabel = record.leftLabel;
-    }
-    if (typeof record.rightLabel === "string" && record.rightLabel !== "") {
-      meta.rightLabel = record.rightLabel;
     }
     return meta;
   } catch {
@@ -54,14 +49,17 @@ export function planeClassName(plane: LinkStyleMeta["plane"]): string {
 }
 
 export interface TsnEdgeData {
-  leftLabel?: string;
-  rightLabel?: string;
+  /** U8/KTD1：端口号读自 src_port/dst_port 列；src 标在 source 端、dst 标在 target 端。NULL→不渲染。 */
+  srcPort?: number;
+  dstPort?: number;
   /** 同节点同方位的端口标签序数；渲染层沿连线向内分层，避免标签重叠。 */
-  leftOrd?: number;
-  rightOrd?: number;
+  srcOrd?: number;
+  dstOrd?: number;
   /** 同一对节点之间多条边的等分序号；渲染层据此把端点均匀分布在节点边上。 */
   parallelIndex?: number;
   parallelCount?: number;
+  /** 自环（src===dst）：端点重合，渲染层据此给两标签反向小偏移防叠压。 */
+  selfLoop?: boolean;
   /** React Flow Edge.data 的结构性要求；不影响已命名字段的类型推断。 */
   [key: string]: unknown;
 }
@@ -146,14 +144,18 @@ export function topologySnapshotToReactFlow(snapshot: TopologyRowSnapshot): {
     edges: snapshot.links.map((link) => {
       const meta = parseLinkStyles(link.stylesJson);
       const parallelSlot = takeParallelSlot(link.srcNode, link.dstNode);
+      // U8/KTD1：端口标签读列——src_port 在 source 端、dst_port 在 target 端（几何无关）。NULL→不渲染。
+      const srcPort = link.srcPort ?? undefined;
+      const dstPort = link.dstPort ?? undefined;
       const data: TsnEdgeData = {
-        leftLabel: meta.leftLabel,
-        rightLabel: meta.rightLabel,
-        // 仅有标签的端点占用层级槽位，无标签端不推远后续标签。
-        leftOrd: meta.leftLabel ? takeOrd(link.srcNode, link.dstNode) : 0,
-        rightOrd: meta.rightLabel ? takeOrd(link.dstNode, link.srcNode) : 0,
+        srcPort,
+        dstPort,
+        // 仅有端口号的端点占用层级槽位，无端口号端不推远后续标签。
+        srcOrd: srcPort !== undefined ? takeOrd(link.srcNode, link.dstNode) : 0,
+        dstOrd: dstPort !== undefined ? takeOrd(link.dstNode, link.srcNode) : 0,
         parallelIndex: parallelSlot.index,
         parallelCount: parallelSlot.count,
+        selfLoop: link.srcNode === link.dstNode,
       };
       return {
         id: linkRowId(link),
@@ -175,23 +177,6 @@ export interface TsnNodeTimesync {
 }
 
 /**
- * 端口标签数字提取（与 Rust db.rs::parse_port_label 同口径）：
- * 只认 `P<digits>`（大小写 P，`"P1"`→1）或纯数字（`"1"`→1）；其余（`"eth0"`/空/缺失）→ undefined。
- * 端口号是前端唯一能从 link 拿到的端口标识（query_topology 不暴露 src/dst_port，
- * 但 styles_json 的 leftLabel=src 端口、rightLabel=dst 端口，与建表迁移同源）。
- */
-export function parsePortLabel(label: string | undefined): number | undefined {
-  if (label === undefined) {
-    return undefined;
-  }
-  const digits = label.startsWith("P") || label.startsWith("p") ? label.slice(1) : label;
-  if (digits === "" || !/^\d+$/.test(digits)) {
-    return undefined;
-  }
-  return Number.parseInt(digits, 10);
-}
-
-/**
  * 时钟树边分类（time-sync 阶段，纯函数）。
  *
  * 树边判定：一端是某节点的 master 端口（朝子）、另一端是子节点的 slave 端口（朝父）。
@@ -204,15 +189,15 @@ export function parsePortLabel(label: string | undefined): number | undefined {
 export type TimesyncEdgeKind = "tree-master-to-slave" | "tree-slave-to-master" | "passive";
 
 export function classifyTimesyncEdge(
-  link: Pick<TopologyLinkRow, "srcNode" | "dstNode" | "stylesJson">,
+  link: Pick<TopologyLinkRow, "srcNode" | "dstNode" | "srcPort" | "dstPort">,
   snapshot: TimesyncSnapshot | undefined,
 ): TimesyncEdgeKind {
   if (!snapshot) {
     return "passive";
   }
-  const meta = parseLinkStyles(link.stylesJson);
-  const srcPort = parsePortLabel(meta.leftLabel);
-  const dstPort = parsePortLabel(meta.rightLabel);
+  // U8/KTD1：端口配对读 src_port/dst_port 列（两列非 NULL=配对），不再读 styles_json.leftLabel。
+  const srcPort = link.srcPort ?? undefined;
+  const dstPort = link.dstPort ?? undefined;
   if (srcPort === undefined || dstPort === undefined) {
     return "passive";
   }
