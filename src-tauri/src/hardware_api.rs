@@ -41,11 +41,8 @@ pub struct HealthzResp {
     pub status: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct VersionResp {
-    pub tsn_sim_version: String,
-    pub api_version: String,
-}
+// 注：`/sim/version` 由 U9 e2e 脚本（scripts/verify-hardware-api.mjs）直连查，Rust 客户端不消费，
+// 故此处不建 VersionResp、trait 不含 version 方法（YAGNI）。
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Avail {
@@ -100,10 +97,6 @@ pub trait HardwareApiClient {
         &self,
         base_url: &str,
     ) -> impl Future<Output = Result<HealthzResp, HardwareApiError>> + Send;
-    fn version(
-        &self,
-        base_url: &str,
-    ) -> impl Future<Output = Result<VersionResp, HardwareApiError>> + Send;
     fn task_check(
         &self,
         base_url: &str,
@@ -201,16 +194,6 @@ impl HardwareApiClient for ReqwestHardwareClient {
         let resp = self
             .client
             .get(endpoint(base_url, "healthz"))
-            .send()
-            .await
-            .map_err(|e| HardwareApiError::Network(e.to_string()))?;
-        parse_json(resp).await
-    }
-
-    async fn version(&self, base_url: &str) -> Result<VersionResp, HardwareApiError> {
-        let resp = self
-            .client
-            .get(endpoint(base_url, "version"))
             .send()
             .await
             .map_err(|e| HardwareApiError::Network(e.to_string()))?;
