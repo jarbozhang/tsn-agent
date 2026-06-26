@@ -520,6 +520,18 @@ function InetHostConfigForm({ onClose }: { onClose: () => void }) {
             在此环境里跑 inet 与 opp_scavetool（如 opp_env wrapper），app 以 “命令 -c 实际指令”
             方式调用。一般用默认即可。
           </p>
+          <label className="sim-field">
+            <span>运行目录</span>
+            <input
+              type="text"
+              value={config.baseDir}
+              onChange={(event) => setConfig({ ...config, baseDir: event.target.value })}
+            />
+          </label>
+          <p className="host-form-hint">
+            远端运行目录的父目录，每次软仿在其下建 run-&lt;随机&gt; 子目录。目录保留不删（默认
+            /tmp，重启自动清），可 SSH 进去看实际 ini/ned 与 results/。换主机若家目录不同记得改。
+          </p>
           <div className="drawer-actions">
             <button
               className="btn primary"

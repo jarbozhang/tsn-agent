@@ -1,5 +1,6 @@
-//! 第二批 U2：远端执行器——把 U1 产物 scp 到远端独立临时目录、ssh 跑 `inet`、收退出码与输出、
-//! best-effort 清理。复用 `commands.rs` 进程纪律（结构化 argv / 超时 / 进程组杀 / 脱敏）。
+//! 第二批 U2：远端执行器——把 U1 产物 scp 到远端独立临时目录（base_dir 下 run-<hex>）、
+//! ssh 跑 `inet`、收退出码与输出。远端 run 目录刻意保留供查看（base_dir 默认 /tmp，重启自动清）；
+//! 仅清理本地暂存。复用 `commands.rs` 进程纪律（结构化 argv / 超时 / 进程组杀 / 脱敏）。
 //!
 //! 设计：argv 构造 / 目录名 / 脱敏是纯函数（可单测，见 KTD8 注入防护）；真 ssh/scp 经
 //! `RemoteRunner` trait 抽象（`SshRunner` 默认实现；测试注入 mock，真连留集成验收）。
@@ -10,8 +11,7 @@ use std::io;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// 远端主机 UI 可配置项（R20）：host/user/inet 路径。落 app_state KV（JSON）。
-/// remote_base_dir 本期不进 UI（保持 env/默认）；base_dir 用户可编辑是 deferred。
+/// 远端主机 UI 可配置项（R20）：host/user/INET 环境命令/运行目录。落 app_state KV（JSON）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct InetHostConfig {
@@ -19,6 +19,8 @@ pub struct InetHostConfig {
     pub user: String,
     /// INET 环境命令前缀（见 RemoteConfig.inet_env_cmd）；序列化为 `inetEnvCmd`。
     pub inet_env_cmd: String,
+    /// 远端运行目录的父目录（见 RemoteConfig.remote_base_dir）；序列化为 `baseDir`。
+    pub base_dir: String,
 }
 
 /// host/user 字符集校验（R20 + security-lens）：限 `[a-zA-Z0-9._-]`、非空。
@@ -61,7 +63,7 @@ impl RemoteConfig {
         let host = std::env::var("TSN_AGENT_INET_HOST").unwrap_or_else(|_| "100.104.38.106".into());
         let user = std::env::var("TSN_AGENT_INET_USER").unwrap_or_else(|_| "zhang".into());
         let remote_base_dir = std::env::var("TSN_AGENT_INET_BASEDIR")
-            .unwrap_or_else(|_| "/home/zhang/tsn-agent-runs".into());
+            .unwrap_or_else(|_| "/tmp/tsn-agent-runs".into());
         let inet_env_cmd =
             std::env::var("TSN_AGENT_INET_ENV").unwrap_or_else(|_| DEFAULT_INET_ENV_CMD.into());
         Self {
@@ -185,11 +187,6 @@ pub fn remote_run_cmd(cfg: &RemoteConfig, remote_dir: &str) -> String {
     format!("{} -c {}", cfg.inet_env_cmd, sh_squote(&inner))
 }
 
-/// 远端清理命令串：rm -rf 受 is_safe 约束的 run 目录（调用方须先校验 dir 安全）。
-pub fn remote_cleanup_cmd(remote_dir: &str) -> String {
-    format!("rm -rf {}", sh_squote(remote_dir))
-}
-
 /// 脱敏：把主机 IP / 用户名 / 远端基目录定向替换为占位符，再交既有 redact_error。
 /// 现有 `redact_secrets` 只挡 key=值/token，挡不住裸主机串（见计划 KTD1/U2）。
 pub fn redact_remote(text: &str, cfg: &RemoteConfig) -> String {
@@ -255,12 +252,8 @@ impl RemoteRunner for SshRunner {
         let cleanup_local = || {
             let _ = std::fs::remove_dir_all(&local_dir);
         };
-        let cleanup_remote = || {
-            let _ = run_with_timeout(
-                make_cmd(&ssh, build_ssh_argv(cfg, &remote_cleanup_cmd(&remote_dir))),
-                cfg.timeout,
-            );
-        };
+        // 远端 run 目录刻意不清理：留在 base_dir（默认 /tmp/tsn-agent-runs）下供 SSH 查看
+        // 实际 ini/ned（请求参数）与 results/+CSV（结果）；/tmp 重启自动清。失败的 run 也留着便于排错。
 
         let transport = |cmd: Command, what: &str| -> Result<(), RemoteError> {
             match run_with_timeout(cmd, cfg.timeout) {
@@ -294,7 +287,6 @@ impl RemoteRunner for SshRunner {
             make_cmd(&scp, build_scp_argv(cfg, &local_src, &remote_dir)),
             "传输 bundle",
         ) {
-            cleanup_remote();
             cleanup_local();
             return Err(e);
         }
@@ -307,7 +299,6 @@ impl RemoteRunner for SshRunner {
         let inet_output = match run_res {
             Ok(o) => o,
             Err(e) => {
-                cleanup_remote();
                 cleanup_local();
                 return Err(RemoteError::Unreachable(format!(
                     "远端运行 inet 失败：{}",
@@ -320,7 +311,6 @@ impl RemoteRunner for SshRunner {
         combined.push_str(&String::from_utf8_lossy(&inet_output.stderr));
         let redacted = redact_remote(&combined, cfg);
         if code == Some(255) || code.is_none() {
-            cleanup_remote();
             cleanup_local();
             return Err(RemoteError::Unreachable(format!(
                 "连不上远端 INET（ssh 退出码 {}）：{}",
@@ -330,7 +320,6 @@ impl RemoteRunner for SshRunner {
         }
         // inet 非 0 退出 → load_failed：不取数，回 csv=None 让 caller 分型。
         if code != Some(0) {
-            cleanup_remote();
             cleanup_local();
             return Ok(SimRunOutcome {
                 exit_code: code,
@@ -365,7 +354,6 @@ impl RemoteRunner for SshRunner {
         };
 
         // 5) best-effort 清理。
-        cleanup_remote();
         cleanup_local();
 
         Ok(SimRunOutcome {
@@ -540,13 +528,6 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_cmd_targets_only_run_dir() {
-        let cmd = remote_cleanup_cmd("/home/zhang/tsn-agent-runs/run-deadbeef");
-        assert!(cmd.starts_with("rm -rf '"));
-        assert!(cmd.contains("/run-deadbeef"));
-    }
-
-    #[test]
     fn redact_strips_bare_host_user_dir() {
         let raw = "ssh zhang@100.104.38.106 failed at /home/zhang/tsn-agent-runs/run-x";
         let out = redact_remote(raw, &cfg());
@@ -570,14 +551,19 @@ mod tests {
             host: "h".into(),
             user: "u".into(),
             inet_env_cmd: "opp_env run inet-4.6.0".into(),
+            base_dir: "/tmp/runs".into(),
         };
         let v: serde_json::Value = serde_json::to_value(&cfg).unwrap();
         assert!(v.get("inetEnvCmd").is_some(), "inetEnvCmd camelCase");
+        assert!(v.get("baseDir").is_some(), "baseDir camelCase");
         assert!(v.get("inet_env_cmd").is_none());
         // 回程：前端发 camelCase → 反序列化回结构。
-        let back: InetHostConfig =
-            serde_json::from_str(r#"{"host":"h2","user":"u2","inetEnvCmd":"x"}"#).unwrap();
+        let back: InetHostConfig = serde_json::from_str(
+            r#"{"host":"h2","user":"u2","inetEnvCmd":"x","baseDir":"/tmp/r"}"#,
+        )
+        .unwrap();
         assert_eq!(back.inet_env_cmd, "x");
+        assert_eq!(back.base_dir, "/tmp/r");
     }
 
     #[test]

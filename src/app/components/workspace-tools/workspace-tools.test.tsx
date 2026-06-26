@@ -13,7 +13,12 @@ beforeEach(() => {
   invokeMock.mockReset();
   invokeMock.mockImplementation(async (command: string) => {
     if (command === "get_inet_host_config") {
-      return { host: "dev.example", user: "zhang", inetEnvCmd: "opp_env run inet-4.6.0" };
+      return {
+        host: "dev.example",
+        user: "zhang",
+        inetEnvCmd: "opp_env run inet-4.6.0",
+        baseDir: "/tmp/tsn-agent-runs",
+      };
     }
     return undefined;
   });
@@ -185,7 +190,7 @@ describe("远端仿真主机配置（U5）", () => {
     const setActivePanel = vi.fn();
     invokeMock.mockImplementation(async (command: string) => {
       if (command === "get_inet_host_config") {
-        return { host: "dev.example", user: "zhang", inetEnvCmd: "envx" };
+        return { host: "dev.example", user: "zhang", inetEnvCmd: "envx", baseDir: "/tmp/runs" };
       }
       if (command === "set_inet_host_config") {
         throw new Error("主机名含非法字符（仅允许字母/数字/.-_）。");
