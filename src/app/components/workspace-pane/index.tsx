@@ -703,7 +703,7 @@ export function WorkspacePane({
               >
                 {tab.label}
                 {tab.id === "time-sync" && timesyncTabHasBadge && (
-                  <span className="config-tab-badge" aria-label="有新内容" />
+                  <span className="config-tab-badge" role="img" aria-label="有新内容" />
                 )}
               </button>
             ))}
