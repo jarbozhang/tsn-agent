@@ -1,11 +1,14 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   buildSimExplainPrompt,
+  FALLBACK_SIM_DEFAULTS,
   hasNonConvergedNode,
+  invokeGetSimDefaults,
   invokeRunTimesyncSim,
   invokeSimExplain,
   isFullyConverged,
   type PerNodeOffset,
+  type SimDefaults,
   type SimOverrideForm,
   type SimResult,
   type SimUiState,
@@ -37,6 +40,8 @@ export interface TimeSyncPanelProps {
   runTimesyncSim?: (sessionId: string, overrides: SimOverrideForm) => Promise<SimResult>;
   /** 解释通道（测试注入替身）。 */
   explainSim?: (prompt: string) => Promise<string>;
+  /** U6：默认值读通道（测试注入替身）。 */
+  getSimDefaults?: () => Promise<SimDefaults>;
 }
 
 const TIMESYNC_SUBTABS: Array<{ id: TimesyncSubTab; label: string }> = [
@@ -54,10 +59,27 @@ export function TimeSyncPanel({
   onSelectSubTab,
   runTimesyncSim = invokeRunTimesyncSim,
   explainSim = invokeSimExplain,
+  getSimDefaults = invokeGetSimDefaults,
 }: TimeSyncPanelProps) {
-  // U12：覆盖表单状态（默认收起，跨软仿运行保留）。
+  // U12：覆盖表单状态（默认收起，跨软仿运行保留）。form 只存「用户覆盖」（在哪个键=已覆盖）；
+  // 显示/预填用 form.x ?? defaults.x，提交也只发 form（不填走后端默认，保持原语义）。
   const [formExpanded, setFormExpanded] = useState(false);
   const [form, setForm] = useState<SimOverrideForm>({});
+  // U6：软仿覆盖参数默认值（后端单一事实源）。undefined=加载中；取数失败回退兜底常量。
+  const [defaults, setDefaults] = useState<SimDefaults | undefined>();
+  useEffect(() => {
+    let alive = true;
+    getSimDefaults()
+      .then((d) => {
+        if (alive) setDefaults(d);
+      })
+      .catch(() => {
+        if (alive) setDefaults(FALLBACK_SIM_DEFAULTS);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [getSimDefaults]);
   // U13：解释态。
   const [explainState, setExplainState] = useState<
     { status: "idle" } | { status: "running" } | { status: "done"; text: string }
@@ -189,6 +211,7 @@ export function TimeSyncPanel({
           <SimOverrideRegion
             expanded={formExpanded}
             form={form}
+            defaults={defaults}
             onToggle={() => setFormExpanded((value) => !value)}
             onChange={setForm}
           />
@@ -231,18 +254,36 @@ function HardDeployEmptyState({ onGoSoftSim }: { onGoSoftSim: () => void }) {
   );
 }
 
-/** U12：软仿覆盖表单（3 参数，默认收起）。 */
+/**
+ * U12/U6：软仿覆盖表单（3 参数，默认收起）。折叠 header 显示生效默认摘要（值来自后端单一事实源），
+ * 展开后字段预填实值；form 只存「用户覆盖」的键——「已覆盖」按键是否存在判定（非值比较），
+ * 提交也只发 form（不填走后端默认，保持原语义）。defaults 未到（加载中）暂用兜底常量显示。
+ */
 function SimOverrideRegion({
   expanded,
   form,
+  defaults,
   onToggle,
   onChange,
 }: {
   expanded: boolean;
   form: SimOverrideForm;
+  defaults: SimDefaults | undefined;
   onToggle: () => void;
   onChange: (form: SimOverrideForm) => void;
 }) {
+  const eff = defaults ?? FALLBACK_SIM_DEFAULTS;
+  const oscOverridden = form.oscillator !== undefined;
+  const driftOverridden = form.driftPpm !== undefined;
+  const simOverridden = form.simTimeS !== undefined;
+  const anyOverridden = oscOverridden || driftOverridden || simOverridden;
+  const tag = (overridden: boolean) => (overridden ? "（已覆盖）" : "");
+  const summary =
+    `振荡器 ${form.oscillator ?? eff.oscillator}${tag(oscOverridden)}` +
+    ` · 漂移 ${form.driftPpm ?? eff.driftPpm}ppm${tag(driftOverridden)}` +
+    ` · 时长 ${form.simTimeS ?? eff.simTimeS}s${tag(simOverridden)}` +
+    `${anyOverridden ? "" : " · 默认"}`;
+
   return (
     <div className="sim-override">
       <button
@@ -251,25 +292,18 @@ function SimOverrideRegion({
         aria-expanded={expanded}
         onClick={onToggle}
       >
-        {expanded ? "▾" : "▸"} 覆盖参数（不填走默认）
+        {expanded ? "▾" : "▸"} 覆盖参数 · <span className="sim-override-summary">{summary}</span>
       </button>
       {expanded && (
         <div className="sim-override-fields" role="group" aria-label="软仿覆盖参数">
           <label className="sim-field">
             <span>振荡器类型</span>
             <select
-              value={form.oscillator ?? ""}
+              value={form.oscillator ?? eff.oscillator}
               onChange={(event) =>
-                onChange({
-                  ...form,
-                  oscillator:
-                    event.target.value === ""
-                      ? undefined
-                      : (event.target.value as "Constant" | "Random"),
-                })
+                onChange({ ...form, oscillator: event.target.value as "Constant" | "Random" })
               }
             >
-              <option value="">默认</option>
               <option value="Constant">Constant</option>
               <option value="Random">Random</option>
             </select>
@@ -279,7 +313,7 @@ function SimOverrideRegion({
             <input
               type="number"
               inputMode="decimal"
-              value={form.driftPpm ?? ""}
+              value={form.driftPpm ?? eff.driftPpm}
               onChange={(event) =>
                 onChange({
                   ...form,
@@ -293,7 +327,7 @@ function SimOverrideRegion({
             <input
               type="number"
               inputMode="decimal"
-              value={form.simTimeS ?? ""}
+              value={form.simTimeS ?? eff.simTimeS}
               onChange={(event) =>
                 onChange({
                   ...form,

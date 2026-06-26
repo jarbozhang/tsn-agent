@@ -85,6 +85,11 @@ function baseProps(overrides: Partial<TimeSyncPanelProps> = {}): TimeSyncPanelPr
     onSelectSubTab: vi.fn(),
     runTimesyncSim: vi.fn(async () => convergedResult()),
     explainSim: vi.fn(async () => "解释内容"),
+    getSimDefaults: vi.fn(async () => ({
+      oscillator: "Random" as const,
+      driftPpm: 100,
+      simTimeS: 60,
+    })),
     ...overrides,
   };
 }
@@ -263,6 +268,45 @@ describe("TimeSyncPanel 覆盖表单（U12）", () => {
     render(<TimeSyncPanel {...baseProps({ runTimesyncSim })} />);
     await user.click(screen.getByRole("button", { name: "软仿" }));
     await waitFor(() => expect(runTimesyncSim).toHaveBeenCalledWith("s1", {}));
+  });
+});
+
+describe("TimeSyncPanel 覆盖参数默认值可见（U6）", () => {
+  it("折叠 header 显示后端生效默认摘要，未编辑不标已覆盖", async () => {
+    render(<TimeSyncPanel {...baseProps()} />);
+    await waitFor(() =>
+      expect(screen.getByText(/振荡器 Random · 漂移 100ppm · 时长 60s · 默认/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/已覆盖/)).not.toBeInTheDocument();
+  });
+
+  it("展开预填实值；编辑某项 → 该项标「已覆盖」、提交只发被改项", async () => {
+    const user = userEvent.setup();
+    const runTimesyncSim = vi.fn(async () => convergedResult());
+    render(<TimeSyncPanel {...baseProps({ runTimesyncSim })} />);
+    await waitFor(() => expect(screen.getByText(/振荡器 Random/)).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /覆盖参数/ }));
+    // 预填实值：漂移输入框初值为默认 100。
+    expect(screen.getByLabelText("漂移幅度（ppm）")).toHaveValue(100);
+    fireEvent.change(screen.getByLabelText("漂移幅度（ppm）"), { target: { value: "250" } });
+    expect(screen.getByText(/漂移 250ppm（已覆盖）/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "软仿" }));
+    await waitFor(() => expect(runTimesyncSim).toHaveBeenCalledWith("s1", { driftPpm: 250 }));
+  });
+
+  it("get_sim_defaults 失败 → 静默回退兜底默认，不报错", async () => {
+    render(
+      <TimeSyncPanel
+        {...baseProps({
+          getSimDefaults: vi.fn(async () => {
+            throw new Error("boom");
+          }),
+        })}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/振荡器 Random · 漂移 100ppm · 时长 60s · 默认/)).toBeInTheDocument(),
+    );
   });
 });
 

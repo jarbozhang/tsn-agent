@@ -46,6 +46,25 @@ export interface SimOverrideForm {
   simTimeS?: number;
 }
 
+/** U5/U6：软仿覆盖参数的生效默认值（后端单一事实源，前端读用于折叠摘要 + 展开预填）。 */
+export interface SimDefaults {
+  oscillator: "Constant" | "Random";
+  driftPpm: number;
+  simTimeS: number;
+}
+
+/** get_sim_defaults 取数失败/加载中的兜底（仅降级用；正常走后端单一事实源）。 */
+export const FALLBACK_SIM_DEFAULTS: SimDefaults = {
+  oscillator: "Random",
+  driftPpm: 100,
+  simTimeS: 60,
+};
+
+/** U6：默认读通道 = get_sim_defaults Tauri command（测试可注入替身）。 */
+export async function invokeGetSimDefaults(): Promise<SimDefaults> {
+  return await invoke<SimDefaults>("get_sim_defaults");
+}
+
 /** U11：App 级软仿运行态——切 tab 不丢、按 status 恢复对应态。 */
 export type SimUiState =
   | { status: "idle" }
