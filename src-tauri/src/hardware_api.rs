@@ -140,13 +140,21 @@ impl Default for ReqwestHardwareClient {
     }
 }
 
+/// 进程级共享 reqwest client：reqwest::Client 内部 Arc 连接池，clone 即共享。命令层每次
+/// `new()` 复用同一池（observing 期 metrics 1s + query 5s 高频轮询不再每次新建 TCP/TLS）。
+static SHARED_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+
 impl ReqwestHardwareClient {
     pub fn new() -> Self {
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("构建 reqwest client 失败");
+        let client = SHARED_CLIENT
+            .get_or_init(|| {
+                reqwest::Client::builder()
+                    .connect_timeout(Duration::from_secs(10))
+                    .timeout(Duration::from_secs(30))
+                    .build()
+                    .expect("构建 reqwest client 失败")
+            })
+            .clone();
         Self { client }
     }
 }

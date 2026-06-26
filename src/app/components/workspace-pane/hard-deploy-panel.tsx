@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { type TimeSyncMetricsPayload, TimeSyncOffsetChart } from "../time-sync-offset-chart";
+import { TimeSyncOffsetChart } from "../time-sync-offset-chart";
 import {
   type HardwareCheckResult,
   type HardwareEvent,
@@ -67,6 +67,8 @@ export function HardDeployPanel({
   // dispatch 领先设置的值用滞后的 prop 覆盖，导致快速链路里 dispatch 读到陈旧态而 no-op）。
   // 会话切换由 TimeSyncPanel 的 key={sessionId} 重挂本组件，stateRef 随之以新会话 hardwareState 重初始化。
   const stateRef = useRef(hardwareState);
+  // 记本组件最后一次 dispatch 出的值，用来分辨「prop 变化来自本组件」还是「外部重置」。
+  const lastDispatchedRef = useRef(hardwareState);
   const runIdRef = useRef(0);
   const metricsTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const queryTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
@@ -102,11 +104,24 @@ export function HardDeployPanel({
     (event: HardwareEvent): HardwareUiState => {
       const next = nextHardwareState(stateRef.current, event);
       stateRef.current = next;
+      lastDispatchedRef.current = next;
       onHardwareStateChange(next);
       return next;
     },
     [onHardwareStateChange],
   );
+
+  // 外部重置同步（修死键）：App 切会话把 hardwareState 归 idle 是 post-commit effect，落后于本组件
+  // 的 key 重挂——重挂时 useRef 拿到的是旧会话的滞后 prop（如 observing），之后 prop 变 idle 但
+  // stateRef 不跟，导致新会话「开始」按钮被 isStartable(stateRef=observing) 判死。仅当 prop 变化
+  // 不是本组件 dispatch 产生（!== lastDispatched）时，把它同步进 stateRef（dispatch 自身的 prop
+  // 变化不会进这支，避免 clobber 领先值）。
+  useEffect(() => {
+    if (hardwareState !== lastDispatchedRef.current) {
+      stateRef.current = hardwareState;
+      lastDispatchedRef.current = hardwareState;
+    }
+  }, [hardwareState]);
 
   // 会话切换 / 卸载：取消循环 + 清定时器 + best-effort 停旧 observing 任务（R7/KTD9）。
   // 只依赖 sessionId——cleanup 仅在真切会话/卸载时跑，不被命令 prop 的身份变动误触发。
@@ -194,7 +209,15 @@ export function HardDeployPanel({
 
       // confirm 循环：created 有限重试，直到 active（observing）或终态。
       for (let i = 0; i < CONFIRM_MAX_TRIES; i++) {
-        const q = await queryRef.current(sid);
+        let q: TaskStatusOut;
+        try {
+          q = await queryRef.current(sid);
+        } catch {
+          // 确认阶段单次 query 失败视为可重试网络抖动（同 observing），不立刻判失败/孤儿任务。
+          await delay(CONFIRM_RETRY_MS);
+          if (myRun !== runIdRef.current) return;
+          continue;
+        }
         if (myRun !== runIdRef.current) return;
         const afterQ = dispatch({ kind: "queried", result: q });
         if (afterQ.status === "observing") {
@@ -221,11 +244,14 @@ export function HardDeployPanel({
     if (stateRef.current.status !== "observing") return;
     clearTimers();
     runIdRef.current += 1; // 取消 observing 循环。
+    const myRun = runIdRef.current;
     const sid = sessionId;
     try {
       const result = await stopRef.current(sid);
+      if (myRun !== runIdRef.current) return; // 停止往返期间切会话/重开 → 不把旧结果泄漏进新态。
       dispatch({ kind: "stopResult", result });
     } catch (e) {
+      if (myRun !== runIdRef.current) return;
       dispatch({ kind: "failed", message: e instanceof Error ? e.message : String(e) });
     }
     activeTaskRef.current = null;
@@ -320,8 +346,12 @@ function MainButton({
 /** metrics 采集态：collecting=采集中（动态骨架）/ no_data=暂无数据（静态）/ ready=画图。 */
 function metricsStatusOf(payload: MetricsPayload | undefined): string | undefined {
   if (!payload) return undefined;
-  const p = payload as TimeSyncMetricsPayload & { data?: TimeSyncMetricsPayload };
-  return p.metrics_status ?? p.data?.metrics_status;
+  // payload 是两层并集（顶层 | { data?: ... }）。逐字段窄取 + typeof 运行时守卫，不用整形 intersection
+  // cast（后者断言整个形状、变更时静默读错层）；每处访问都被 typeof 兜住，形状变了也只会返回 undefined。
+  const top = (payload as { metrics_status?: unknown }).metrics_status;
+  if (typeof top === "string") return top;
+  const nested = (payload as { data?: { metrics_status?: unknown } }).data?.metrics_status;
+  return typeof nested === "string" ? nested : undefined;
 }
 
 function HardDeployBody({ state }: { state: HardwareUiState }) {

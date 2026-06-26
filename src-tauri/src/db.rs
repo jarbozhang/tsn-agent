@@ -148,6 +148,10 @@ pub const P0_DOMAIN_SCHEMA_SQL: &str = r#"
 /// 表名 `task`（非 hardware 专属——`type` 列区分 hardware/simulation，将来软仿同表）。
 /// 业务列 task_id/duration/type；session_id 做归属（FK CASCADE）、created_at 定位"当前 task"。
 /// 不在 v1/v2 safety-net 的 15 张 P0 表内，用独立 `ensure_task_table` 守卫挂载（CREATE IF NOT EXISTS 幂等）。
+///
+/// **有意不进 `SESSION_SCOPED_TABLES`**（同 topology_undo_snapshots 不导出口径）：task 行是本机
+/// 硬件部署的尝试记录，task_id 指向远端 tsn-sim 服务的瞬时任务，导出到别处再导入无意义（远端任务不存在）。
+/// 故会话 export/import 不复制 task 行。
 pub const TASK_SCHEMA_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS task (
         session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

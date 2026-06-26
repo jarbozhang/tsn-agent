@@ -161,6 +161,36 @@ describe("HardDeployPanel — driver", () => {
     );
   });
 
+  it("external reset to idle (session-switch race) keeps 开始 usable, not a dead button", async () => {
+    // 模拟 App 切会话把 hardwareState 外部归 idle（prop 变但本组件未重挂）：先到 observing，
+    // 再外部重置，「开始」不应被残留的 observing stateRef 判死（code-review 修复回归锁）。
+    function ResetHarness() {
+      const [hw, setHw] = useState<HardwareUiState>({ status: "idle" });
+      return (
+        <div>
+          <button type="button" onClick={() => setHw({ status: "idle" })}>
+            外部重置
+          </button>
+          <HardDeployPanel {...fakes({ hardwareState: hw, onHardwareStateChange: setHw })} />
+        </div>
+      );
+    }
+    render(<ResetHarness />);
+    screen.getByRole("button", { name: "开始硬件部署" }).click();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "停止任务" })).toBeInTheDocument(),
+    );
+    screen.getByRole("button", { name: "外部重置" }).click();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "开始硬件部署" })).toBeInTheDocument(),
+    );
+    // 关键：重置后「开始」不是死键——再点能重新进部署流程到 observing。
+    screen.getByRole("button", { name: "开始硬件部署" }).click();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "停止任务" })).toBeInTheDocument(),
+    );
+  });
+
   it("stop returning done shows 任务已完成 (not stopped)", async () => {
     const stop = vi.fn(async (): Promise<TaskStatusOut> => ({ status: "done" }));
     render(<Harness stop={stop} />);
