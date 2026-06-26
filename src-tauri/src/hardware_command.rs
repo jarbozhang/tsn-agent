@@ -10,9 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::hardware_api::{
-    HardwareApiClient, ReqwestHardwareClient, TaskValidateResp,
-};
+use crate::hardware_api::{HardwareApiClient, ReqwestHardwareClient, TaskValidateResp};
 use crate::hardware_api_config::resolve_hardware_api_url;
 use crate::task_request::build_task_request;
 use crate::task_store::{TaskRow, insert_task, latest_task};
@@ -141,7 +139,10 @@ async fn hardware_check_inner<C: HardwareApiClient>(
     base_url: &str,
 ) -> Result<HardwareCheckResult, String> {
     client.healthz(base_url).await.map_err(|e| e.to_string())?;
-    let check = client.task_check(base_url).await.map_err(|e| e.to_string())?;
+    let check = client
+        .task_check(base_url)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(HardwareCheckResult {
         healthz_ok: true,
         hardware_available: check.hardware.available,
@@ -230,8 +231,13 @@ pub async fn hardware_query(
 ) -> Result<TaskStatusOut, String> {
     let pool = store.pool(&app).await?;
     let base_url = resolve_hardware_api_url(pool).await?;
-    hardware_query_inner(pool, &ReqwestHardwareClient::new(), &base_url, &request.session_id)
-        .await
+    hardware_query_inner(
+        pool,
+        &ReqwestHardwareClient::new(),
+        &base_url,
+        &request.session_id,
+    )
+    .await
 }
 
 async fn hardware_query_inner<C: HardwareApiClient>(
@@ -261,8 +267,13 @@ pub async fn hardware_metrics(
 ) -> Result<serde_json::Value, String> {
     let pool = store.pool(&app).await?;
     let base_url = resolve_hardware_api_url(pool).await?;
-    hardware_metrics_inner(pool, &ReqwestHardwareClient::new(), &base_url, &request.session_id)
-        .await
+    hardware_metrics_inner(
+        pool,
+        &ReqwestHardwareClient::new(),
+        &base_url,
+        &request.session_id,
+    )
+    .await
 }
 
 async fn hardware_metrics_inner<C: HardwareApiClient>(
@@ -287,8 +298,13 @@ pub async fn hardware_stop(
 ) -> Result<TaskStatusOut, String> {
     let pool = store.pool(&app).await?;
     let base_url = resolve_hardware_api_url(pool).await?;
-    hardware_stop_inner(pool, &ReqwestHardwareClient::new(), &base_url, &request.session_id)
-        .await
+    hardware_stop_inner(
+        pool,
+        &ReqwestHardwareClient::new(),
+        &base_url,
+        &request.session_id,
+    )
+    .await
 }
 
 async fn hardware_stop_inner<C: HardwareApiClient>(
@@ -401,11 +417,7 @@ mod tests {
         ) -> Result<TaskStartResp, HardwareApiError> {
             Ok(self.start.clone())
         }
-        async fn task_query(
-            &self,
-            _b: &str,
-            _t: &str,
-        ) -> Result<TaskQueryResp, HardwareApiError> {
+        async fn task_query(&self, _b: &str, _t: &str) -> Result<TaskQueryResp, HardwareApiError> {
             Ok(self.query.clone())
         }
         async fn task_metrics_query(
@@ -415,11 +427,7 @@ mod tests {
         ) -> Result<serde_json::Value, HardwareApiError> {
             Ok(self.metrics.clone())
         }
-        async fn task_stop(
-            &self,
-            _b: &str,
-            _t: &str,
-        ) -> Result<TaskQueryResp, HardwareApiError> {
+        async fn task_stop(&self, _b: &str, _t: &str) -> Result<TaskQueryResp, HardwareApiError> {
             Ok(self.stop.clone())
         }
     }
@@ -458,16 +466,19 @@ mod tests {
         assert!(id.starts_with("hw-a7f06ff1-"));
         // 仅 [A-Za-z0-9_.:-]，首字符字母数字。
         assert!(id.chars().next().unwrap().is_ascii_alphanumeric());
-        assert!(id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '-')));
+        assert!(
+            id.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '-'))
+        );
     }
 
     #[tokio::test]
     async fn check_available() {
         let pool = seeded_pool().await;
         let _ = pool;
-        let res = hardware_check_inner(&FakeClient::default(), "http://x").await.unwrap();
+        let res = hardware_check_inner(&FakeClient::default(), "http://x")
+            .await
+            .unwrap();
         assert!(res.healthz_ok);
         assert!(res.hardware_available);
     }
@@ -517,7 +528,9 @@ mod tests {
                 location: None,
             }],
         };
-        let res = hardware_start_inner(&pool, &fake, "http://x", "s1", 60).await.unwrap();
+        let res = hardware_start_inner(&pool, &fake, "http://x", "s1", 60)
+            .await
+            .unwrap();
         assert!(res.start.is_none());
         assert_eq!(res.validate.issues.len(), 1);
     }
@@ -528,7 +541,9 @@ mod tests {
         let mut fake = FakeClient::default();
         fake.validate.ready = true;
         fake.validate.task_start_compatible = false;
-        let res = hardware_start_inner(&pool, &fake, "http://x", "s1", 60).await.unwrap();
+        let res = hardware_start_inner(&pool, &fake, "http://x", "s1", 60)
+            .await
+            .unwrap();
         assert!(res.start.is_none());
     }
 
@@ -559,7 +574,9 @@ mod tests {
             verdict: Some("PASS".into()),
             summary: None,
         };
-        let res = hardware_stop_inner(&pool, &fake, "http://x", "s1").await.unwrap();
+        let res = hardware_stop_inner(&pool, &fake, "http://x", "s1")
+            .await
+            .unwrap();
         // 任务恰好跑完 → 带回 done，不硬编码 stopped。
         assert_eq!(res.status, "done");
     }

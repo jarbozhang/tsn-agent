@@ -203,11 +203,13 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO sessions (id, title, created_at, updated_at, payload) \
-                     VALUES ('s1', 't', 'now', 'now', '{}')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO sessions (id, title, created_at, updated_at, payload) \
+                     VALUES ('s1', 't', 'now', 'now', '{}')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         pool
     }
 
@@ -256,7 +258,13 @@ mod tests {
         let req = build_task_request(&pool, "s1", &hw_task()).await.unwrap();
         let v = serde_json::to_value(&req).unwrap();
         // 5 段都在。
-        for k in ["task", "topology_nodes", "topology_links", "timesync_domain", "timesync_nodes"] {
+        for k in [
+            "task",
+            "topology_nodes",
+            "topology_links",
+            "timesync_domain",
+            "timesync_nodes",
+        ] {
             assert!(v.get(k).is_some(), "缺段 {k}");
         }
         // task.type=hardware（来自 type 列）、scope=time_sync（常量）、无 offset_ns_max。

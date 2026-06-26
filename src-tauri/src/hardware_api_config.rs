@@ -122,12 +122,14 @@ mod tests {
             base_url: url.to_string(),
         })
         .unwrap();
-        sqlx::query("INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, 'now')")
-            .bind(HARDWARE_API_CONFIG_KEY)
-            .bind(&json)
-            .execute(pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, 'now')",
+        )
+        .bind(HARDWARE_API_CONFIG_KEY)
+        .bind(&json)
+        .execute(pool)
+        .await
+        .unwrap();
     }
 
     #[test]
