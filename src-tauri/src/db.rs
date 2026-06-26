@@ -144,6 +144,23 @@ pub const P0_DOMAIN_SCHEMA_SQL: &str = r#"
     PRAGMA application_id = 1414745601;  -- 0x54534E01 ("TSN\x01")
 "#;
 
+/// 任务表（2026-06-26，硬件部署接口对接 U1）：每会话多 task，应用生成 task_id。
+/// 表名 `task`（非 hardware 专属——`type` 列区分 hardware/simulation，将来软仿同表）。
+/// 业务列 task_id/duration/type；session_id 做归属（FK CASCADE）、created_at 定位"当前 task"。
+/// 不在 v1/v2 safety-net 的 15 张 P0 表内，用独立 `ensure_task_table` 守卫挂载（CREATE IF NOT EXISTS 幂等）。
+pub const TASK_SCHEMA_SQL: &str = r#"
+    CREATE TABLE IF NOT EXISTS task (
+        session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        task_id     TEXT    NOT NULL,
+        duration    INTEGER NOT NULL,
+        type        TEXT    NOT NULL,
+        created_at  TEXT    NOT NULL,
+        PRIMARY KEY (session_id, task_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_session_created_at
+        ON task(session_id, created_at DESC);
+"#;
+
 /// `connect_app_database` 内 safety-net 用：v1 + v2 schema 的 `CREATE IF NOT EXISTS`
 /// + v3 `DROP diagnostic_logs` + v6 `DROP` 废弃空壳表，均幂等。
 pub fn safety_net_schema_sql() -> String {
@@ -170,6 +187,13 @@ pub async fn ensure_topology_nodes_name_column(
             .await?;
     }
 
+    Ok(())
+}
+
+/// 建 `task` 表（2026-06-26，U1）：CREATE IF NOT EXISTS 幂等，老库自动建出、新库 no-op。
+/// 不在 safety-net 的 15 张 P0 表内，须在 connect_app_database 显式调用。
+pub async fn ensure_task_table(pool: &sqlx::Pool<sqlx::Sqlite>) -> Result<(), sqlx::Error> {
+    sqlx::query(TASK_SCHEMA_SQL).execute(pool).await?;
     Ok(())
 }
 

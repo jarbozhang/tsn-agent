@@ -253,6 +253,9 @@ pub async fn connect_app_database(app: &tauri::AppHandle) -> Result<Pool<Sqlite>
         eprintln!("U9 端口审计失败（非致命，跳过）：{e}");
     }
 
+    // 硬件部署 task 表（2026-06-26）：CREATE IF NOT EXISTS 幂等，老库自动建出（见 db.rs）。
+    crate::db::ensure_task_table(&pool).await.map_err(db_error)?;
+
     Ok(pool)
 }
 
