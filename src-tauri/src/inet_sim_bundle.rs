@@ -104,10 +104,11 @@ fn link_datarate_mbps(styles_json: &str) -> u32 {
 
 /// 链路速率（Mbps）：优先用 speed 列（结构事实源），缺省回退 styles_json.speed、再回退默认。
 fn link_rate(link: &VerifyLink) -> u32 {
-    if let Some(s) = link.speed {
-        if s > 0 && (s as f64) <= MAX_DATARATE_MBPS {
-            return s as u32;
-        }
+    if let Some(s) = link.speed
+        && s > 0
+        && (s as f64) <= MAX_DATARATE_MBPS
+    {
+        return s as u32;
     }
     link_datarate_mbps(&link.styles_json)
 }
@@ -362,10 +363,10 @@ fn build_ini(
             m.ned_name,
             master_eths.join(", ")
         ));
-        if let Some(slave) = t.slave_port.first() {
-            if let Some(e) = eth_name(port_eth, &t.mid, *slave) {
-                ini.push_str(&format!("*.{}.gptp.slavePort = \"{e}\"\n", m.ned_name));
-            }
+        if let Some(slave) = t.slave_port.first()
+            && let Some(e) = eth_name(port_eth, &t.mid, *slave)
+        {
+            ini.push_str(&format!("*.{}.gptp.slavePort = \"{e}\"\n", m.ned_name));
         }
         if let Some(sync) = t.sync_period_ms {
             ini.push_str(&format!("*.{}.gptp.syncInterval = {sync}ms\n", m.ned_name));
