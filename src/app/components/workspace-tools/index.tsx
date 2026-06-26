@@ -11,6 +11,11 @@ import {
   exportEvalDataset,
   openEvalDir,
 } from "../../eval-transfer";
+import {
+  getHardwareApiConfig,
+  type HardwareApiConfig,
+  setHardwareApiConfig,
+} from "../../hardware-api-config";
 import { getInetHostConfig, type InetHostConfig, setInetHostConfig } from "../../inet-host-config";
 import type { TransferNotice } from "../../session-transfer";
 import { DetailRow, formatTime } from "../shared";
@@ -549,6 +554,94 @@ function InetHostConfigForm({ onClose }: { onClose: () => void }) {
   );
 }
 
+/**
+ * U4：硬件部署 API 配置表单（tsn-sim 服务 base_url，自由输入）。与软仿远端 SSH 配置解耦。
+ * 同 InetHostConfigForm 模式：显式「保存」提交、保存后关抽屉、关闭不保存则回滚。
+ */
+function HardwareApiConfigForm({ onClose }: { onClose: () => void }) {
+  const [config, setConfig] = useState<HardwareApiConfig | undefined>();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  useEffect(() => {
+    let cancelled = false;
+    getHardwareApiConfig()
+      .then((loaded) => {
+        if (!cancelled) {
+          setConfig(loaded);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError("读取硬件 API 配置失败");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleSave() {
+    if (!config || saving) {
+      return;
+    }
+    setSaving(true);
+    setError(undefined);
+    try {
+      await setHardwareApiConfig(config);
+      onClose();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="settings-host-form" aria-label="硬件部署 API">
+      <div className="detail-surface-header">
+        <div>
+          <p className="drawer-kicker">Hardware API</p>
+          <h3>硬件部署 API</h3>
+        </div>
+      </div>
+      {config ? (
+        <div className="host-form-fields">
+          <label className="sim-field">
+            <span>服务地址</span>
+            <input
+              type="text"
+              value={config.baseUrl}
+              onChange={(event) => setConfig({ ...config, baseUrl: event.target.value })}
+            />
+          </label>
+          <p className="host-form-hint">
+            tsn-sim 硬件部署服务根地址（如 http://100.78.48.43:19080），需 http(s) 前缀。与软仿
+            远端主机是两套独立配置。
+          </p>
+          <div className="drawer-actions">
+            <button
+              className="btn primary"
+              type="button"
+              disabled={saving}
+              onClick={() => void handleSave()}
+            >
+              保存
+            </button>
+          </div>
+          {error && (
+            <p className="transfer-notice error" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="empty-panel mono">{error ?? "加载中…"}</div>
+      )}
+    </section>
+  );
+}
+
 function SettingsToolPanel({
   version,
   releases,
@@ -589,6 +682,8 @@ function SettingsToolPanel({
       <EvalToolPanel currentSessionId={currentSessionId} />
 
       <InetHostConfigForm onClose={onClose} />
+
+      <HardwareApiConfigForm onClose={onClose} />
 
       <section className="settings-release-panel" aria-label="更新日志">
         <div className="detail-surface-header">

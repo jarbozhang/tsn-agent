@@ -3,6 +3,7 @@ mod commands;
 mod db;
 mod eval_command;
 mod hardware_api;
+mod hardware_api_config;
 mod inet_remote;
 mod inet_sim_bundle;
 mod inet_sim_command;
@@ -110,6 +111,8 @@ pub fn run() {
             inet_sim_command::get_sim_defaults,
             inet_sim_command::get_inet_host_config,
             inet_sim_command::set_inet_host_config,
+            hardware_api_config::get_hardware_api_config,
+            hardware_api_config::set_hardware_api_config,
             session_store::get_current_session,
             session_store::list_sessions,
             session_store::remove_session,
