@@ -10,8 +10,30 @@ function convergedResult(): SimResult {
     status: "converged",
     overall: "2 个从节点全部收敛",
     perNode: [
-      { mid: "1", maxOffsetNs: 12.3, meanOffsetNs: 5.1, converged: true, withinThreshold: true },
-      { mid: "2", maxOffsetNs: 30.7, meanOffsetNs: 9.9, converged: true, withinThreshold: true },
+      {
+        mid: "TsnAgentTimesyncNetwork.sw1.clock",
+        maxOffsetNs: 12.3,
+        meanOffsetNs: 5.1,
+        converged: true,
+        withinThreshold: true,
+        samples: [
+          { tMs: 0, offsetNs: 12.3 },
+          { tMs: 500, offsetNs: 2.1 },
+          { tMs: 1000, offsetNs: 0.4 },
+        ],
+      },
+      {
+        mid: "TsnAgentTimesyncNetwork.es2.clock",
+        maxOffsetNs: 30.7,
+        meanOffsetNs: 9.9,
+        converged: true,
+        withinThreshold: true,
+        samples: [
+          { tMs: 0, offsetNs: -30.7 },
+          { tMs: 500, offsetNs: -4.0 },
+          { tMs: 1000, offsetNs: 0.9 },
+        ],
+      },
     ],
   };
 }
@@ -22,8 +44,22 @@ function partlyConvergedResult(): SimResult {
     status: "converged",
     overall: "1 个收敛 / 1 个未收敛",
     perNode: [
-      { mid: "1", maxOffsetNs: 12.3, meanOffsetNs: 5.1, converged: true, withinThreshold: true },
-      { mid: "2", maxOffsetNs: 9000, meanOffsetNs: 8000, converged: false, withinThreshold: false },
+      {
+        mid: "1",
+        maxOffsetNs: 12.3,
+        meanOffsetNs: 5.1,
+        converged: true,
+        withinThreshold: true,
+        samples: [{ tMs: 0, offsetNs: 12.3 }],
+      },
+      {
+        mid: "2",
+        maxOffsetNs: 9000,
+        meanOffsetNs: 8000,
+        converged: false,
+        withinThreshold: false,
+        samples: [{ tMs: 0, offsetNs: 9000 }],
+      },
     ],
   };
 }
@@ -106,6 +142,21 @@ describe("TimeSyncPanel 运行/结果（U11）", () => {
     const table = screen.getByRole("table");
     expect(within(table).getAllByText("收敛", { selector: ".sim-badge" })).toHaveLength(2);
     expect(within(table).getByText("12.3 ns")).toBeInTheDocument();
+  });
+
+  it("收敛结果在表下渲染抖动曲线（每从节点一条线 + 阈值带 + 短名图例）", () => {
+    render(
+      <TimeSyncPanel {...baseProps({ simState: { status: "done", result: convergedResult() } })} />,
+    );
+    const chart = screen.getByRole("img", { name: "从节点偏差随仿真时间抖动曲线" });
+    expect(chart).toBeInTheDocument();
+    expect(chart.querySelectorAll("polyline.sim-chart-line")).toHaveLength(2);
+    // ±1µs 收敛阈值带。
+    expect(chart.querySelector("rect.sim-chart-threshold-band")).not.toBeNull();
+    // 图例与表格用短名（sw1/es2，各出现在表格+图例），完整模块路径只放 title 不进文本。
+    expect(screen.getAllByText("sw1").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("es2").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("TsnAgentTimesyncNetwork.sw1.clock")).not.toBeInTheDocument();
   });
 
   it("空结果不渲染全绿（显示 message、无表格）", () => {
