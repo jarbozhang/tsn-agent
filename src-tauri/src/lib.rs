@@ -11,6 +11,7 @@ mod session_import;
 mod session_store;
 mod skill_factory_hashes;
 mod skill_files;
+mod task_request;
 mod task_store;
 mod timesync_query_command;
 mod timesync_sidecar_routes;
