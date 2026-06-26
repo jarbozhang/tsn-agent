@@ -1,0 +1,125 @@
+.time-sync-offset-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.time-sync-offset-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.time-sync-offset-header h3 {
+  margin: 0;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.time-sync-offset-status {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.time-sync-offset-status.error {
+  color: #d4380d;
+}
+
+.time-sync-offset-filters {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.time-sync-offset-master,
+.time-sync-offset-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  background: #ffffff;
+}
+
+.time-sync-offset-master {
+  border-color: rgba(250, 84, 28, 0.18);
+}
+
+.time-sync-offset-master strong {
+  color: var(--accent);
+}
+
+.time-sync-offset-select select {
+  height: 24px;
+  border: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  background: transparent;
+  outline: none;
+}
+
+.time-sync-offset-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.time-sync-offset-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  width: fit-content;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  background: #ffffff;
+  white-space: nowrap;
+}
+
+.time-sync-offset-metric strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.time-sync-offset-metric.success {
+  border-color: rgba(132, 204, 22, 0.24);
+  background: #f7fee7;
+}
+
+.time-sync-offset-metric.success strong {
+  color: #65a30d;
+}
+
+.time-sync-offset-chart {
+  width: 100%;
+  height: 280px;
+  min-height: 280px;
+}
+
+.time-sync-offset-empty {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  background: #fbfbfc;
+}
