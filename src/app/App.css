@@ -2398,6 +2398,28 @@ textarea:focus-visible {
   color: var(--accent);
 }
 
+/* U4：set_gm 揭示在时间同步 tab 上的脉冲 badge（不抢焦点的「有新内容」提示）。 */
+.config-tab-badge {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+  animation: config-tab-badge-pulse 1s ease-in-out infinite;
+}
+
+@keyframes config-tab-badge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
 .config-tab:disabled {
   cursor: not-allowed;
   opacity: 0.35;

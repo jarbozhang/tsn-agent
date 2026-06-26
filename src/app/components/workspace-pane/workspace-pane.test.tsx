@@ -199,6 +199,7 @@ function baseProps(overrides: Partial<WorkspacePaneProps> = {}): WorkspacePanePr
     onSimStateChange: vi.fn(),
     activeTimesyncSubTab: "soft-sim",
     onSelectTimesyncSubTab: vi.fn(),
+    timesyncTabHasBadge: false,
     onToggleConfigPanel: vi.fn(),
     onSelectConfigTab: vi.fn(),
     onNodeSelect: vi.fn(),

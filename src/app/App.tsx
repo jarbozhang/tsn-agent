@@ -87,16 +87,70 @@ export function App() {
   const activeRunIdRef = useRef<string | undefined>(undefined);
   // 仅当 cancel 命令返回 killed:true 才置位——是「本轮被用户真终止」的唯一依据（KTD3）。
   const cancelRequestedRef = useRef(false);
+  // set_gm 揭示（U4）：时间同步 tab 上的「有新内容」脉冲 badge（面板已开但用户在别 tab 时用）。
+  const [timesyncTabHasBadge, setTimesyncTabHasBadge] = useState(false);
+  // 镜像最新 expand/activeConfigTab，供 reveal effect 读而不把它们放进 deps（否则会误触发）。
+  const configPanelExpandedRef = useRef(configPanelExpanded);
+  configPanelExpandedRef.current = configPanelExpanded;
+  const activeConfigTabRef = useRef(activeConfigTab);
+  activeConfigTabRef.current = activeConfigTab;
+  // reveal 基线：记每会话的 gmMid 基线，区分「切会话水合」与「同会话内 set_gm」。
+  const revealBaselineRef = useRef<{
+    sessionId: string;
+    gmMid: string | null | undefined;
+    established: boolean;
+  }>({ sessionId: currentSession.id, gmMid: undefined, established: false });
 
   // U10（doc-review 决定）：会话切换时三态归零——收起、回 node-props、清选中，防 PR#23 id 污染。
-  // U11：软仿运行态也随会话切换重置（不跨会话保留结果）。
+  // U11：软仿运行态也随会话切换重置（不跨会话保留结果）。U4：badge 也清。
   useEffect(() => {
     setConfigPanelExpanded(false);
     setActiveConfigTab("node-props");
     setActiveTimesyncSubTab("soft-sim");
     setSelectedNodeId(undefined);
     setSimState({ status: "idle" });
+    setTimesyncTabHasBadge(false);
   }, [currentSession.id]);
+
+  // U4：set_gm 后分级揭示。触发=「同会话内 gmMid 无→有 或 值变化」且处于时间同步阶段。
+  // 切会话时先把基线设为新会话首个稳定 gmMid（不揭示），避免「切进已有 GM 的会话」被误当 set_gm。
+  useEffect(() => {
+    const gmMid = timesyncSnapshot?.domain?.gmMid;
+    const baseline = revealBaselineRef.current;
+    // 会话变了：重置基线为「未建立」，本次不揭示。
+    if (baseline.sessionId !== currentSession.id) {
+      revealBaselineRef.current = {
+        sessionId: currentSession.id,
+        gmMid,
+        established: timesyncSnapshot !== undefined,
+      };
+      return;
+    }
+    // 基线尚未建立：等首个稳定快照（snapshot 非 undefined）作基线，不揭示。
+    if (!baseline.established) {
+      if (timesyncSnapshot !== undefined) {
+        revealBaselineRef.current = { ...baseline, gmMid, established: true };
+      }
+      return;
+    }
+    // 基线已建立：仅离开时间同步阶段时清 badge、刷新基线，不揭示。
+    if (currentSession.workflow.currentStep !== "time-sync") {
+      setTimesyncTabHasBadge(false);
+      revealBaselineRef.current = { ...baseline, gmMid };
+      return;
+    }
+    // 真实跃迁：gmMid 有值且与基线不同（首次设 GM 或换 GM）。
+    if (gmMid && gmMid !== baseline.gmMid) {
+      if (!configPanelExpandedRef.current) {
+        setConfigPanelExpanded(true);
+        setActiveConfigTab("time-sync");
+        setActiveTimesyncSubTab("soft-sim");
+      } else if (activeConfigTabRef.current !== "time-sync") {
+        setTimesyncTabHasBadge(true);
+      }
+    }
+    revealBaselineRef.current = { ...baseline, gmMid };
+  }, [currentSession.id, currentSession.workflow.currentStep, timesyncSnapshot]);
 
   const workflow = currentSession.workflow;
   const scenarioConfig = getScenarioConfig(workflow.scenarioConfigId);
@@ -479,8 +533,15 @@ export function App() {
           onSimStateChange={setSimState}
           activeTimesyncSubTab={activeTimesyncSubTab}
           onSelectTimesyncSubTab={setActiveTimesyncSubTab}
+          timesyncTabHasBadge={timesyncTabHasBadge}
           onToggleConfigPanel={() => setConfigPanelExpanded((value) => !value)}
-          onSelectConfigTab={setActiveConfigTab}
+          onSelectConfigTab={(tab) => {
+            setActiveConfigTab(tab);
+            // 进时间同步 tab 即清 badge（用户已看到揭示）。
+            if (tab === "time-sync") {
+              setTimesyncTabHasBadge(false);
+            }
+          }}
           onNodeSelect={handleNodeSelect}
           onRefreshTopology={() => void refetchTopology()}
           onUndone={handleTopologyUndone}

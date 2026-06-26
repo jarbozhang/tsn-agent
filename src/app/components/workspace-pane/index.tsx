@@ -167,6 +167,8 @@ export interface WorkspacePaneProps {
   /** 时间同步子 tab 选择（App 级，随会话重置；reveal 可强制落 soft-sim）。 */
   activeTimesyncSubTab: TimesyncSubTab;
   onSelectTimesyncSubTab: (tab: TimesyncSubTab) => void;
+  /** U4：set_gm 揭示在「面板已开但用户在别 tab」时给时间同步 tab 挂的脉冲 badge。 */
+  timesyncTabHasBadge: boolean;
   /** U10：底部 handle 条切换弹出框显隐。 */
   onToggleConfigPanel: () => void;
   onSelectConfigTab: (tab: ConfigTabId) => void;
@@ -194,6 +196,7 @@ export function WorkspacePane({
   onSimStateChange,
   activeTimesyncSubTab,
   onSelectTimesyncSubTab,
+  timesyncTabHasBadge,
   onToggleConfigPanel,
   onSelectConfigTab,
   onNodeSelect,
@@ -701,6 +704,9 @@ export function WorkspacePane({
                 onClick={() => onSelectConfigTab(tab.id)}
               >
                 {tab.label}
+                {tab.id === "time-sync" && timesyncTabHasBadge && (
+                  <span className="config-tab-badge" aria-label="有新内容" />
+                )}
               </button>
             ))}
             <div className="config-spacer" />
