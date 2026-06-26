@@ -22,6 +22,7 @@ import {
   type TopologyRowSnapshot,
 } from "../../../sessions/topology-snapshot";
 import { DetailRow, Stat } from "../shared";
+import type { HardwareUiState } from "./hardware-deploy";
 import { TimeSyncPanel, type TimesyncSubTab } from "./time-sync-panel";
 import type { SimUiState } from "./timesync-sim";
 import {
@@ -36,6 +37,7 @@ import {
 } from "./topology-flow";
 import { TsnFloatingEdge } from "./tsn-floating-edge";
 
+export type { HardwareUiState } from "./hardware-deploy";
 export type { TimesyncSubTab } from "./time-sync-panel";
 export type { SimUiState } from "./timesync-sim";
 export type { TimesyncEdgeKind, TsnEdgeData, TsnNodeKind } from "./topology-flow";
@@ -162,6 +164,9 @@ export interface WorkspacePaneProps {
   /** U11：App 级软仿运行态。 */
   simState: SimUiState;
   onSimStateChange: (state: SimUiState) => void;
+  /** U8：App 级硬件部署运行态（随会话重置）。 */
+  hardwareState: HardwareUiState;
+  onHardwareStateChange: (state: HardwareUiState) => void;
   /** 时间同步子 tab 选择（App 级，随会话重置；reveal 可强制落 soft-sim）。 */
   activeTimesyncSubTab: TimesyncSubTab;
   onSelectTimesyncSubTab: (tab: TimesyncSubTab) => void;
@@ -192,6 +197,8 @@ export function WorkspacePane({
   sessionId,
   simState,
   onSimStateChange,
+  hardwareState,
+  onHardwareStateChange,
   activeTimesyncSubTab,
   onSelectTimesyncSubTab,
   timesyncTabHasBadge,
@@ -762,6 +769,8 @@ export function WorkspacePane({
                 sessionId={sessionId}
                 simState={simState}
                 onSimStateChange={onSimStateChange}
+                hardwareState={hardwareState}
+                onHardwareStateChange={onHardwareStateChange}
                 activeSubTab={activeTimesyncSubTab}
                 onSelectSubTab={onSelectTimesyncSubTab}
               />

@@ -183,6 +183,20 @@ describe("nextHardwareState — stopResult branches by status (done != stopped)"
   });
 });
 
+describe("nextHardwareState — softTimeout", () => {
+  it("observing + softTimeout -> stopped, preserving metrics", () => {
+    const next = nextHardwareState(
+      { status: "observing", taskId: "hw-1", metrics: { series: [] } },
+      { kind: "softTimeout" },
+    );
+    expect(next).toEqual({ status: "stopped", metrics: { series: [] } });
+  });
+  it("softTimeout outside observing is a no-op", () => {
+    const done: HardwareUiState = { status: "done" };
+    expect(nextHardwareState(done, { kind: "softTimeout" })).toBe(done);
+  });
+});
+
 describe("nextHardwareState — error + reset", () => {
   it("failed event -> error with message", () => {
     expect(

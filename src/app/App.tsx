@@ -20,6 +20,7 @@ import { redactProviderNamesForDisplay } from "../ui/display-redaction";
 import { ChatPane } from "./components/chat-pane";
 import {
   type ConfigTabId,
+  type HardwareUiState,
   type SimUiState,
   type TimesyncSubTab,
   WorkspacePane,
@@ -75,6 +76,8 @@ export function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>();
   // U11：软仿运行态持于 App 级（非 tab 组件内）——切 tab 不取消命令、切回按 simStatus 恢复。
   const [simState, setSimState] = useState<SimUiState>({ status: "idle" });
+  // U8：硬件部署运行态同样持于 App 级（切 tab/子 tab 不丢；随会话重置）。
+  const [hardwareState, setHardwareState] = useState<HardwareUiState>({ status: "idle" });
   const {
     snapshot: topologySnapshot,
     refetch: refetchTopology,
@@ -110,6 +113,7 @@ export function App() {
     setActiveTimesyncSubTab("soft-sim");
     setSelectedNodeId(undefined);
     setSimState({ status: "idle" });
+    setHardwareState({ status: "idle" });
     setTimesyncTabHasBadge(false);
   }, [currentSession.id]);
 
@@ -515,6 +519,8 @@ export function App() {
           sessionId={currentSession.id}
           simState={simState}
           onSimStateChange={setSimState}
+          hardwareState={hardwareState}
+          onHardwareStateChange={setHardwareState}
           activeTimesyncSubTab={activeTimesyncSubTab}
           onSelectTimesyncSubTab={setActiveTimesyncSubTab}
           timesyncTabHasBadge={timesyncTabHasBadge}

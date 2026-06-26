@@ -197,6 +197,8 @@ function baseProps(overrides: Partial<WorkspacePaneProps> = {}): WorkspacePanePr
     sessionId: "s1",
     simState: { status: "idle" },
     onSimStateChange: vi.fn(),
+    hardwareState: { status: "idle" },
+    onHardwareStateChange: vi.fn(),
     activeTimesyncSubTab: "soft-sim",
     onSelectTimesyncSubTab: vi.fn(),
     timesyncTabHasBadge: false,

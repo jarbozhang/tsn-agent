@@ -73,6 +73,7 @@ export type HardwareEvent =
   | { kind: "queried"; result: TaskStatusOut }
   | { kind: "metrics"; payload: MetricsPayload }
   | { kind: "stopResult"; result: TaskStatusOut }
+  | { kind: "softTimeout" }
   | { kind: "failed"; message: string }
   | { kind: "reset" };
 
@@ -111,6 +112,11 @@ const TERMINAL: ReadonlySet<HardwareUiState["status"]> = new Set([
   "error",
   "idle",
 ]);
+
+/** 是否可发起新部署（idle / 终态）——非此即正在跑，「开始」按钮禁用（防孤儿，KTD9）。 */
+export function isStartable(state: HardwareUiState): boolean {
+  return TERMINAL.has(state.status);
+}
 
 /**
  * 纯状态机迁移（无副作用，便于单测）。App effect 据返回的 state 决定下一步调哪个命令。
@@ -211,6 +217,11 @@ export function nextHardwareState(prev: HardwareUiState, event: HardwareEvent): 
           return { status: "stopped", metrics };
       }
     }
+
+    case "softTimeout":
+      // 软超时（elapsed>duration+余量仍无终态）：停轮询、落 stopped（中性「已停止」，保留曲线）。
+      if (prev.status !== "observing") return prev;
+      return { status: "stopped", metrics: prev.metrics };
 
     case "failed":
       return { status: "error", message: event.message };

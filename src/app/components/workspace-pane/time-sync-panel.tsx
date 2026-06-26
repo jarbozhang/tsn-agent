@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { HardDeployPanel } from "./hard-deploy-panel";
+import type { HardwareUiState } from "./hardware-deploy";
 import {
   buildSimExplainPrompt,
   FALLBACK_SIM_DEFAULTS,
@@ -33,6 +35,9 @@ export interface TimeSyncPanelProps {
   sessionId: string;
   simState: SimUiState;
   onSimStateChange: (state: SimUiState) => void;
+  /** U8：硬件部署运行态，持于 App 级、随会话重置（同 simState 分层）。 */
+  hardwareState: HardwareUiState;
+  onHardwareStateChange: (state: HardwareUiState) => void;
   /** 平级子 tab：软件仿真 / 硬件部署。 */
   activeSubTab: TimesyncSubTab;
   onSelectSubTab: (tab: TimesyncSubTab) => void;
@@ -55,6 +60,8 @@ export function TimeSyncPanel({
   sessionId,
   simState,
   onSimStateChange,
+  hardwareState,
+  onHardwareStateChange,
   activeSubTab,
   onSelectSubTab,
   runTimesyncSim = invokeRunTimesyncSim,
@@ -232,25 +239,17 @@ export function TimeSyncPanel({
           id="timesync-subpanel-hard-deploy"
           aria-labelledby="timesync-subtab-hard-deploy"
         >
-          <HardDeployEmptyState onGoSoftSim={() => onSelectSubTab("soft-sim")} />
+          <HardDeployPanel
+            sessionId={sessionId}
+            inTimeSyncStage={inTimeSyncStage}
+            treeConfirmed={treeConfirmed}
+            hardwareState={hardwareState}
+            onHardwareStateChange={onHardwareStateChange}
+            onGoSoftSim={() => onSelectSubTab("soft-sim")}
+          />
         </div>
       )}
     </section>
-  );
-}
-
-/** U3：硬件部署子 tab 占位空态——本期不可用，引导去软件仿真。视觉权重弱化（非主功能）。 */
-function HardDeployEmptyState({ onGoSoftSim }: { onGoSoftSim: () => void }) {
-  return (
-    <div className="hard-deploy-empty">
-      <h2>硬件部署</h2>
-      <p className="hard-deploy-empty__note">
-        把验证过的时钟同步配置下发到真实硬件。该能力本期尚未接入，先用软件仿真验证收敛。
-      </p>
-      <button type="button" className="btn" onClick={onGoSoftSim}>
-        先用软件仿真验证
-      </button>
-    </div>
   );
 }
 

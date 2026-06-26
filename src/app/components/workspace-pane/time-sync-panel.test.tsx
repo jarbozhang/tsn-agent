@@ -85,6 +85,8 @@ function baseProps(overrides: Partial<TimeSyncPanelProps> = {}): TimeSyncPanelPr
     sessionId: "s1",
     simState: { status: "idle" },
     onSimStateChange: vi.fn(),
+    hardwareState: { status: "idle" },
+    onHardwareStateChange: vi.fn(),
     activeSubTab: "soft-sim",
     onSelectSubTab: vi.fn(),
     runTimesyncSim: vi.fn(async () => convergedResult()),
@@ -292,12 +294,21 @@ describe("TimeSyncPanel 子 tab（软件仿真/硬件部署，平级）", () => 
     expect(onSelectSubTab).toHaveBeenCalledWith("hard-deploy");
   });
 
-  it("硬件部署子 tab：占位空态 + 回软仿按钮", async () => {
+  it("硬件部署子 tab（树已确认）：显示部署 UI 开始按钮", () => {
+    render(<TimeSyncPanel {...baseProps({ activeSubTab: "hard-deploy" })} />);
+    expect(screen.getByRole("button", { name: "开始硬件部署" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "软仿" })).not.toBeInTheDocument();
+  });
+
+  it("硬件部署子 tab（树未确认）：引导 + 回软仿按钮", async () => {
     const user = userEvent.setup();
     const onSelectSubTab = vi.fn();
-    render(<TimeSyncPanel {...baseProps({ activeSubTab: "hard-deploy", onSelectSubTab })} />);
-    expect(screen.getByText(/本期尚未接入/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "软仿" })).not.toBeInTheDocument();
+    render(
+      <TimeSyncPanel
+        {...baseProps({ activeSubTab: "hard-deploy", treeConfirmed: false, onSelectSubTab })}
+      />,
+    );
+    expect(screen.getByText(/请先确认时钟树/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "先用软件仿真验证" }));
     expect(onSelectSubTab).toHaveBeenCalledWith("soft-sim");
   });

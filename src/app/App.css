@@ -2183,6 +2183,81 @@ textarea:focus-visible {
   line-height: 1.5;
 }
 
+/* U8：硬件部署面板（flex 防 WebKit 行塌，同 .sim-subpanel 约定）。 */
+.hard-deploy {
+  display: flex;
+  flex-direction: column;
+  align-self: start;
+  gap: 12px;
+  overflow: visible;
+}
+
+.hard-deploy-observe,
+.hard-deploy-error {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hard-deploy-collecting {
+  padding: 24px 8px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  border: 1px dashed var(--border-subtle, #d9dee6);
+  border-radius: 8px;
+  animation: hard-deploy-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes hard-deploy-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.hard-deploy-issues ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hard-deploy-issues li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hard-deploy-issues .issue-sev {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.hard-deploy-issues .issue-error {
+  color: var(--text-secondary);
+}
+
+.hard-deploy-issues .issue-error .issue-sev {
+  color: #b42318;
+  background: rgba(180, 35, 24, 0.1);
+}
+
+.hard-deploy-issues .issue-warn .issue-sev {
+  color: #b54708;
+  background: rgba(181, 71, 8, 0.1);
+}
+
 .sim-actions {
   display: flex;
   gap: 8px;
