@@ -235,10 +235,21 @@ pub fn build_timesync_sim_bundle(
     let port_eth = build_port_eth_map(links);
 
     // submodules：`<ned_name>: <ned_type>;`，按入参顺序。
+    // 关键（真机校正 2026-06-26）：用显式门号 `ethg[k]` 时 INET 的 `ethg[]` 默认 size 0，
+    // 必须在 submodule 里显式声明门向量大小（=该节点用到的端口数），否则 network setup 报
+    // 「Gate index 0 out of range ... 'ethg$i[]' with size 0」。`ethg++` 才会自动增长。
     let mut submodules = String::new();
     for node in nodes {
         if let Some(m) = mapped.get(node.mid.as_str()) {
-            submodules.push_str(&format!("        {}: {};\n", m.ned_name, m.ned_type));
+            let gate_count = port_eth.get(node.mid.as_str()).map_or(0, |p| p.len());
+            if gate_count > 0 {
+                submodules.push_str(&format!(
+                    "        {}: {} {{\n            gates:\n                ethg[{}];\n        }}\n",
+                    m.ned_name, m.ned_type, gate_count
+                ));
+            } else {
+                submodules.push_str(&format!("        {}: {};\n", m.ned_name, m.ned_type));
+            }
         }
     }
 
@@ -502,6 +513,10 @@ mod tests {
         assert!(ned.contains("sw1.ethg[1] <-->"), "{ned}");
         assert!(ned.contains("sw1.ethg[0] <-->"), "{ned}");
         assert!(ned.contains("allowunconnected"));
+        // 真机校正：显式门号必须配门向量大小声明，否则 INET ethg[] size 0 报错。
+        // sw0 用 2 个端口 → ethg[2]；es1/es2 各 1 个端口 → ethg[1]。
+        assert!(ned.contains("ethg[2];"), "sw 应声明门大小 ethg[2]: {ned}");
+        assert!(ned.contains("ethg[1];"), "es 应声明门大小 ethg[1]: {ned}");
     }
 
     #[test]
