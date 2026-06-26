@@ -8,6 +8,8 @@ export interface InetHostConfig {
   user: string;
   /** INET 环境命令前缀：以 `<inetEnvCmd> -c '<cmd>'` 在 OMNeT++/INET 环境里跑 inet 与 opp_scavetool。 */
   inetEnvCmd: string;
+  /** 远端运行目录的父目录：每次软仿在 `<baseDir>/run-<hex>` 下 scp+跑+清理。 */
+  baseDir: string;
 }
 
 /** 读 UI 持久的远端主机配置（无记录时后端回播种当前默认）。 */

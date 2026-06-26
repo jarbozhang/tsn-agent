@@ -69,6 +69,11 @@ async fn resolve_remote_config(pool: &sqlx::Pool<sqlx::Sqlite>) -> Result<Remote
         ui.as_ref().map(|c| c.inet_env_cmd.as_str()),
         &base.inet_env_cmd,
     );
+    let remote_base_dir = pick(
+        "TSN_AGENT_INET_BASEDIR",
+        ui.as_ref().map(|c| c.base_dir.as_str()),
+        &base.remote_base_dir,
+    );
     if !is_valid_host_or_user(&host) {
         return Err(format!(
             "主机名 {host:?} 含非法字符（仅允许字母/数字/.-_），请在设置里改正。"
@@ -82,7 +87,7 @@ async fn resolve_remote_config(pool: &sqlx::Pool<sqlx::Sqlite>) -> Result<Remote
     Ok(RemoteConfig {
         host,
         user,
-        remote_base_dir: base.remote_base_dir,
+        remote_base_dir,
         inet_env_cmd,
         timeout: base.timeout,
     })
@@ -103,6 +108,7 @@ pub async fn get_inet_host_config(
         host: base.host,
         user: base.user,
         inet_env_cmd: base.inet_env_cmd,
+        base_dir: base.remote_base_dir,
     })
 }
 
@@ -118,6 +124,11 @@ pub async fn set_inet_host_config(
     }
     if !is_valid_host_or_user(&config.user) {
         return Err("用户名含非法字符（仅允许字母/数字/.-_）。".to_string());
+    }
+    // base_dir 是命令模板（自用工具、信任用户，同 inet_env_cmd 口径不做字符集校验），但必须非空：
+    // 空值会让运行目录变成 `/run-<hex>`，mkdir/rm -rf 落到根下，风险大。
+    if config.base_dir.trim().is_empty() {
+        return Err("运行目录不能为空。".to_string());
     }
     let pool = store.pool(&app).await?;
     let json = serde_json::to_string(&config).map_err(|e| format!("序列化配置失败：{e}"))?;
@@ -643,6 +654,7 @@ mod tests {
             host: "10.0.0.5".into(),
             user: "alice".into(),
             inet_env_cmd: "opp_env mock".into(),
+            base_dir: "/home/alice/runs".into(),
         };
         let json = serde_json::to_string(&cfg).unwrap();
         sqlx::query(
@@ -662,6 +674,9 @@ mod tests {
             if std::env::var("TSN_AGENT_INET_ENV").is_err() {
                 assert_eq!(resolved.inet_env_cmd, "opp_env mock");
             }
+            if std::env::var("TSN_AGENT_INET_BASEDIR").is_err() {
+                assert_eq!(resolved.remote_base_dir, "/home/alice/runs");
+            }
         }
     }
 
@@ -675,6 +690,7 @@ mod tests {
             host: "evil; rm -rf".into(),
             user: "zhang".into(),
             inet_env_cmd: "opp_env mock".into(),
+            base_dir: "/home/zhang/runs".into(),
         };
         let json = serde_json::to_string(&bad).unwrap();
         sqlx::query(
