@@ -111,9 +111,13 @@ pub struct SessionRequest {
     pub session_id: String,
 }
 
-/// 生成 task_id：`hw-<session_id 前 8 位>-<unix 毫秒>`（毫秒避免同秒撞 PK，KTD4）。
+/// 生成 task_id：`hw-<会话 uuid 前 8 位>-<unix 毫秒>`（KTD4）。
+/// 本地 task↔session 关联由 `task.session_id` 列负责，task_id 不为此服务；它是发给远端的**全局键**，
+/// 需全局唯一 + 可追溯。session_id 形如 `session-<uuid>`，先剥掉固定的 `session-` 前缀再取 uuid 前 8 位
+/// （否则前缀永远是 `session-`、毫无区分度，两会话同毫秒启动会在远端撞键）。毫秒兜同会话同秒。
 fn gen_task_id(session_id: &str) -> String {
-    let prefix: String = session_id.chars().take(8).collect();
+    let core = session_id.strip_prefix("session-").unwrap_or(session_id);
+    let prefix: String = core.chars().take(8).collect();
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -469,6 +473,17 @@ mod tests {
         assert!(
             id.chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '-'))
+        );
+    }
+
+    #[test]
+    fn gen_task_id_strips_session_prefix_for_real_uuid_fragment() {
+        // session_id 形如 session-<uuid>：剥掉固定 session- 前缀，用真正的 uuid 片段（非永远 "session-"）。
+        let id = gen_task_id("session-b1fee6d1-112f-463c-b35f-dd694e644c38");
+        assert!(id.starts_with("hw-b1fee6d1-"), "{id}");
+        assert!(
+            !id.contains("hw-session-"),
+            "前缀不应再是无区分度的 session-：{id}"
         );
     }
 
