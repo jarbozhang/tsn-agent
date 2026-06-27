@@ -3808,3 +3808,142 @@ textarea:focus-visible {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* ============================================================
+   工作台设置 — 精炼工程控制台重设计（frontend-design）
+   作用域锁在 .settings-* 下，不影响工程 / Skill / 节点属性面板。
+   方向：克制的工具美学——单色面板 + 橙色点睛、技术值走等宽体、清晰分区。
+   ============================================================ */
+
+/* 引导语略放大，作为面板开场 */
+.workspace-tool-panel.split-panel > .tool-panel-summary {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* 分区节奏：每个分区之间一条细分隔线 + 统一上间距，左侧 3px 橙色短条作锚 */
+.settings-eval-section,
+.settings-host-form,
+.settings-release-panel {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+/* 统一分区头部（kicker + 标题），左侧橙条 */
+.settings-eval-section > .detail-surface-header,
+.settings-host-form > .detail-surface-header,
+.settings-release-panel > .detail-surface-header {
+  margin-bottom: 14px;
+  padding-left: 11px;
+  border-left: 3px solid var(--accent);
+}
+
+.settings-eval-section .detail-surface-header h3,
+.settings-host-form .detail-surface-header h3,
+.settings-release-panel .detail-surface-header h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+}
+
+/* —— 运行信息：2 列「状态卡」，技术值走等宽体，URL 可换行 —— */
+.settings-list {
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.settings-list .detail-row {
+  gap: 6px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.settings-list .detail-row > span {
+  color: var(--text-muted);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.settings-list .detail-row > strong {
+  color: var(--text-primary);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+/* —— 评估采集：3 等分按钮行 + 危险操作单列 —— */
+.settings-eval-section .drawer-actions.three-up {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.settings-eval-section .drawer-actions.three-up .btn {
+  justify-content: center;
+}
+
+/* —— host 配置表单：输入更克制、聚焦橙色环、标签等宽小字 —— */
+.settings-host-form .host-form-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-host-form .sim-field > span {
+  color: var(--text-muted);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.settings-host-form .sim-field input {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12.5px;
+  background: var(--bg-primary);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.settings-host-form .sim-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.settings-host-form .host-form-hint {
+  line-height: 1.6;
+}
+
+/* —— 更新日志：选中版本走橙色左条 + 浅橙底，版本号等宽橙字 —— */
+.settings-release-panel .master-list-item {
+  border-radius: 8px;
+}
+
+.settings-release-panel .master-list-item.active {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.settings-release-panel .master-list-item.active .release-version,
+.settings-release-panel .release-note-detail .release-version {
+  color: var(--accent);
+}
+
+.settings-release-panel .master-list-item .release-version {
+  font-size: 10px;
+  letter-spacing: 0.3px;
+}
