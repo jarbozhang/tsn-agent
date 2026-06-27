@@ -112,8 +112,6 @@ pub fn run() {
             verify_time_sync,
             inet_sim_command::run_timesync_sim,
             inet_sim_command::get_sim_defaults,
-            inet_sim_command::get_inet_host_config,
-            inet_sim_command::set_inet_host_config,
             hardware_api_config::get_hardware_api_config,
             hardware_api_config::set_hardware_api_config,
             inet_sim_http_config::get_inet_sim_http_config,

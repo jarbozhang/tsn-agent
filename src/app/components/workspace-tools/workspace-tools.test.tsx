@@ -11,17 +11,7 @@ import { WorkspaceTools, type WorkspaceToolsProps } from "./index";
 
 beforeEach(() => {
   invokeMock.mockReset();
-  invokeMock.mockImplementation(async (command: string) => {
-    if (command === "get_inet_host_config") {
-      return {
-        host: "dev.example",
-        user: "zhang",
-        inetEnvCmd: "opp_env run inet-4.6.0",
-        baseDir: "/tmp/tsn-agent-runs",
-      };
-    }
-    return undefined;
-  });
+  invokeMock.mockImplementation(async () => undefined);
 });
 
 function baseProps(overrides: Partial<WorkspaceToolsProps> = {}): WorkspaceToolsProps {
