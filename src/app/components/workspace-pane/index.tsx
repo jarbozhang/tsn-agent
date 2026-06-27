@@ -219,7 +219,7 @@ export function WorkspacePane({
 }: WorkspacePaneProps) {
   // U11：time-sync 阶段叠加时钟树视图——画布节点注入端口角色（GM/同步/旁路/未覆盖）。
   const showClockTree = workflowStep === "time-sync";
-  const enableHardwareDeploymentAnimation = isHardwareDeploymentAnimationActive(hardwareState);
+  const enableTopologyAnimation = isTopologyAnimationActive(simState, hardwareState);
   const [isTimesyncTreeDialogOpen, setIsTimesyncTreeDialogOpen] = useState(false);
   useEffect(() => {
     if (!showClockTree) {
@@ -259,10 +259,10 @@ export function WorkspacePane({
         linkByEdgeId,
         timesyncSnapshot,
         propagationPlan,
-        enableHardwareDeploymentAnimation,
+        enableTopologyAnimation,
       ),
     };
-  }, [topologySnapshot, showClockTree, timesyncSnapshot, enableHardwareDeploymentAnimation]);
+  }, [topologySnapshot, showClockTree, timesyncSnapshot, enableTopologyAnimation]);
 
   const timesyncTreeDialogFlow = useMemo(() => {
     if (!topologySnapshot || isEmptyTopologySnapshot(topologySnapshot) || !showClockTree) {
@@ -863,12 +863,15 @@ function enrichTimesyncNodes(
   });
 }
 
-function isHardwareDeploymentAnimationActive(state: HardwareUiState): boolean {
+function isTopologyAnimationActive(simState: SimUiState, hardwareState: HardwareUiState): boolean {
+  if (simState.status === "running") {
+    return true;
+  }
   return (
-    state.status === "checking" ||
-    state.status === "starting" ||
-    state.status === "confirming" ||
-    state.status === "observing"
+    hardwareState.status === "checking" ||
+    hardwareState.status === "starting" ||
+    hardwareState.status === "confirming" ||
+    hardwareState.status === "observing"
   );
 }
 

@@ -1181,6 +1181,62 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
     expect(meta).toHaveAttribute("data-timesync-travel", "1.8");
   });
 
+  it("软件仿真运行中：树边播放同步报文动画", () => {
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: portedSnapshot(),
+          workflowStep: "time-sync",
+          timesyncSnapshot: timesyncFor("1"),
+          simState: { status: "running" },
+        })}
+      />,
+    );
+    const meta = screen.getByTestId("edge-meta-link-0");
+    expect(meta).toHaveAttribute(
+      "data-class",
+      "timesync-tree-edge timesync-flow-edge timesync-flow-forward",
+    );
+    expect(meta).toHaveAttribute("data-timesync-pulse", "forward");
+  });
+
+  it("软件仿真结束后：去掉主画布同步报文动画", () => {
+    const doneResult = {
+      caliber: "sim",
+      status: "converged",
+      perNode: [],
+      overall: "已完成",
+    };
+    const { rerender } = render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: portedSnapshot(),
+          workflowStep: "time-sync",
+          timesyncSnapshot: timesyncFor("1"),
+          simState: { status: "running" },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("edge-meta-link-0")).toHaveAttribute(
+      "data-class",
+      "timesync-tree-edge timesync-flow-edge timesync-flow-forward",
+    );
+
+    rerender(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: portedSnapshot(),
+          workflowStep: "time-sync",
+          timesyncSnapshot: timesyncFor("1"),
+          simState: { status: "done", result: doneResult },
+        })}
+      />,
+    );
+    const meta = screen.getByTestId("edge-meta-link-0");
+    expect(meta).toHaveAttribute("data-class", "timesync-tree-edge");
+    expect(meta).toHaveAttribute("data-timesync-pulse", "none");
+  });
+
   it("硬件部署停止中/停止后：去掉主画布同步报文动画", () => {
     const { rerender } = render(
       <WorkspacePane
