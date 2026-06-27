@@ -103,28 +103,29 @@ function baseProps(overrides: Partial<TimeSyncPanelProps> = {}): TimeSyncPanelPr
 describe("TimeSyncPanel 门控（U11）", () => {
   it("非 time-sync 阶段 → 软仿 disabled + 「请先进入时钟同步阶段」", () => {
     render(<TimeSyncPanel {...baseProps({ inTimeSyncStage: false })} />);
-    const button = screen.getByRole("button", { name: "软仿" });
+    const button = screen.getByRole("button", { name: "开始仿真" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", "请先进入时钟同步阶段");
   });
 
   it("阶段对但树未确认 → disabled + 「请先确认时钟树」（区别文案）", () => {
     render(<TimeSyncPanel {...baseProps({ treeConfirmed: false })} />);
-    const button = screen.getByRole("button", { name: "软仿" });
+    const button = screen.getByRole("button", { name: "开始仿真" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", "请先确认时钟树");
   });
 
   it("阶段对且树已确认 → 软仿可点", () => {
     render(<TimeSyncPanel {...baseProps()} />);
-    expect(screen.getByRole("button", { name: "软仿" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "开始仿真" })).toBeEnabled();
   });
 });
 
 describe("TimeSyncPanel 运行/结果（U11）", () => {
-  it("初始态显示引导文案", () => {
+  it("初始态显示 CTA（开始仿真按钮 + 引导说明）", () => {
     render(<TimeSyncPanel {...baseProps()} />);
-    expect(screen.getByText("点软仿运行后在此查看")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始仿真" })).toBeInTheDocument();
+    expect(screen.getByText(/跑完取回各节点相对 GM 的收敛偏差/)).toBeInTheDocument();
   });
 
   it("点软仿 → invoke 命令、置运行态", async () => {
@@ -132,7 +133,7 @@ describe("TimeSyncPanel 运行/结果（U11）", () => {
     const runTimesyncSim = vi.fn(async () => convergedResult());
     const onSimStateChange = vi.fn();
     render(<TimeSyncPanel {...baseProps({ runTimesyncSim, onSimStateChange })} />);
-    await user.click(screen.getByRole("button", { name: "软仿" }));
+    await user.click(screen.getByRole("button", { name: "开始仿真" }));
     await waitFor(() => expect(runTimesyncSim).toHaveBeenCalledWith("s1", {}));
     expect(onSimStateChange).toHaveBeenCalledWith({ status: "running" });
     expect(onSimStateChange).toHaveBeenCalledWith({
@@ -144,7 +145,7 @@ describe("TimeSyncPanel 运行/结果（U11）", () => {
   it("运行中态显示「仿真进行中…」、软仿按钮 loading", () => {
     render(<TimeSyncPanel {...baseProps({ simState: { status: "running" } })} />);
     expect(screen.getByText("仿真进行中…")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "软仿运行中…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "仿真运行中…" })).toBeDisabled();
   });
 
   it("收敛结果渲染汇总表（每从节点一行 + 收敛徽标 + 总判定）", () => {
@@ -282,7 +283,7 @@ describe("TimeSyncPanel 运行/结果（U11）", () => {
 describe("TimeSyncPanel 子 tab（软件仿真/硬件部署，平级）", () => {
   it("默认软件仿真子 tab：软仿按钮可见，无并排硬仿按钮", () => {
     render(<TimeSyncPanel {...baseProps()} />);
-    expect(screen.getByRole("button", { name: "软仿" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始仿真" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "硬仿" })).not.toBeInTheDocument();
   });
 
@@ -297,7 +298,7 @@ describe("TimeSyncPanel 子 tab（软件仿真/硬件部署，平级）", () => 
   it("硬件部署子 tab（树已确认）：显示部署 UI 开始按钮", () => {
     render(<TimeSyncPanel {...baseProps({ activeSubTab: "hard-deploy" })} />);
     expect(screen.getByRole("button", { name: "开始硬件部署" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "软仿" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "开始仿真" })).not.toBeInTheDocument();
   });
 
   it("硬件部署子 tab（树未确认）：引导 + 回软仿按钮", async () => {
@@ -326,7 +327,7 @@ describe("TimeSyncPanel 覆盖表单（U12）", () => {
     fireEvent.change(screen.getByLabelText("漂移幅度（ppm）"), { target: { value: "200" } });
     fireEvent.change(screen.getByLabelText("仿真时长（s）"), { target: { value: "5" } });
 
-    await user.click(screen.getByRole("button", { name: "软仿" }));
+    await user.click(screen.getByRole("button", { name: "开始仿真" }));
     await waitFor(() =>
       expect(runTimesyncSim).toHaveBeenCalledWith("s1", {
         oscillator: "Random",
@@ -340,7 +341,7 @@ describe("TimeSyncPanel 覆盖表单（U12）", () => {
     const user = userEvent.setup();
     const runTimesyncSim = vi.fn(async () => convergedResult());
     render(<TimeSyncPanel {...baseProps({ runTimesyncSim })} />);
-    await user.click(screen.getByRole("button", { name: "软仿" }));
+    await user.click(screen.getByRole("button", { name: "开始仿真" }));
     await waitFor(() => expect(runTimesyncSim).toHaveBeenCalledWith("s1", {}));
   });
 });
@@ -364,7 +365,7 @@ describe("TimeSyncPanel 覆盖参数默认值可见（U6）", () => {
     expect(screen.getByLabelText("漂移幅度（ppm）")).toHaveValue(100);
     fireEvent.change(screen.getByLabelText("漂移幅度（ppm）"), { target: { value: "250" } });
     expect(screen.getByText(/漂移 250ppm（已覆盖）/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "软仿" }));
+    await user.click(screen.getByRole("button", { name: "开始仿真" }));
     await waitFor(() => expect(runTimesyncSim).toHaveBeenCalledWith("s1", { driftPpm: 250 }));
   });
 
@@ -448,7 +449,7 @@ describe("TimeSyncPanel 异步竞态", () => {
       <TimeSyncPanel {...baseProps({ sessionId: "s1", runTimesyncSim, onSimStateChange })} />,
     );
 
-    await user.click(screen.getByRole("button", { name: "软仿" }));
+    await user.click(screen.getByRole("button", { name: "开始仿真" }));
     expect(onSimStateChange).toHaveBeenCalledWith({ status: "running" });
 
     // await 未结束前切到新会话（prop 变化）。
@@ -471,7 +472,7 @@ describe("TimeSyncPanel 异步竞态", () => {
     const runTimesyncSim = vi.fn(() => pending.promise);
     render(<TimeSyncPanel {...baseProps({ runTimesyncSim })} />);
 
-    const button = screen.getByRole("button", { name: "软仿" });
+    const button = screen.getByRole("button", { name: "开始仿真" });
     // 两次同步点击，disabled 态下一拍才生效；ref 守卫拦住第二次。
     fireEvent.click(button);
     fireEvent.click(button);

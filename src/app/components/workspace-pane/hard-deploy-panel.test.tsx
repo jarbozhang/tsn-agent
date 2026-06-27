@@ -15,7 +15,10 @@ const echartsMock = vi.hoisted(() => ({
   resize: vi.fn(),
   dispose: vi.fn(),
 }));
-vi.mock("echarts", () => ({ init: vi.fn(() => echartsMock) }));
+vi.mock("echarts", () => ({
+  init: vi.fn(() => echartsMock),
+  getInstanceByDom: vi.fn(() => undefined),
+}));
 
 const okCheck: HardwareCheckResult = { healthzOk: true, hardwareAvailable: true };
 const passStart: HardwareStartResult = {
@@ -31,7 +34,8 @@ function fakes(over: Partial<HardDeployPanelProps> = {}): HardDeployPanelProps {
     treeConfirmed: true,
     hardwareState: { status: "idle" },
     onHardwareStateChange: vi.fn(),
-    onGoSoftSim: vi.fn(),
+    activeSubTab: "hard-deploy",
+    onSelectSubTab: vi.fn(),
     check: vi.fn(async () => okCheck),
     start: vi.fn(async () => passStart),
     query: vi.fn(async (): Promise<TaskStatusOut> => ({ status: "running" })),
@@ -66,7 +70,7 @@ describe("HardDeployPanel — button + body per state", () => {
   it("idle: start button + hint", () => {
     render(<HardDeployPanel {...fakes({ hardwareState: { status: "idle" } })} />);
     expect(screen.getByRole("button", { name: "开始硬件部署" })).toBeEnabled();
-    expect(screen.getByText(/点上方按钮/)).toBeInTheDocument();
+    expect(screen.getByText(/下发到真实硬件/)).toBeInTheDocument();
   });
   it("checking: disabled 部署中 button", () => {
     render(<HardDeployPanel {...fakes({ hardwareState: { status: "checking" } })} />);
@@ -219,6 +223,8 @@ describe("HardDeployPanel — driver", () => {
   });
 
   it("stop returning done shows 任务已完成 (not stopped)", async () => {
+    // 默认 query 恒 running（保证先到 observing）；停止后确认轮询读到 running 非终态，
+    // 回退用 stop 的 ack（done）落「任务已完成」。
     const stop = vi.fn(async (): Promise<TaskStatusOut> => ({ status: "done" }));
     render(<Harness stop={stop} />);
     screen.getByRole("button", { name: "开始硬件部署" }).click();
@@ -226,6 +232,11 @@ describe("HardDeployPanel — driver", () => {
       expect(screen.getByRole("button", { name: "停止任务" })).toBeInTheDocument(),
     );
     screen.getByRole("button", { name: "停止任务" }).click();
-    await waitFor(() => expect(screen.getByText("任务已完成")).toBeInTheDocument());
+    // 先进入「停止中」过渡态（挡住立刻重部署）。
+    await waitFor(() => expect(screen.getByRole("button", { name: "停止中…" })).toBeDisabled());
+    // 沉降 + 确认后才落终态（含 STOP_SETTLE_MS，放宽超时）。
+    await waitFor(() => expect(screen.getByText("任务已完成")).toBeInTheDocument(), {
+      timeout: 3000,
+    });
   });
 });

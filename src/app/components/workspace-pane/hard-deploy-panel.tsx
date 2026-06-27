@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import type { TimesyncSnapshot } from "../../../sessions/timesync-snapshot";
+import type { TopologyRowSnapshot } from "../../../sessions/topology-snapshot";
+import { useTimesyncSnapshot } from "../../hooks/use-timesync-snapshot";
+import { useTopologySnapshot } from "../../hooks/use-topology-snapshot";
 import { TimeSyncOffsetChart } from "../time-sync-offset-chart";
 import {
+  classifyStatus,
   type HardwareCheckResult,
   type HardwareEvent,
   type HardwareStartResult,
@@ -16,6 +21,8 @@ import {
   nextHardwareState,
   type TaskStatusOut,
 } from "./hardware-deploy";
+import { PanelCta } from "./panel-cta";
+import { type TimesyncSubTab, TimesyncSubTabs } from "./timesync-subtabs";
 
 /**
  * U8：硬件部署子 tab 主面板 —— 状态机驱动 + 双定时器轮询 + 按钮状态表 + issues 纯文本渲染。
@@ -32,6 +39,8 @@ const QUERY_INTERVAL_MS = 5000;
 const CONFIRM_RETRY_MS = 2000;
 const CONFIRM_MAX_TRIES = 12;
 const SOFT_TIMEOUT_GRACE_MS = 30_000;
+// 停止后到落终态的沉降时间：给硬件测量流断开留窗口，避免立刻重部署串到上次的流（boss 报的 bug）。
+const STOP_SETTLE_MS = 1500;
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -41,7 +50,9 @@ export interface HardDeployPanelProps {
   treeConfirmed: boolean;
   hardwareState: HardwareUiState;
   onHardwareStateChange: (state: HardwareUiState) => void;
-  onGoSoftSim: () => void;
+  // 子 tab 分段开关（命令栏左侧）+ 门控态「先用软件仿真」跳转。
+  activeSubTab: TimesyncSubTab;
+  onSelectSubTab: (tab: TimesyncSubTab) => void;
   // 命令通道（测试注入替身）。
   check?: () => Promise<HardwareCheckResult>;
   start?: (sessionId: string, durationS?: number) => Promise<HardwareStartResult>;
@@ -56,7 +67,8 @@ export function HardDeployPanel({
   treeConfirmed,
   hardwareState,
   onHardwareStateChange,
-  onGoSoftSim,
+  activeSubTab,
+  onSelectSubTab,
   check = invokeHardwareCheck,
   start = invokeHardwareStart,
   query = invokeHardwareQuery,
@@ -90,6 +102,14 @@ export function HardDeployPanel({
   metricsRef.current = metrics;
   const stopRef = useRef(stop);
   stopRef.current = stop;
+
+  // 图表头部展示用：GM 节点 / 同步·测量周期 / 节点名（非 Tauri 环境 hook 恒空 → 标签回退 --）。
+  const { snapshot: timesyncSnapshot } = useTimesyncSnapshot(sessionId);
+  const { snapshot: topologySnapshot } = useTopologySnapshot(sessionId);
+  const chartMeta = useMemo(
+    () => buildChartMeta(timesyncSnapshot, topologySnapshot),
+    [timesyncSnapshot, topologySnapshot],
+  );
 
   const clearTimers = useCallback(() => {
     if (metricsTimerRef.current) clearInterval(metricsTimerRef.current);
@@ -246,9 +266,24 @@ export function HardDeployPanel({
     runIdRef.current += 1; // 取消 observing 循环。
     const myRun = runIdRef.current;
     const sid = sessionId;
+    dispatch({ kind: "stopBegin" }); // → 停止中（按钮禁用，挡住立刻重部署）。
     try {
-      const result = await stopRef.current(sid);
+      const ack = await stopRef.current(sid);
       if (myRun !== runIdRef.current) return; // 停止往返期间切会话/重开 → 不把旧结果泄漏进新态。
+      // 沉降 + 确认：等一拍让硬件测量流断开，再 query 确认远端真正进入终态后才落终态、放开重部署。
+      await delay(STOP_SETTLE_MS);
+      if (myRun !== runIdRef.current) return;
+      let result = ack;
+      try {
+        const q = await queryRef.current(sid);
+        if (myRun !== runIdRef.current) return;
+        // 远端已报终态则以它为准；仍 active（异常）则退回 stop 的 ack。
+        const cls = classifyStatus(q.status);
+        if (cls !== "active" && cls !== "transient") result = q;
+      } catch {
+        // query 失败：用 stop 的 ack 落终态（已等过沉降，不再阻塞）。
+      }
+      if (myRun !== runIdRef.current) return;
       dispatch({ kind: "stopResult", result });
     } catch (e) {
       if (myRun !== runIdRef.current) return;
@@ -261,44 +296,84 @@ export function HardDeployPanel({
     dispatch({ kind: "reset" });
   }, [dispatch]);
 
-  // 门控空态：未到阶段 / 树未确认。
-  if (!inTimeSyncStage || !treeConfirmed) {
-    return (
-      <div className="hard-deploy-empty">
-        <h2>硬件部署</h2>
-        <p className="hard-deploy-empty__note">
-          {!inTimeSyncStage
-            ? "请先进入时钟同步阶段。"
-            : "请先确认时钟树（设好 GM），再把配置下发到真实硬件。"}
-        </p>
-        <button type="button" className="btn" onClick={onGoSoftSim}>
-          先用软件仿真验证
-        </button>
-      </div>
-    );
-  }
+  // 门控：未到阶段 / 树未确认 → 命令栏仍在（可切回软仿），操作区换成引导。
+  const gated = !inTimeSyncStage || !treeConfirmed;
+  // 首次空态（idle）：开始按钮放 body CTA（醒目防找不到）；运行过/有结果后收进命令栏右上角（boss 定）。
+  const hardFresh = !gated && hardwareState.status === "idle";
 
   return (
     <div className="hard-deploy">
-      <div className="panel-heading">
-        <div>
-          <h2>硬件部署</h2>
-          <p>把已确认的时钟同步配置下发到真实硬件，实时观测各节点相对 GM 的时钟偏移。</p>
-        </div>
-      </div>
-
-      <div className="sim-actions" role="group" aria-label="硬件部署操作">
-        <MainButton state={hardwareState} onStart={handleStart} onRetry={handleRetry} />
-        {hardwareState.status === "observing" && (
-          <button type="button" className="btn" onClick={() => void handleStop()}>
-            停止任务
-          </button>
+      {/* 命令栏：子 tab 分段开关（左）+ 硬件部署操作/状态（右）同一行（boss 定，省垂直占用、去冗余大标题）。 */}
+      <div className="timesync-commandbar">
+        <TimesyncSubTabs activeSubTab={activeSubTab} onSelectSubTab={onSelectSubTab} />
+        {!gated && !hardFresh && (
+          <div className="timesync-commandbar__actions" role="group" aria-label="硬件部署操作">
+            <MainButton state={hardwareState} onStart={handleStart} onRetry={handleRetry} />
+            {hardwareState.status === "observing" && (
+              <button type="button" className="btn" onClick={() => void handleStop()}>
+                停止任务
+              </button>
+            )}
+            <TerminalNote state={hardwareState} />
+          </div>
         )}
       </div>
 
-      <HardDeployBody state={hardwareState} />
+      {gated ? (
+        <div className="hard-deploy-empty">
+          <p className="hard-deploy-empty__note">
+            {!inTimeSyncStage
+              ? "请先进入时钟同步阶段。"
+              : "请先确认时钟树（设好 GM），再把配置下发到真实硬件。"}
+          </p>
+          <button type="button" className="btn" onClick={() => onSelectSubTab("soft-sim")}>
+            先用软件仿真验证
+          </button>
+        </div>
+      ) : hardFresh ? (
+        <PanelCta
+          label="开始硬件部署"
+          hint="把已确认的时钟同步配置下发到真实硬件，实时观测各节点相对 GM 的时钟偏移。"
+          onClick={() => void handleStart()}
+        />
+      ) : (
+        <HardDeployBody state={hardwareState} chartMeta={chartMeta} />
+      )}
     </div>
   );
+}
+
+/** 图表头部展示元数据（GM/周期/节点名），由会话快照派生。 */
+interface ChartMeta {
+  masterNodeId?: string;
+  masterLabel?: string;
+  syncPeriodLabel?: string;
+  measurePeriodLabel?: string;
+  nodeLabels?: Record<string, string>;
+}
+
+function buildChartMeta(
+  timesync: TimesyncSnapshot | undefined,
+  topology: TopologyRowSnapshot | undefined,
+): ChartMeta {
+  const nodeLabels: Record<string, string> = {};
+  for (const node of topology?.nodes ?? []) {
+    nodeLabels[node.mid] = node.name ?? `节点 ${node.mid}`;
+  }
+  const masterNodeId = timesync?.domain?.gmMid ?? undefined;
+  // 周期取值：GM 节点优先，回退首个有值的节点（同会话各节点通常一致）。
+  const periodRow =
+    (masterNodeId ? timesync?.nodes.find((n) => n.mid === masterNodeId) : undefined) ??
+    timesync?.nodes.find((n) => n.syncPeriod != null) ??
+    timesync?.nodes[0];
+  const fmtMs = (v: number | null | undefined) => (v == null ? undefined : `${v} ms`);
+  return {
+    masterNodeId,
+    masterLabel: masterNodeId ? nodeLabels[masterNodeId] : undefined,
+    syncPeriodLabel: fmtMs(periodRow?.syncPeriod),
+    measurePeriodLabel: fmtMs(periodRow?.measurePeriod),
+    nodeLabels: Object.keys(nodeLabels).length > 0 ? nodeLabels : undefined,
+  };
 }
 
 function MainButton({
@@ -327,6 +402,12 @@ function MainButton({
       );
     case "observing":
       return null;
+    case "stopping":
+      return (
+        <button type="button" className="btn primary" disabled>
+          停止中…
+        </button>
+      );
     case "error":
       return (
         <button type="button" className="btn primary" onClick={onRetry}>
@@ -354,7 +435,7 @@ function metricsStatusOf(payload: MetricsPayload | undefined): string | undefine
   return typeof nested === "string" ? nested : undefined;
 }
 
-function HardDeployBody({ state }: { state: HardwareUiState }) {
+function HardDeployBody({ state, chartMeta }: { state: HardwareUiState; chartMeta: ChartMeta }) {
   switch (state.status) {
     case "idle":
       return <div className="empty-panel mono">点上方按钮，开始把配置下发到硬件。</div>;
@@ -374,14 +455,14 @@ function HardDeployBody({ state }: { state: HardwareUiState }) {
         </div>
       );
     case "observing":
+    case "stopping":
     case "done":
     case "stopped":
     case "failed": {
       const metrics = "metrics" in state ? state.metrics : undefined;
       return (
         <div className="hard-deploy-observe">
-          <TerminalNote state={state} />
-          <MetricsView state={state.status} metrics={metrics} />
+          <MetricsView state={state.status} metrics={metrics} chartMeta={chartMeta} />
         </div>
       );
     }
@@ -390,25 +471,26 @@ function HardDeployBody({ state }: { state: HardwareUiState }) {
   }
 }
 
+/** 终态状态药丸（紧凑，置于 topbar 操作行旁，省一整行横幅）。文本不变。 */
 function TerminalNote({ state }: { state: HardwareUiState }) {
   switch (state.status) {
     case "done":
       return (
-        <div className="sim-overall converged" role="status">
+        <span className="hard-deploy-status ok" role="status">
           任务已完成
-        </div>
+        </span>
       );
     case "stopped":
       return (
-        <div className="sim-overall" role="status">
+        <span className="hard-deploy-status" role="status">
           任务已停止
-        </div>
+        </span>
       );
     case "failed":
       return (
-        <p className="transfer-notice error" role="alert">
+        <span className="hard-deploy-status error" role="alert">
           任务失败：{state.message}
-        </p>
+        </span>
       );
     default:
       return null;
@@ -431,14 +513,26 @@ function metricsHasPoints(payload: MetricsPayload | undefined): boolean {
 function MetricsView({
   state,
   metrics,
+  chartMeta,
 }: {
   state: HardwareUiState["status"];
   metrics: MetricsPayload | undefined;
+  chartMeta: ChartMeta;
 }) {
   // 关键：只要已有数据点就实时画——远端任务运行期 metrics_status 一直是 collecting，但 series 在逐秒
   // 攒点；不能等 collecting→ready（那要等满整段 duration）。有点即画 = 每秒滚动最近一分钟。
   if (metricsHasPoints(metrics)) {
-    return <TimeSyncOffsetChart metrics={metrics} title="时钟偏移曲线" />;
+    return (
+      <TimeSyncOffsetChart
+        metrics={metrics}
+        title="时钟偏移曲线"
+        masterNodeId={chartMeta.masterNodeId}
+        masterLabel={chartMeta.masterLabel}
+        syncPeriodLabel={chartMeta.syncPeriodLabel}
+        measurePeriodLabel={chartMeta.measurePeriodLabel}
+        nodeLabels={chartMeta.nodeLabels}
+      />
+    );
   }
   // 还没有任何点：observing 显采集中骨架（动态）；no_data/其它显暂无数据（静态）。
   if (state === "observing" && metricsStatusOf(metrics) !== "no_data") {

@@ -2120,46 +2120,58 @@ textarea:focus-visible {
   color: var(--text-primary);
 }
 
-/* U11/U12/U13：时钟同步软仿面板。 */
-/* 时间同步内的平级子 tab（软件仿真/硬件部署）。flex 而非 grid：WebKit 下 grid+overflow
-   auto 行会 row collapse 塌 0 高（踩过两次）。子 tab 内容用 flex 列、align-self/content:start
-   防嵌套 stretch 跳变。 */
-.sim-subtabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  margin-bottom: 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-.sim-subtab {
-  flex: 0 0 auto;
-  padding: 7px 14px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  background: transparent;
-  transition:
-    color 0.15s,
-    border-color 0.15s;
-}
-
-.sim-subtab:hover {
-  color: var(--text-primary);
-}
-
-.sim-subtab.active {
-  border-bottom-color: var(--accent);
-  color: var(--accent);
-}
-
+/* U11/U12/U13：时钟同步软仿面板。子 tab 已改为 .timesync-commandbar 内的分段开关
+   （.timesync-subtabs），旧的 .sim-subtabs/.sim-subtab 下划线样式已移除。 */
 .sim-subpanel {
   display: flex;
   flex-direction: column;
-  align-self: start;
+  /* 行距：命令栏 / 覆盖参数 / 结果区之间留白，避免拥挤。 */
+  gap: 10px;
+  /* 父级现为 flex 列：用 stretch 保持满宽（原 start 在 block 父下是 no-op，flex 父下会横向缩）。 */
+  align-self: stretch;
   overflow: visible;
+}
+
+/* 首次空态醒目主操作（居中大按钮 + 说明），填满 body 让用户一眼看到。 */
+.panel-cta {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: #fbfbfc;
+}
+
+.panel-cta__btn {
+  font-size: 14px;
+  padding: 10px 28px;
+}
+
+.panel-cta__hint {
+  margin: 0;
+  max-width: 440px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* 时间同步面板：flex 列填满抽屉，把高度下传给硬件部署图表。 */
+.time-sync-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 硬件部署子面板填满剩余高度（软仿子面板不加，保持内容自然高度）。 */
+.sim-subpanel--fill {
+  flex: 1;
+  min-height: 0;
 }
 
 .hard-deploy-empty {
@@ -2184,12 +2196,93 @@ textarea:focus-visible {
 }
 
 /* U8：硬件部署面板（flex 防 WebKit 行塌，同 .sim-subpanel 约定）。 */
+/* align-self: stretch 横向拉满父级（.sim-subpanel 是 flex-column，start 会把面板缩到内容宽 →
+   echarts 只占左半；stretch 让偏移曲线铺满弹框宽度）。 */
 .hard-deploy {
   display: flex;
   flex-direction: column;
-  align-self: start;
-  gap: 12px;
+  align-self: stretch;
+  flex: 1;
+  min-height: 0;
+  gap: 10px;
   overflow: visible;
+}
+
+/* 命令栏：子 tab 分段开关（左）+ 面板操作/状态（右）同一行（boss 定「并入操作行」）。
+   去掉独立子 tab 行、冗余大标题与整条状态横幅，垂直占用让给图表。软仿/硬件部署共用。 */
+.timesync-commandbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.timesync-commandbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 子 tab 分段开关（iOS segmented 风）。 */
+.timesync-subtabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: #eef1f5;
+  border-radius: 8px;
+}
+
+.timesync-subtab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 5px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.timesync-subtab:hover {
+  color: var(--text);
+}
+
+.timesync-subtab.active {
+  background: #ffffff;
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(31, 41, 55, 0.12);
+}
+
+/* 终态状态药丸（替代整条横幅）。 */
+.hard-deploy-status {
+  align-self: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+  background: #eef1f5;
+  color: var(--text-muted);
+}
+
+.hard-deploy-status.ok {
+  background: #eaf7ee;
+  color: #2f9e44;
+}
+
+.hard-deploy-status.error {
+  background: #fdecea;
+  color: #d4380d;
+  white-space: normal;
+}
+
+.hard-deploy-observe {
+  flex: 1;
+  min-height: 0;
 }
 
 .hard-deploy-observe,
@@ -2526,7 +2619,9 @@ textarea:focus-visible {
 }
 
 .config-body {
-  display: block;
+  /* flex 列：让 time-sync 面板能把抽屉高度下传给图表填满（节点属性/软仿仍按内容自然高度，顶部对齐）。 */
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   padding: 12px 16px;

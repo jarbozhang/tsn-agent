@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { HardDeployPanel } from "./hard-deploy-panel";
 import type { HardwareUiState } from "./hardware-deploy";
+import { PanelCta } from "./panel-cta";
 import {
   buildSimExplainPrompt,
   FALLBACK_SIM_DEFAULTS,
@@ -15,6 +16,7 @@ import {
   type SimResult,
   type SimUiState,
 } from "./timesync-sim";
+import { type TimesyncSubTab, TimesyncSubTabs } from "./timesync-subtabs";
 
 /**
  * 时间同步 tab 内容——两个平级子 tab：软件仿真（软仿按钮 + 门控 + 运行态 + 结果表/曲线 + 覆盖表单 + 解释）
@@ -24,8 +26,8 @@ import {
  * 覆盖表单展开/填值是组件内独立 intent（跨软仿运行保留、仅会话切换重置——靠 key={sessionId} 重挂）。
  */
 
-/** 时间同步面板内的平级子 tab（boss 定平级，无 gating）。单一定义，index.tsx 复用。 */
-export type TimesyncSubTab = "soft-sim" | "hard-deploy";
+/** 子 tab 类型 single source 移至 ./timesync-subtabs；此处 re-export 保持 index.tsx 引用不变。 */
+export type { TimesyncSubTab } from "./timesync-subtabs";
 
 export interface TimeSyncPanelProps {
   /** 当前阶段是否 time-sync。 */
@@ -48,11 +50,6 @@ export interface TimeSyncPanelProps {
   /** U6：默认值读通道（测试注入替身）。 */
   getSimDefaults?: () => Promise<SimDefaults>;
 }
-
-const TIMESYNC_SUBTABS: Array<{ id: TimesyncSubTab; label: string }> = [
-  { id: "soft-sim", label: "软件仿真" },
-  { id: "hard-deploy", label: "硬件部署" },
-];
 
 export function TimeSyncPanel({
   inTimeSyncStage,
@@ -101,6 +98,8 @@ export function TimeSyncPanel({
   sessionIdRef.current = sessionId;
 
   const running = simState.status === "running";
+  // 首次空态（从未运行、无结果）：开始按钮放 body CTA；运行过/有结果后收进命令栏右上角。
+  const softFresh = simState.status === "idle";
   // 门控两条文案（doc-review）：未到阶段 / 树未确认。
   const softSimDisabled = !inTimeSyncStage || !treeConfirmed || running;
   const softSimTooltip = !inTimeSyncStage
@@ -170,23 +169,6 @@ export function TimeSyncPanel({
       role="tabpanel"
       aria-label="时间同步"
     >
-      <div className="sim-subtabs" role="tablist" aria-label="时间同步阶段">
-        {TIMESYNC_SUBTABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            id={`timesync-subtab-${tab.id}`}
-            aria-selected={activeSubTab === tab.id}
-            aria-controls={`timesync-subpanel-${tab.id}`}
-            className={activeSubTab === tab.id ? "sim-subtab active" : "sim-subtab"}
-            onClick={() => onSelectSubTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
       {activeSubTab === "soft-sim" && (
         <div
           className="sim-subpanel"
@@ -194,25 +176,23 @@ export function TimeSyncPanel({
           id="timesync-subpanel-soft-sim"
           aria-labelledby="timesync-subtab-soft-sim"
         >
-          <div className="panel-heading">
-            <div>
-              <h2>软件仿真</h2>
-              <p>
-                把当前拓扑 + 时钟树组装成 INET gPTP 软仿，远端跑完取回各节点相对 GM 的收敛偏差。
-              </p>
-            </div>
-          </div>
-
-          <div className="sim-actions" role="group" aria-label="仿真操作">
-            <button
-              type="button"
-              className="btn primary"
-              disabled={softSimDisabled}
-              title={softSimTooltip}
-              onClick={() => void handleSoftSim()}
-            >
-              {running ? "软仿运行中…" : "软仿"}
-            </button>
+          {/* 命令栏：子 tab 分段开关（左）+ 仿真操作（右）。渐进式：首次空态按钮在 body CTA，
+              运行过/有结果后才收进命令栏右上角（boss 定）。 */}
+          <div className="timesync-commandbar">
+            <TimesyncSubTabs activeSubTab={activeSubTab} onSelectSubTab={onSelectSubTab} />
+            {!softFresh && (
+              <div className="timesync-commandbar__actions" role="group" aria-label="仿真操作">
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={softSimDisabled}
+                  title={softSimTooltip}
+                  onClick={() => void handleSoftSim()}
+                >
+                  {running ? "仿真运行中…" : "开始仿真"}
+                </button>
+              </div>
+            )}
           </div>
 
           <SimOverrideRegion
@@ -223,18 +203,28 @@ export function TimeSyncPanel({
             onChange={setForm}
           />
 
-          <SimResultArea
-            simState={simState}
-            explainState={explainState}
-            explainFailed={explainFailed}
-            onExplain={handleExplain}
-          />
+          {softFresh ? (
+            <PanelCta
+              label="开始仿真"
+              hint="把当前拓扑 + 时钟树组装成 INET gPTP 软仿，跑完取回各节点相对 GM 的收敛偏差。"
+              onClick={() => void handleSoftSim()}
+              disabled={softSimDisabled}
+              title={softSimTooltip}
+            />
+          ) : (
+            <SimResultArea
+              simState={simState}
+              explainState={explainState}
+              explainFailed={explainFailed}
+              onExplain={handleExplain}
+            />
+          )}
         </div>
       )}
 
       {activeSubTab === "hard-deploy" && (
         <div
-          className="sim-subpanel"
+          className="sim-subpanel sim-subpanel--fill"
           role="tabpanel"
           id="timesync-subpanel-hard-deploy"
           aria-labelledby="timesync-subtab-hard-deploy"
@@ -245,7 +235,8 @@ export function TimeSyncPanel({
             treeConfirmed={treeConfirmed}
             hardwareState={hardwareState}
             onHardwareStateChange={onHardwareStateChange}
-            onGoSoftSim={() => onSelectSubTab("soft-sim")}
+            activeSubTab={activeSubTab}
+            onSelectSubTab={onSelectSubTab}
           />
         </div>
       )}

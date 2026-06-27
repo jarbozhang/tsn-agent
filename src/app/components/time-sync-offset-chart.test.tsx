@@ -15,6 +15,7 @@ const echartsMock = vi.hoisted(() => ({
 
 vi.mock("echarts", () => ({
   init: vi.fn(() => echartsMock),
+  getInstanceByDom: vi.fn(() => undefined),
 }));
 
 function sampleMetrics(): TimeSyncMetricsQueryResponse {

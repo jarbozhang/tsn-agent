@@ -156,27 +156,39 @@ describe("nextHardwareState — observing", () => {
   });
 });
 
-describe("nextHardwareState — stopResult branches by status (done != stopped)", () => {
+describe("nextHardwareState — stopBegin/stopResult（先进停止中过渡态，再按 status 分流）", () => {
+  it("observing + stopBegin -> stopping（保留 metrics）", () => {
+    const next = nextHardwareState(
+      { status: "observing", taskId: "hw-1", metrics: { series: [{ node_id: "1" }] } },
+      { kind: "stopBegin" },
+    );
+    expect(next.status).toBe("stopping");
+    if (next.status === "stopping") {
+      expect(next.metrics).toEqual({ series: [{ node_id: "1" }] });
+    }
+  });
+  it("stopResult 只从 stopping 生效（observing 直接 stopResult 不变）", () => {
+    const obs: HardwareUiState = { status: "observing", taskId: "hw-1" };
+    expect(nextHardwareState(obs, { kind: "stopResult", result: { status: "stopped" } })).toBe(obs);
+  });
   it("stop returns stopped -> stopped", () => {
     expect(
       nextHardwareState(
-        { status: "observing", taskId: "hw-1" },
+        { status: "stopping" },
         { kind: "stopResult", result: { status: "stopped" } },
       ).status,
     ).toBe("stopped");
   });
   it("stop returns done (task finished concurrently) -> done", () => {
     expect(
-      nextHardwareState(
-        { status: "observing", taskId: "hw-1" },
-        { kind: "stopResult", result: { status: "done" } },
-      ).status,
+      nextHardwareState({ status: "stopping" }, { kind: "stopResult", result: { status: "done" } })
+        .status,
     ).toBe("done");
   });
   it("stop returns timeout -> failed", () => {
     expect(
       nextHardwareState(
-        { status: "observing", taskId: "hw-1" },
+        { status: "stopping" },
         { kind: "stopResult", result: { status: "timeout" } },
       ).status,
     ).toBe("failed");

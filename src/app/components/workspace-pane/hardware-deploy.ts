@@ -60,6 +60,8 @@ export type HardwareUiState =
   | { status: "starting" }
   | { status: "confirming"; taskId: string }
   | { status: "observing"; taskId: string; metrics?: MetricsPayload }
+  // 停止过渡态：已请求停止、正在确认远端真正终止（给硬件测量流断开留时间，避免立刻重部署串流）。
+  | { status: "stopping"; metrics?: MetricsPayload }
   | { status: "done"; metrics?: MetricsPayload }
   | { status: "stopped"; metrics?: MetricsPayload }
   | { status: "failed"; message: string; metrics?: MetricsPayload }
@@ -72,6 +74,7 @@ export type HardwareEvent =
   | { kind: "started"; result: HardwareStartResult }
   | { kind: "queried"; result: TaskStatusOut }
   | { kind: "metrics"; payload: MetricsPayload }
+  | { kind: "stopBegin" }
   | { kind: "stopResult"; result: TaskStatusOut }
   | { kind: "softTimeout" }
   | { kind: "failed"; message: string }
@@ -200,8 +203,13 @@ export function nextHardwareState(prev: HardwareUiState, event: HardwareEvent): 
       if (prev.status !== "observing") return prev;
       return { status: "observing", taskId: prev.taskId, metrics: event.payload };
 
-    case "stopResult": {
+    case "stopBegin":
+      // 点停止 → 进入「停止中」过渡态（保留曲线），由 driver 轮询确认远端真正终止后再落终态。
       if (prev.status !== "observing") return prev;
+      return { status: "stopping", metrics: prev.metrics };
+
+    case "stopResult": {
+      if (prev.status !== "stopping") return prev;
       const metrics = prev.metrics;
       // 按返回 status 分流——任务可能恰好跑完（done/failed/timeout），不硬编码 stopped。
       switch (classifyStatus(event.result.status)) {

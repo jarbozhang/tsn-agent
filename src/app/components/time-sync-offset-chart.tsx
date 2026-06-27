@@ -196,21 +196,19 @@ export function TimeSyncOffsetChart({
       className={className ? `time-sync-offset-card ${className}` : "time-sync-offset-card"}
       aria-label={title}
     >
+      {/* 单行头部：指标卡（左）+ 主时钟/从时钟（右）。去掉冗余「时钟偏移曲线」标题行，省纵向空间给图表。 */}
       <div className="time-sync-offset-header">
-        <div>
-          <h3>{title}</h3>
-          {normalized.message && (
-            <p
+        <div className="time-sync-offset-metrics" role="group" aria-label="时钟同步指标">
+          {normalized.cards.map((card) => (
+            <span
+              key={card.label}
               className={
-                normalized.status === "failed"
-                  ? "time-sync-offset-status error"
-                  : "time-sync-offset-status"
+                card.tone ? `time-sync-offset-metric ${card.tone}` : "time-sync-offset-metric"
               }
-              role="status"
             >
-              {normalized.message}
-            </p>
-          )}
+              {card.label} <strong className="mono">{card.value}</strong>
+            </span>
+          ))}
         </div>
         <div className="time-sync-offset-filters">
           <span className="time-sync-offset-master">
@@ -235,18 +233,18 @@ export function TimeSyncOffsetChart({
         </div>
       </div>
 
-      <div className="time-sync-offset-metrics" role="group" aria-label="时钟同步指标">
-        {normalized.cards.map((card) => (
-          <span
-            key={card.label}
-            className={
-              card.tone ? `time-sync-offset-metric ${card.tone}` : "time-sync-offset-metric"
-            }
-          >
-            {card.label} <strong className="mono">{card.value}</strong>
-          </span>
-        ))}
-      </div>
+      {normalized.message && (
+        <p
+          className={
+            normalized.status === "failed"
+              ? "time-sync-offset-status error"
+              : "time-sync-offset-status"
+          }
+          role="status"
+        >
+          {normalized.message}
+        </p>
+      )}
 
       {hasChartData ? (
         <EchartsLineCanvas
@@ -287,33 +285,50 @@ function EchartsLineCanvas({
   }, [points, series, thresholdNs]);
 
   useEffect(() => {
-    if (!chartElementRef.current) {
+    const el = chartElementRef.current;
+    if (!el) {
       return undefined;
     }
     let disposed = false;
-    let resize: (() => void) | undefined;
+    let chart: ECharts.ECharts | undefined;
+    let observer: ResizeObserver | undefined;
 
-    void createEcharts(chartElementRef.current).then((chart) => {
-      if (disposed || !chartElementRef.current) {
-        chart.dispose();
-        return;
-      }
-      chartInstanceRef.current = chart;
-      chart.setOption(latestOptionRef.current, {
-        notMerge: true,
-        lazyUpdate: true,
+    void import("echarts")
+      .then((echarts) => {
+        // import 是异步的——StrictMode 双挂载 / HMR 会在 import 解析前就 cleanup，此时直接退出不 init。
+        if (disposed || chartElementRef.current !== el) {
+          return;
+        }
+        // 同一 dom 重复 init 时 echarts 会返回旧实例并告警，随后前一个 effect 的 cleanup 把这个
+        // 共享实例 dispose 掉 → setOption 打在已 disposed 的实例上 → 空白画布。先清残留实例，确保
+        // 每次都拿到全新实例；cleanup 只 dispose 本 effect 自己的 chart（局部变量，非共享 ref）。
+        echarts.getInstanceByDom(el)?.dispose();
+        chart = echarts.init(el, undefined, { renderer: "canvas" });
+        chartInstanceRef.current = chart;
+        chart.setOption(latestOptionRef.current, {
+          notMerge: true,
+          lazyUpdate: true,
+        });
+        // init 可能在容器完成布局前读到 0 宽/高（Tauri WebKit 时序）——立即 resize 读真实尺寸，
+        // 并用 ResizeObserver 盯容器本身（面板分栏布局变化不会触发 window resize，必须盯元素）。
+        chart.resize();
+        if (typeof ResizeObserver !== "undefined") {
+          observer = new ResizeObserver(() => chart?.resize());
+          observer.observe(el);
+        }
+      })
+      .catch((err) => {
+        // 把被 promise 吞掉的 echarts import/init/setOption 报错暴露出来（排查空白画布）。
+        console.error("[time-sync-chart] echarts 渲染失败:", err);
       });
-      resize = () => chart.resize();
-      window.addEventListener("resize", resize);
-    });
 
     return () => {
       disposed = true;
-      if (resize) {
-        window.removeEventListener("resize", resize);
+      observer?.disconnect();
+      chart?.dispose();
+      if (chartInstanceRef.current === chart) {
+        chartInstanceRef.current = undefined;
       }
-      chartInstanceRef.current?.dispose();
-      chartInstanceRef.current = undefined;
     };
   }, []);
 
@@ -325,11 +340,6 @@ function EchartsLineCanvas({
       aria-label="时钟偏移曲线图"
     />
   );
-}
-
-async function createEcharts(element: HTMLDivElement): Promise<ECharts.ECharts> {
-  const echarts = await import("echarts");
-  return echarts.init(element, undefined, { renderer: "canvas" });
 }
 
 export function normalizeTimeSyncMetrics(
@@ -367,7 +377,7 @@ export function normalizeTimeSyncMetrics(
       options.syncPeriodLabel,
       options.measurePeriodLabel,
       thresholdNs,
-      resolveDurationNs(payload, points),
+      resolveDurationNs(points),
     ),
   };
 }
@@ -473,7 +483,8 @@ function buildTimeSyncChartOption(
   return {
     animation: false,
     color: series.map((item) => item.color),
-    grid: { top: 42, right: 42, bottom: 88, left: 62 },
+    // y 轴名移到左侧竖排（不占顶部纵向）→ top 收紧，把高度让给曲线。
+    grid: { top: 14, right: 42, bottom: 88, left: 66 },
     tooltip: {
       trigger: "axis",
       valueFormatter: (value) => `${value} ns`,
@@ -522,9 +533,10 @@ function buildTimeSyncChartOption(
       max: yRange.max,
       interval: yRange.interval,
       name: "时钟偏移(ns)",
-      nameLocation: "end",
-      nameGap: 16,
-      nameTextStyle: { color: "#747b87", fontSize: 13, fontWeight: 600, align: "left" },
+      nameLocation: "middle",
+      nameRotate: 90,
+      nameGap: 46,
+      nameTextStyle: { color: "#747b87", fontSize: 12, fontWeight: 600 },
       splitLine: { lineStyle: { color: "#eceff3" } },
       axisLine: { show: true, lineStyle: { color: "#aeb4bf" } },
       axisTick: { show: false },
@@ -659,16 +671,9 @@ function resolveThreshold(payload: TimeSyncMetricsPayload | undefined): number {
   return threshold ?? DEFAULT_THRESHOLD_NS;
 }
 
-function resolveDurationNs(
-  payload: TimeSyncMetricsPayload | undefined,
-  points: ChartPoint[],
-): number | undefined {
-  const sampleCount = payload?.runs
-    ?.map((run) => run.sample_count)
-    .find((value): value is number => typeof value === "number");
-  if (sampleCount && sampleCount > 0) {
-    return sampleCount * 1_000_000_000;
-  }
+function resolveDurationNs(points: ChartPoint[]): number | undefined {
+  // 每个点是一个 1s 桶，测试时长 = 桶的时间跨度。不能用 runs.sample_count——那是样本总数
+  // （硬件下每秒上报多条），当秒数会算出离谱的「1h 4m 32s」。
   return points.length > 1 ? (points.length - 1) * 1_000_000_000 : undefined;
 }
 
