@@ -40,7 +40,7 @@ describe("nextHardwareState — begin/checking/starting", () => {
     });
   });
   it("begin from observing is a no-op (cannot restart mid-run)", () => {
-    const obs: HardwareUiState = { status: "observing", taskId: "hw-1" };
+    const obs: HardwareUiState = { status: "observing", taskId: "hw-1", phase: "running" };
     expect(nextHardwareState(obs, { kind: "begin" })).toBe(obs);
   });
   it("checked available -> starting", () => {
@@ -114,7 +114,7 @@ describe("nextHardwareState — confirming (created retry is the key fix)", () =
         { status: "confirming", taskId: "hw-1" },
         { kind: "queried", result: { status: "running" } },
       ),
-    ).toEqual({ status: "observing", taskId: "hw-1" });
+    ).toEqual({ status: "observing", taskId: "hw-1", phase: "running" });
   });
   it("done -> done; failed -> failed", () => {
     expect(
@@ -135,14 +135,24 @@ describe("nextHardwareState — confirming (created retry is the key fix)", () =
 describe("nextHardwareState — observing", () => {
   it("metrics updates the payload", () => {
     const next = nextHardwareState(
-      { status: "observing", taskId: "hw-1" },
+      { status: "observing", taskId: "hw-1", phase: "running" },
       { kind: "metrics", payload: { series: [] } },
     );
-    expect(next).toEqual({ status: "observing", taskId: "hw-1", metrics: { series: [] } });
+    expect(next).toEqual({
+      status: "observing",
+      taskId: "hw-1",
+      phase: "running",
+      metrics: { series: [] },
+    });
   });
   it("query done -> done, preserving last metrics", () => {
     const next = nextHardwareState(
-      { status: "observing", taskId: "hw-1", metrics: { series: [{ node_id: "2" }] } },
+      {
+        status: "observing",
+        taskId: "hw-1",
+        phase: "running",
+        metrics: { series: [{ node_id: "2" }] },
+      },
       { kind: "queried", result: { status: "done" } },
     );
     expect(next.status).toBe("done");
@@ -150,16 +160,44 @@ describe("nextHardwareState — observing", () => {
       expect(next.metrics).toEqual({ series: [{ node_id: "2" }] });
     }
   });
-  it("query running stays observing", () => {
-    const obs: HardwareUiState = { status: "observing", taskId: "hw-1" };
-    expect(nextHardwareState(obs, { kind: "queried", result: { status: "running" } })).toBe(obs);
+  it("query running stays observing（running 相位）", () => {
+    const obs: HardwareUiState = { status: "observing", taskId: "hw-1", phase: "running" };
+    // active 时返回新对象以刷新 phase（不再保引用），语义不变 → 用 toEqual。
+    expect(nextHardwareState(obs, { kind: "queried", result: { status: "running" } })).toEqual(obs);
+  });
+  it("query queued → observing 标记 queued 相位（保留 metrics）", () => {
+    const obs: HardwareUiState = {
+      status: "observing",
+      taskId: "hw-1",
+      phase: "running",
+      metrics: { series: [{ node_id: "1" }] },
+    };
+    const next = nextHardwareState(obs, { kind: "queried", result: { status: "queued" } });
+    expect(next).toEqual({
+      status: "observing",
+      taskId: "hw-1",
+      phase: "queued",
+      metrics: { series: [{ node_id: "1" }] },
+    });
+  });
+  it("confirming + queried queued → observing 直接是 queued 相位", () => {
+    const next = nextHardwareState(
+      { status: "confirming", taskId: "hw-1" },
+      { kind: "queried", result: { status: "queued" } },
+    );
+    expect(next).toEqual({ status: "observing", taskId: "hw-1", phase: "queued" });
   });
 });
 
 describe("nextHardwareState — stopBegin/stopResult（先进停止中过渡态，再按 status 分流）", () => {
   it("observing + stopBegin -> stopping（保留 metrics）", () => {
     const next = nextHardwareState(
-      { status: "observing", taskId: "hw-1", metrics: { series: [{ node_id: "1" }] } },
+      {
+        status: "observing",
+        taskId: "hw-1",
+        phase: "running",
+        metrics: { series: [{ node_id: "1" }] },
+      },
       { kind: "stopBegin" },
     );
     expect(next.status).toBe("stopping");
@@ -168,7 +206,7 @@ describe("nextHardwareState — stopBegin/stopResult（先进停止中过渡态�
     }
   });
   it("stopResult 只从 stopping 生效（observing 直接 stopResult 不变）", () => {
-    const obs: HardwareUiState = { status: "observing", taskId: "hw-1" };
+    const obs: HardwareUiState = { status: "observing", taskId: "hw-1", phase: "running" };
     expect(nextHardwareState(obs, { kind: "stopResult", result: { status: "stopped" } })).toBe(obs);
   });
   it("stop returns stopped -> stopped", () => {
@@ -198,7 +236,7 @@ describe("nextHardwareState — stopBegin/stopResult（先进停止中过渡态�
 describe("nextHardwareState — softTimeout", () => {
   it("observing + softTimeout -> stopped, preserving metrics", () => {
     const next = nextHardwareState(
-      { status: "observing", taskId: "hw-1", metrics: { series: [] } },
+      { status: "observing", taskId: "hw-1", phase: "running", metrics: { series: [] } },
       { kind: "softTimeout" },
     );
     expect(next).toEqual({ status: "stopped", metrics: { series: [] } });
