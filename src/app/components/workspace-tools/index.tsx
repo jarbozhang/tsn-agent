@@ -17,6 +17,11 @@ import {
   setHardwareApiConfig,
 } from "../../hardware-api-config";
 import { getInetHostConfig, type InetHostConfig, setInetHostConfig } from "../../inet-host-config";
+import {
+  getInetSimHttpConfig,
+  type InetSimHttpConfig,
+  setInetSimHttpConfig,
+} from "../../inet-sim-http-config";
 import type { TransferNotice } from "../../session-transfer";
 import { DetailRow, formatTime } from "../shared";
 
@@ -642,6 +647,94 @@ function HardwareApiConfigForm({ onClose }: { onClose: () => void }) {
   );
 }
 
+/**
+ * U5：INET 软仿 HTTP 服务地址（base_url，自由输入）。空=未启用，软仿走 SSH 兜底；配了走 HTTP。
+ * 同其它配置表单：显式「保存」提交、保存后关抽屉、关闭不保存则回滚。
+ */
+function InetSimHttpConfigForm({ onClose }: { onClose: () => void }) {
+  const [config, setConfig] = useState<InetSimHttpConfig | undefined>();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  useEffect(() => {
+    let cancelled = false;
+    getInetSimHttpConfig()
+      .then((loaded) => {
+        if (!cancelled) {
+          setConfig(loaded);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError("读取软仿 HTTP 配置失败");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleSave() {
+    if (!config || saving) {
+      return;
+    }
+    setSaving(true);
+    setError(undefined);
+    try {
+      await setInetSimHttpConfig(config);
+      onClose();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="settings-host-form" aria-label="软仿 HTTP 服务">
+      <div className="detail-surface-header">
+        <div>
+          <p className="drawer-kicker">Soft-sim HTTP</p>
+          <h3>软仿 HTTP 服务</h3>
+        </div>
+      </div>
+      {config ? (
+        <div className="host-form-fields">
+          <label className="sim-field">
+            <span>服务地址</span>
+            <input
+              type="text"
+              value={config.baseUrl}
+              onChange={(event) => setConfig({ ...config, baseUrl: event.target.value })}
+            />
+          </label>
+          <p className="host-form-hint">
+            INET 宿主机上的薄 HTTP 软仿服务地址（如 http://100.104.38.106:19090），需 http(s)
+            前缀。配了软仿走 HTTP；留空则走远端主机 SSH 兜底。
+          </p>
+          <div className="drawer-actions">
+            <button
+              className="btn primary"
+              type="button"
+              disabled={saving}
+              onClick={() => void handleSave()}
+            >
+              保存
+            </button>
+          </div>
+          {error && (
+            <p className="transfer-notice error" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="empty-panel mono">{error ?? "加载中…"}</div>
+      )}
+    </section>
+  );
+}
+
 function SettingsToolPanel({
   version,
   releases,
@@ -682,6 +775,8 @@ function SettingsToolPanel({
       <EvalToolPanel currentSessionId={currentSessionId} />
 
       <InetHostConfigForm onClose={onClose} />
+
+      <InetSimHttpConfigForm onClose={onClose} />
 
       <HardwareApiConfigForm onClose={onClose} />
 

@@ -8,6 +8,8 @@ mod hardware_command;
 mod inet_remote;
 mod inet_sim_bundle;
 mod inet_sim_command;
+mod inet_sim_http;
+mod inet_sim_http_config;
 mod redaction;
 mod session_export;
 mod session_import;
@@ -114,6 +116,8 @@ pub fn run() {
             inet_sim_command::set_inet_host_config,
             hardware_api_config::get_hardware_api_config,
             hardware_api_config::set_hardware_api_config,
+            inet_sim_http_config::get_inet_sim_http_config,
+            inet_sim_http_config::set_inet_sim_http_config,
             hardware_command::hardware_check,
             hardware_command::hardware_start,
             hardware_command::hardware_query,

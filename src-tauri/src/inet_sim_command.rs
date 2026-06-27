@@ -409,13 +409,26 @@ pub async fn run_timesync_sim(
     request: RunTimesyncSimRequest,
 ) -> Result<SimResult, String> {
     let pool = store.pool(&app).await?;
-    let cfg = resolve_remote_config(pool).await?;
     let overrides = SimOverrides {
         oscillator: parse_oscillator(request.oscillator.as_deref()),
         drift_ppm: request.drift_ppm,
         sim_time_s: request.sim_time_s,
     };
-    run_timesync_sim_inner(pool, &request.session_id, &overrides, &SshRunner, &cfg).await
+    // 选路（U7/KTD4）：配了 INET 软仿 HTTP 地址走 HttpRunner，否则 SSH 兜底。
+    // 下游 run_timesync_sim_inner（bundle/解析/分型）两路共用，前端零改。
+    let http_url = crate::inet_sim_http_config::resolve_inet_sim_http_url(pool).await?;
+    if let Some(base_url) = http_url {
+        let runner = crate::inet_sim_http::HttpRunner::new(
+            crate::inet_sim_http::ReqwestInetSimClient,
+            base_url,
+        );
+        // HttpRunner 不消费 RemoteConfig（SSH 专用）；占位默认，避免无谓校验 SSH 配置。
+        let cfg = RemoteConfig::dev_default();
+        run_timesync_sim_inner(pool, &request.session_id, &overrides, &runner, &cfg).await
+    } else {
+        let cfg = resolve_remote_config(pool).await?;
+        run_timesync_sim_inner(pool, &request.session_id, &overrides, &SshRunner, &cfg).await
+    }
 }
 
 /// 可测内核：注入 RemoteRunner，编排 verify-gate → bundle → 远端跑 → 取数算偏差。
