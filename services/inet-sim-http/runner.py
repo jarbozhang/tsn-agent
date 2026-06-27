@@ -1,6 +1,9 @@
 """软仿执行器：在宿主机本地复刻 app 侧 SSH 路径（inet_remote.rs SshRunner）的命令，
-区别只是去掉 ssh/scp、改本地解包 + 子进程。结果形状（exit_code/output_tail/csv/
+区别只是去掉 ssh/scp、改本地写文件 + 子进程。结果形状（exit_code/output_tail/csv/
 scavetool_failed）与 SimRunOutcome 对齐，app 端 HttpRunner 直接映射（plan KTD1/R1）。
+
+bundle 就是三段文本（network.ned / omnetpp.ini / manifest.json），经 JSON 传来，服务写到
+run-<hex> 的固定布局（tsnagent/generated/network.ned 等）——无 tar、无路径穿越面。
 
 单运行（plan R6）：同一时刻只跑一个软仿，忙时 submit 抛 Busy（端点转 409）。
 异步：submit 立即返回 job_id，真正执行在后台线程；app 轮询 status/result。
@@ -8,13 +11,11 @@ scavetool_failed）与 SimRunOutcome 对齐，app 端 HttpRunner 直接映射（
 
 from __future__ import annotations
 
-import io
 import os
 import secrets
 import shlex
+import shutil
 import subprocess
-import sys
-import tarfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -26,10 +27,6 @@ _OUTPUT_TAIL_MAX = 2000
 
 class Busy(Exception):
     """已有软仿在跑（单运行）。"""
-
-
-class BadBundle(Exception):
-    """bundle 解包失败 / 含路径穿越。"""
 
 
 @dataclass
@@ -57,21 +54,16 @@ def _tail(text: str, limit: int = _OUTPUT_TAIL_MAX) -> str:
     return "…" + text[-limit:]
 
 
-def _safe_extract(tar_bytes: bytes, dest_dir: str) -> None:
-    """把 bundle tar 解包到 dest_dir，拒绝任何逃出 dest_dir 的成员（路径穿越防护，plan R9）。"""
-    dest_abs = os.path.realpath(dest_dir)
-    with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tar:
-        for member in tar.getmembers():
-            target = os.path.realpath(os.path.join(dest_dir, member.name))
-            if target != dest_abs and not target.startswith(dest_abs + os.sep):
-                raise BadBundle(f"bundle 含越界路径：{member.name}")
-            if member.issym() or member.islnk():
-                raise BadBundle(f"bundle 含链接（不允许）：{member.name}")
-        # 手工校验已挡穿越；filter="data"（Py3.12+）再加一层 + 消弭弃用告警，旧 Py 回退。
-        if sys.version_info >= (3, 12):
-            tar.extractall(dest_dir, filter="data")
-        else:
-            tar.extractall(dest_dir)
+def _write_bundle(run_dir: str, network_ned: str, omnetpp_ini: str, manifest_json: str) -> None:
+    """把三段文本写到 run_dir 固定布局（与 inet_remote.rs SshRunner 写的本地布局一致）。"""
+    gen_dir = os.path.join(run_dir, "tsnagent", "generated")
+    os.makedirs(gen_dir, exist_ok=True)
+    with open(os.path.join(gen_dir, "network.ned"), "w") as fh:
+        fh.write(network_ned)
+    with open(os.path.join(run_dir, "omnetpp.ini"), "w") as fh:
+        fh.write(omnetpp_ini)
+    with open(os.path.join(run_dir, "manifest.json"), "w") as fh:
+        fh.write(manifest_json)
 
 
 def _run_in_inet_env(inner: str) -> subprocess.CompletedProcess:
@@ -86,8 +78,7 @@ def _run_in_inet_env(inner: str) -> subprocess.CompletedProcess:
 
 
 def _execute_run(job: Job, scavetool_filter: str) -> None:
-    """后台线程体：跑 inet → （exit 0 则）跑 scavetool 取 CSV → 落 result。
-    解包已在 submit 同步完成（job.run_dir 就绪）。"""
+    """后台线程体：跑 inet →（exit 0 则）跑 scavetool 取 CSV → 落 result。"""
     run_dir = job.run_dir
     try:
         # 跑 inet（与 inet_remote.rs remote_run_cmd 同形）。
@@ -120,7 +111,9 @@ def _execute_run(job: Job, scavetool_filter: str) -> None:
         _set_failed(job, f"执行出错：{err}")
 
 
-def _set_result(job: Job, exit_code: int, output_tail: str, csv: str | None, scavetool_failed: bool) -> None:
+def _set_result(
+    job: Job, exit_code: int, output_tail: str, csv: str | None, scavetool_failed: bool
+) -> None:
     with _lock:
         job.result = {
             "exit_code": exit_code,
@@ -141,9 +134,8 @@ def _has_active_job() -> bool:
     return any(j.status in ("queued", "running") for j in _jobs.values())
 
 
-def submit(tar_bytes: bytes, scavetool_filter: str) -> str:
-    """单运行：有活跃任务则抛 Busy。同步解包（坏 bundle 立即抛 BadBundle→端点 400），
-    再起后台线程跑慢的 inet+scavetool，立即返回 job_id。"""
+def submit(network_ned: str, omnetpp_ini: str, manifest_json: str, scavetool_filter: str) -> str:
+    """单运行：有活跃任务则抛 Busy。同步写 bundle，再起后台线程跑慢的 inet+scavetool，返回 job_id。"""
     with _lock:
         if _has_active_job():
             raise Busy("已有软仿在运行")
@@ -152,14 +144,11 @@ def submit(tar_bytes: bytes, scavetool_filter: str) -> str:
     run_dir = os.path.join(config.RUN_BASE_DIR, job.job_id)
     job.run_dir = run_dir
     try:
-        os.makedirs(run_dir, exist_ok=True)
-        _safe_extract(tar_bytes, run_dir)  # 同步：路径穿越/坏包立即失败
-    except (BadBundle, OSError) as err:
-        _set_failed(job, str(err))
-        raise BadBundle(str(err)) from err
-    thread = threading.Thread(
-        target=_execute_run, args=(job, scavetool_filter), daemon=True
-    )
+        _write_bundle(run_dir, network_ned, omnetpp_ini, manifest_json)
+    except OSError as err:
+        _set_failed(job, f"写 bundle 失败：{err}")
+        raise
+    thread = threading.Thread(target=_execute_run, args=(job, scavetool_filter), daemon=True)
     thread.start()
     return job.job_id
 
@@ -185,8 +174,6 @@ def gc(retention: int | None = None) -> int:
     removed = 0
     for path in entries[keep:]:
         try:
-            import shutil
-
             shutil.rmtree(path)
             removed += 1
         except OSError:

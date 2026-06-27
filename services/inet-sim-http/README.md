@@ -52,7 +52,7 @@ curl -s http://localhost:19090/sim/healthz    # 期望 {"ok": true, "checks": {.
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/sim/healthz` | 前置验证 `{ok, checks}` |
-| POST | `/sim/run` | multipart：`bundle`(tar) + `scavetool_filter` → `202 {job_id}`；忙 409、坏包 400 |
+| POST | `/sim/run` | JSON：`{network_ned, omnetpp_ini, manifest_json, scavetool_filter}` → `202 {job_id}`；忙 409 |
 | GET | `/sim/run/{job_id}/status` | `{status: queued\|running\|done\|failed}` |
 | GET | `/sim/run/{job_id}/result` | done 才回 `{exit_code, output_tail, csv, scavetool_failed}`；运行中 409、失败 500、未知 404 |
 
