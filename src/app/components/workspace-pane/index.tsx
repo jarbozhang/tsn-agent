@@ -12,7 +12,7 @@ import {
   ReactFlow,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WorkflowStep } from "../../../domain/scenario-config";
 import { type TimesyncSnapshot, timesyncRoleForNode } from "../../../sessions/timesync-snapshot";
 import {
@@ -219,7 +219,7 @@ export function WorkspacePane({
 }: WorkspacePaneProps) {
   // U11：time-sync 阶段叠加时钟树视图——画布节点注入端口角色（GM/同步/旁路/未覆盖）。
   const showClockTree = workflowStep === "time-sync";
-  const enableHardwareDeploymentAnimation = isHardwareDeploymentAnimationActive(hardwareState);
+  const enableTopologyAnimation = isTopologyAnimationActive(simState, hardwareState);
   const [isTimesyncTreeDialogOpen, setIsTimesyncTreeDialogOpen] = useState(false);
   useEffect(() => {
     if (!showClockTree) {
@@ -253,21 +253,16 @@ export function WorkspacePane({
     const propagationPlan = buildTimesyncPropagationPlan(topologySnapshot.links, timesyncSnapshot);
     return {
       ...flow,
-      nodes: enrichTimesyncNodes(
-        flow.nodes,
-        timesyncSnapshot,
-        propagationPlan,
-        enableHardwareDeploymentAnimation,
-      ),
+      nodes: enrichTimesyncNodes(flow.nodes, timesyncSnapshot),
       edges: decorateTimesyncEdges(
         flow.edges,
         linkByEdgeId,
         timesyncSnapshot,
         propagationPlan,
-        enableHardwareDeploymentAnimation,
+        enableTopologyAnimation,
       ),
     };
-  }, [topologySnapshot, showClockTree, timesyncSnapshot, enableHardwareDeploymentAnimation]);
+  }, [topologySnapshot, showClockTree, timesyncSnapshot, enableTopologyAnimation]);
 
   const timesyncTreeDialogFlow = useMemo(() => {
     if (!topologySnapshot || isEmptyTopologySnapshot(topologySnapshot) || !showClockTree) {
@@ -276,7 +271,7 @@ export function WorkspacePane({
     const flow = topologySnapshotToReactFlow(topologySnapshot);
     const linkByEdgeId = new Map(topologySnapshot.links.map((link) => [linkRowId(link), link]));
     const propagationPlan = buildTimesyncPropagationPlan(topologySnapshot.links, timesyncSnapshot);
-    const enrichedNodes = enrichTimesyncNodes(flow.nodes, timesyncSnapshot, propagationPlan, false);
+    const enrichedNodes = enrichTimesyncNodes(flow.nodes, timesyncSnapshot);
     return {
       ...flow,
       nodes: layoutTimesyncTreeNodes(
@@ -857,28 +852,26 @@ export function WorkspacePane({
 function enrichTimesyncNodes(
   nodes: Node[],
   timesyncSnapshot: TimesyncSnapshot | undefined,
-  propagationPlan: TimesyncPropagationPlan,
-  includeArrivalPulse: boolean,
 ): Node[] {
   return nodes.map((node) => {
     const summary = timesyncRoleForNode(timesyncSnapshot, node.id);
-    const nodePulse = includeArrivalPulse ? propagationPlan.nodes.get(node.id) : undefined;
     const timesync: TsnNodeTimesync = {
       role: summary.role,
       isGm: summary.role === "gm",
-      arrivalDelaySec: nodePulse?.arrivalDelaySec,
-      pulseCycleSec: nodePulse?.cycleSec,
     };
     return { ...node, data: { ...node.data, timesync } };
   });
 }
 
-function isHardwareDeploymentAnimationActive(state: HardwareUiState): boolean {
+function isTopologyAnimationActive(simState: SimUiState, hardwareState: HardwareUiState): boolean {
+  if (simState.status === "running") {
+    return true;
+  }
   return (
-    state.status === "checking" ||
-    state.status === "starting" ||
-    state.status === "confirming" ||
-    state.status === "observing"
+    hardwareState.status === "checking" ||
+    hardwareState.status === "starting" ||
+    hardwareState.status === "confirming" ||
+    hardwareState.status === "observing"
   );
 }
 
@@ -952,30 +945,18 @@ function TsnTopologyNode({ data }: NodeProps) {
   };
   const nodeType = nodeData.nodeType ?? "endSystem";
   const timesync = nodeData.timesync;
-  const hasArrivalPulse =
-    nodeType === "switch" && timesync?.arrivalDelaySec !== undefined && !timesync.isGm;
   // time-sync 阶段：节点附时钟树角色 class（GM 高亮 + 角色配色）+ 角色徽标。
   const className = [
     "tsn-node",
     nodeType,
     timesync ? "timesync" : "",
     timesync ? `timesync-${timesync.role}` : "",
-    hasArrivalPulse ? "timesync-arrival-pulse" : "",
   ]
     .filter(Boolean)
     .join(" ");
-  const nodeStyle =
-    hasArrivalPulse &&
-    timesync?.arrivalDelaySec !== undefined &&
-    timesync.pulseCycleSec !== undefined
-      ? ({
-          "--timesync-arrival-delay": `${timesync.arrivalDelaySec}s`,
-          "--timesync-cycle-duration": `${timesync.pulseCycleSec}s`,
-        } as CSSProperties)
-      : undefined;
 
   return (
-    <div className={className} style={nodeStyle}>
+    <div className={className}>
       {/* R2：floating 边不锚定 handle；保留一对隐形 handle 满足 React Flow 边合法性。 */}
       <Handle id="s" type="source" position={Position.Top} />
       <Handle id="t" type="target" position={Position.Top} />

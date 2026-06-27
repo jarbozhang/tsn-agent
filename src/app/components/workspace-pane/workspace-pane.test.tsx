@@ -1181,6 +1181,62 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
     expect(meta).toHaveAttribute("data-timesync-travel", "1.8");
   });
 
+  it("软件仿真运行中：树边播放同步报文动画", () => {
+    render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: portedSnapshot(),
+          workflowStep: "time-sync",
+          timesyncSnapshot: timesyncFor("1"),
+          simState: { status: "running" },
+        })}
+      />,
+    );
+    const meta = screen.getByTestId("edge-meta-link-0");
+    expect(meta).toHaveAttribute(
+      "data-class",
+      "timesync-tree-edge timesync-flow-edge timesync-flow-forward",
+    );
+    expect(meta).toHaveAttribute("data-timesync-pulse", "forward");
+  });
+
+  it("软件仿真结束后：去掉主画布同步报文动画", () => {
+    const doneResult = {
+      caliber: "sim",
+      status: "converged",
+      perNode: [],
+      overall: "已完成",
+    };
+    const { rerender } = render(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: portedSnapshot(),
+          workflowStep: "time-sync",
+          timesyncSnapshot: timesyncFor("1"),
+          simState: { status: "running" },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("edge-meta-link-0")).toHaveAttribute(
+      "data-class",
+      "timesync-tree-edge timesync-flow-edge timesync-flow-forward",
+    );
+
+    rerender(
+      <WorkspacePane
+        {...baseProps({
+          topologySnapshot: portedSnapshot(),
+          workflowStep: "time-sync",
+          timesyncSnapshot: timesyncFor("1"),
+          simState: { status: "done", result: doneResult },
+        })}
+      />,
+    );
+    const meta = screen.getByTestId("edge-meta-link-0");
+    expect(meta).toHaveAttribute("data-class", "timesync-tree-edge");
+    expect(meta).toHaveAttribute("data-timesync-pulse", "none");
+  });
+
   it("硬件部署停止中/停止后：去掉主画布同步报文动画", () => {
     const { rerender } = render(
       <WorkspacePane
@@ -1228,7 +1284,7 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
     expect(meta).toHaveAttribute("data-timesync-pulse", "none");
   });
 
-  it("硬件部署运行中：只有非 GM 交换机在小圆点到达时触发呼吸灯", () => {
+  it("硬件部署运行中：交换机节点不触发呼吸灯动画", () => {
     const snapshot = portedSnapshot();
     snapshot.nodes = [
       { mid: "1", name: "SW-1", x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
@@ -1248,8 +1304,8 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
     const gmNode = within(flow).getByText("SW-1").closest(".tsn-node");
     const reachedSwitch = within(flow).getByText("SW-2").closest(".tsn-node");
     expect(gmNode).not.toHaveClass("timesync-arrival-pulse");
-    expect(reachedSwitch).toHaveClass("timesync-arrival-pulse");
-    expect(reachedSwitch).toHaveStyle({
+    expect(reachedSwitch).not.toHaveClass("timesync-arrival-pulse");
+    expect(reachedSwitch).not.toHaveStyle({
       "--timesync-arrival-delay": "1.68s",
       "--timesync-cycle-duration": "3s",
     });

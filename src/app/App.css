@@ -2116,7 +2116,7 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
-/* U11：time-sync 阶段时钟树角色视觉——节点保留原类型配色，GM 以橙色角标和呼吸灯强调。 */
+/* U11：time-sync 阶段时钟树角色视觉——节点保留原类型配色，GM 以橙色角标强调。 */
 .tsn-node.timesync-gm {
   border-color: var(--accent);
   border-width: 2px;
@@ -2127,11 +2127,6 @@ textarea:focus-visible {
 
 .tsn-node.timesync-gm .tsn-node-type {
   background: var(--accent);
-}
-
-.tsn-node.timesync-arrival-pulse {
-  animation: timesyncArrivalPulse var(--timesync-cycle-duration, 6s) ease-in-out infinite;
-  animation-delay: var(--timesync-arrival-delay, 0s);
 }
 
 .tsn-node-gm-corner {
