@@ -1,0 +1,116 @@
+"""U2/U3：runner（执行 + 单运行 + GC）。mock _run_in_inet_env 避免真跑 opp_env。"""
+
+import os
+import subprocess
+import threading
+import time
+
+import config
+import pytest
+import runner
+
+_NED = "network Net {}"
+_INI = "[General]\n"
+_MANIFEST = "{}"
+
+
+@pytest.fixture(autouse=True)
+def _isolate(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "RUN_BASE_DIR", str(tmp_path / "runs"))
+    runner._jobs.clear()
+    yield
+    runner._jobs.clear()
+
+
+def _submit(filt="filt"):
+    return runner.submit(_NED, _INI, _MANIFEST, filt)
+
+
+def _fake_inet_env(inet_rc=0, inet_out="inet ran", scave_rc=0, scave_out="csv-data"):
+    def fake(inner: str) -> subprocess.CompletedProcess:
+        if "opp_scavetool" in inner:
+            return subprocess.CompletedProcess([], scave_rc, scave_out, "")
+        return subprocess.CompletedProcess([], inet_rc, inet_out, "")
+
+    return fake
+
+
+def _wait_done(job_id: str, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        job = runner.get_job(job_id)
+        if job and job.status in ("done", "failed"):
+            return job
+        time.sleep(0.02)
+    raise AssertionError("job 未在超时内完成")
+
+
+def test_happy_path_writes_bundle_and_returns_csv(monkeypatch):
+    monkeypatch.setattr(
+        runner, "_run_in_inet_env", _fake_inet_env(scave_out="module,name,vectime,vecvalue\n")
+    )
+    job = _wait_done(_submit())
+    assert job.status == "done"
+    assert job.result["exit_code"] == 0
+    assert job.result["csv"] == "module,name,vectime,vecvalue\n"
+    assert job.result["scavetool_failed"] is False
+    # bundle 写到固定布局（与 SSH 路径一致）
+    assert os.path.isfile(os.path.join(job.run_dir, "omnetpp.ini"))
+    assert os.path.isfile(os.path.join(job.run_dir, "manifest.json"))
+    assert os.path.isfile(os.path.join(job.run_dir, "tsnagent/generated/network.ned"))
+
+
+def test_inet_nonzero_exit_skips_scavetool(monkeypatch):
+    monkeypatch.setattr(runner, "_run_in_inet_env", _fake_inet_env(inet_rc=1, inet_out="boom"))
+    job = _wait_done(_submit())
+    assert job.result["exit_code"] == 1
+    assert job.result["csv"] is None
+    assert job.result["scavetool_failed"] is False
+
+
+def test_scavetool_empty_is_not_failure(monkeypatch):
+    monkeypatch.setattr(runner, "_run_in_inet_env", _fake_inet_env(scave_out="   \n"))
+    job = _wait_done(_submit())
+    assert job.result["csv"] is None
+    assert job.result["scavetool_failed"] is False  # 跑成功但 0 行 → 结果为空，非失败
+
+
+def test_scavetool_nonzero_is_failure(monkeypatch):
+    monkeypatch.setattr(runner, "_run_in_inet_env", _fake_inet_env(scave_rc=2, scave_out=""))
+    job = _wait_done(_submit())
+    assert job.result["csv"] is None
+    assert job.result["scavetool_failed"] is True
+
+
+def test_single_run_rejects_second(monkeypatch):
+    gate = threading.Event()
+
+    def blocking(inner: str) -> subprocess.CompletedProcess:
+        gate.wait(timeout=5)
+        return subprocess.CompletedProcess([], 0, "ok", "")
+
+    monkeypatch.setattr(runner, "_run_in_inet_env", blocking)
+    first = _submit()  # 卡在 inet 上
+    with pytest.raises(runner.Busy):
+        _submit()
+    gate.set()
+    _wait_done(first)
+    monkeypatch.setattr(runner, "_run_in_inet_env", _fake_inet_env())
+    second = _submit()
+    assert second != first
+
+
+def test_gc_keeps_recent_n(monkeypatch):
+    base = config.RUN_BASE_DIR
+    os.makedirs(base, exist_ok=True)
+    for i in range(5):
+        d = os.path.join(base, f"run-{i:02d}")
+        os.makedirs(d)
+        os.utime(d, (i, i))
+    other = os.path.join(base, "not-a-run")
+    os.makedirs(other)
+    removed = runner.gc(retention=2)
+    assert removed == 3
+    remaining = sorted(n for n in os.listdir(base) if n.startswith("run-"))
+    assert remaining == ["run-03", "run-04"]
+    assert os.path.isdir(other)  # 非 run-* 不动
