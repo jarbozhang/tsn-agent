@@ -59,7 +59,8 @@ export type HardwareUiState =
   | { status: "checking" }
   | { status: "starting" }
   | { status: "confirming"; taskId: string }
-  | { status: "observing"; taskId: string; metrics?: MetricsPayload }
+  // phase 区分 queued（任务在队列等硬件）/ running（已在跑），界面据此显示「排队中」而非「暂无数据」。
+  | { status: "observing"; taskId: string; phase: "queued" | "running"; metrics?: MetricsPayload }
   // 停止过渡态：已请求停止、正在确认远端真正终止（给硬件测量流断开留时间，避免立刻重部署串流）。
   | { status: "stopping"; metrics?: MetricsPayload }
   | { status: "done"; metrics?: MetricsPayload }
@@ -89,6 +90,11 @@ type StatusClass = "transient" | "active" | "done" | "stopped" | "failed";
  * - `done`/`stopped` 各自终态；`failed`/`timeout` 归 failed。
  * - 未知值 → active（防御：宁可继续观测也不误判终态）。
  */
+/** observing 子相位：远端 status=queued → 排队中（等硬件空闲）；其余 active（running 等）→ 已在跑。 */
+function queuedPhase(result: TaskStatusOut): "queued" | "running" {
+  return result.status === "queued" ? "queued" : "running";
+}
+
 export function classifyStatus(status: string): StatusClass {
   switch (status) {
     case "created":
@@ -167,7 +173,7 @@ export function nextHardwareState(prev: HardwareUiState, event: HardwareEvent): 
           case "transient":
             return prev; // created → 继续等（不判 error）。
           case "active":
-            return { status: "observing", taskId: prev.taskId };
+            return { status: "observing", taskId: prev.taskId, phase: queuedPhase(event.result) };
           case "done":
             return { status: "done" };
           case "stopped":
@@ -182,8 +188,15 @@ export function nextHardwareState(prev: HardwareUiState, event: HardwareEvent): 
       if (prev.status === "observing") {
         switch (cls) {
           case "transient":
-          case "active":
             return prev;
+          case "active":
+            // 更新 queued/running 相位（保留已攒的 metrics）；排队期界面显示「排队中」。
+            return {
+              status: "observing",
+              taskId: prev.taskId,
+              phase: queuedPhase(event.result),
+              metrics: prev.metrics,
+            };
           case "done":
             return { status: "done", metrics: prev.metrics };
           case "stopped":
@@ -201,7 +214,12 @@ export function nextHardwareState(prev: HardwareUiState, event: HardwareEvent): 
 
     case "metrics":
       if (prev.status !== "observing") return prev;
-      return { status: "observing", taskId: prev.taskId, metrics: event.payload };
+      return {
+        status: "observing",
+        taskId: prev.taskId,
+        phase: prev.phase,
+        metrics: event.payload,
+      };
 
     case "stopBegin":
       // 点停止 → 进入「停止中」过渡态（保留曲线），由 driver 轮询确认远端真正终止后再落终态。

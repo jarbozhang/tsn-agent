@@ -460,9 +460,10 @@ function HardDeployBody({ state, chartMeta }: { state: HardwareUiState; chartMet
     case "stopped":
     case "failed": {
       const metrics = "metrics" in state ? state.metrics : undefined;
+      const phase = state.status === "observing" ? state.phase : undefined;
       return (
         <div className="hard-deploy-observe">
-          <MetricsView state={state.status} metrics={metrics} chartMeta={chartMeta} />
+          <MetricsView state={state.status} phase={phase} metrics={metrics} chartMeta={chartMeta} />
         </div>
       );
     }
@@ -512,10 +513,12 @@ function metricsHasPoints(payload: MetricsPayload | undefined): boolean {
 
 function MetricsView({
   state,
+  phase,
   metrics,
   chartMeta,
 }: {
   state: HardwareUiState["status"];
+  phase: "queued" | "running" | undefined;
   metrics: MetricsPayload | undefined;
   chartMeta: ChartMeta;
 }) {
@@ -532,6 +535,14 @@ function MetricsView({
         measurePeriodLabel={chartMeta.measurePeriodLabel}
         nodeLabels={chartMeta.nodeLabels}
       />
+    );
+  }
+  // 排队中（远端 status=queued）：明确告知用户任务在队列里等硬件，而非「暂无数据」。
+  if (state === "observing" && phase === "queued") {
+    return (
+      <div className="hard-deploy-collecting mono">
+        排队中：任务已在队列，正在等待硬件空闲，请稍候…
+      </div>
     );
   }
   // 还没有任何点：observing 显采集中骨架（动态）；no_data/其它显暂无数据（静态）。

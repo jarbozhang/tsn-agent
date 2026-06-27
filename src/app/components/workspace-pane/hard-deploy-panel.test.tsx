@@ -78,10 +78,22 @@ describe("HardDeployPanel — button + body per state", () => {
   });
   it("observing without metrics: stop button + 采集中", () => {
     render(
-      <HardDeployPanel {...fakes({ hardwareState: { status: "observing", taskId: "hw-1" } })} />,
+      <HardDeployPanel
+        {...fakes({ hardwareState: { status: "observing", taskId: "hw-1", phase: "running" } })}
+      />,
     );
     expect(screen.getByRole("button", { name: "停止任务" })).toBeInTheDocument();
     expect(screen.getByText("采集中…")).toBeInTheDocument();
+  });
+  it("observing + queued 相位：显示「排队中」而非暂无数据", () => {
+    render(
+      <HardDeployPanel
+        {...fakes({ hardwareState: { status: "observing", taskId: "hw-1", phase: "queued" } })}
+      />,
+    );
+    expect(screen.getByText(/排队中/)).toBeInTheDocument();
+    expect(screen.queryByText("采集中…")).not.toBeInTheDocument();
+    expect(screen.queryByText("暂无数据")).not.toBeInTheDocument();
   });
   it("observing + collecting WITH points renders chart (real-time), not 采集中", () => {
     // 远端运行期 metrics_status 一直 collecting 但 series 在攒点——有点就实时画，不卡采集中（修复回归）。
@@ -91,6 +103,7 @@ describe("HardDeployPanel — button + body per state", () => {
           hardwareState: {
             status: "observing",
             taskId: "hw-1",
+            phase: "running",
             metrics: {
               metrics_status: "collecting",
               series: [{ node_id: "1", points: [{ bucket_start_ns: 0, latest_offset_ns: 33 }] }],
@@ -109,6 +122,7 @@ describe("HardDeployPanel — button + body per state", () => {
           hardwareState: {
             status: "observing",
             taskId: "hw-1",
+            phase: "running",
             metrics: { metrics_status: "no_data", series: [] },
           },
         })}
