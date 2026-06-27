@@ -500,12 +500,14 @@ mod tests {
 
     #[tokio::test]
     async fn check_unavailable_returns_reason() {
-        let mut fake = FakeClient::default();
-        fake.check = TaskCheckResp {
-            hardware: Avail {
-                available: false,
-                reason: Some("无设备".into()),
+        let fake = FakeClient {
+            check: TaskCheckResp {
+                hardware: Avail {
+                    available: false,
+                    reason: Some("无设备".into()),
+                },
             },
+            ..Default::default()
         };
         let res = hardware_check_inner(&fake, "http://x").await.unwrap();
         assert!(!res.hardware_available);
@@ -529,19 +531,21 @@ mod tests {
     #[tokio::test]
     async fn start_validate_fail_does_not_start() {
         let pool = seeded_pool().await;
-        let mut fake = FakeClient::default();
-        fake.validate = TaskValidateResp {
-            verdict: "FAIL".into(),
-            summary: Some("bad".into()),
-            task_start_compatible: false,
-            ready: false,
-            issues: vec![crate::hardware_api::ValidateIssue {
-                severity: "ERROR".into(),
-                category: None,
-                code: Some("bad_sync".into()),
-                message: "sync_period 不支持".into(),
-                location: None,
-            }],
+        let fake = FakeClient {
+            validate: TaskValidateResp {
+                verdict: "FAIL".into(),
+                summary: Some("bad".into()),
+                task_start_compatible: false,
+                ready: false,
+                issues: vec![crate::hardware_api::ValidateIssue {
+                    severity: "ERROR".into(),
+                    category: None,
+                    code: Some("bad_sync".into()),
+                    message: "sync_period 不支持".into(),
+                    location: None,
+                }],
+            },
+            ..Default::default()
         };
         let res = hardware_start_inner(&pool, &fake, "http://x", "s1", 60)
             .await
@@ -554,6 +558,7 @@ mod tests {
     async fn start_ready_but_not_compatible_does_not_start() {
         let pool = seeded_pool().await;
         let mut fake = FakeClient::default();
+        // 子字段赋值（非整字段重赋）——clippy field_reassign_with_default 不触发。
         fake.validate.ready = true;
         fake.validate.task_start_compatible = false;
         let res = hardware_start_inner(&pool, &fake, "http://x", "s1", 60)
@@ -583,11 +588,13 @@ mod tests {
         hardware_start_inner(&pool, &FakeClient::default(), "http://x", "s1", 60)
             .await
             .unwrap();
-        let mut fake = FakeClient::default();
-        fake.stop = TaskQueryResp {
-            status: "done".into(),
-            verdict: Some("PASS".into()),
-            summary: None,
+        let fake = FakeClient {
+            stop: TaskQueryResp {
+                status: "done".into(),
+                verdict: Some("PASS".into()),
+                summary: None,
+            },
+            ..Default::default()
         };
         let res = hardware_stop_inner(&pool, &fake, "http://x", "s1")
             .await
