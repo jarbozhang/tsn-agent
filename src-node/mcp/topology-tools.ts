@@ -641,7 +641,7 @@ export function createTimesyncToolRegistry(): TimesyncMcpToolDefinition[] {
         "port roles are NOT touched. syncPeriod must be one of 125/250/500/1000/2000/4000/8000 ms " +
         "(powers-of-two seconds in integer ms; hardware OpenSync requirement); measurePeriod is a power of two in ms (1..32768); " +
         "meanLinkDelayThresh is a power of two (1..128); offsetThreshold is an integer 0..4095; reportEnable is 0/1. " +
-        "Recommended defaults (already applied on set_gm): syncPeriod=125, measurePeriod=1024, reportEnable=1, " +
+        "Recommended defaults (already applied on set_gm): syncPeriod=125, measurePeriod=2, reportEnable=1, " +
         "meanLinkDelayThresh=64, offsetThreshold=1000.",
       inputSchema: setParamsInputSchema(),
       handler: async (args) =>
