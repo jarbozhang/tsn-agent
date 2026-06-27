@@ -12,10 +12,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
-use crate::inet_remote::{
-    InetHostConfig, RemoteConfig, RemoteError, RemoteRunner, SimRunOutcome, SshRunner,
-    is_valid_host_or_user,
-};
+use crate::inet_remote::{RemoteError, RemoteRunner, SimRunOutcome};
 use crate::inet_sim_bundle::{
     DEFAULT_DRIFT_PPM, DEFAULT_SIM_TIME_S, OscillatorKind, SimNodeTiming, SimOverrides,
     build_timesync_sim_bundle,
@@ -27,122 +24,6 @@ const TIMECHANGED_FILTER: &str = "module=~\"**.clock\" AND name=~\"timeChanged:v
 /// 收敛默认阈值（纳秒）：稳态 max|offset| 在此内算收敛（参考线、非设计质量判定，R8）。
 /// 逐节点 offset_threshold 的精确 mid↔module 映射 deferred（实跑确认 module 路径后接入）。
 const CONVERGENCE_THRESHOLD_NS: f64 = 1000.0; // 1µs
-/// app_state 里远端主机配置的 key（R20）。
-const INET_HOST_CONFIG_KEY: &str = "inet_host_config";
-
-// ---------- U5：远端主机 UI 配置（app_state 持久化 + env>UI>默认 resolve）----------
-
-/// 读 UI 持久的远端主机配置（app_state）。无记录 → None。
-async fn load_host_config(pool: &sqlx::Pool<sqlx::Sqlite>) -> Option<InetHostConfig> {
-    let raw: Option<String> =
-        sqlx::query_scalar("SELECT value FROM app_state WHERE key = ? LIMIT 1")
-            .bind(INET_HOST_CONFIG_KEY)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten();
-    raw.and_then(|s| serde_json::from_str::<InetHostConfig>(&s).ok())
-}
-
-/// 解析最终远端配置：env 覆盖 > UI 持久值 > dev_default。host/user 过字符集校验（拒非法）。
-async fn resolve_remote_config(pool: &sqlx::Pool<sqlx::Sqlite>) -> Result<RemoteConfig, String> {
-    let base = RemoteConfig::dev_default();
-    let ui = load_host_config(pool).await;
-    let pick = |env_key: &str, ui_val: Option<&str>, base_val: &str| -> String {
-        std::env::var(env_key)
-            .ok()
-            .filter(|v| !v.is_empty())
-            .or_else(|| ui_val.map(|s| s.to_string()))
-            .unwrap_or_else(|| base_val.to_string())
-    };
-    let host = pick(
-        "TSN_AGENT_INET_HOST",
-        ui.as_ref().map(|c| c.host.as_str()),
-        &base.host,
-    );
-    let user = pick(
-        "TSN_AGENT_INET_USER",
-        ui.as_ref().map(|c| c.user.as_str()),
-        &base.user,
-    );
-    let inet_env_cmd = pick(
-        "TSN_AGENT_INET_ENV",
-        ui.as_ref().map(|c| c.inet_env_cmd.as_str()),
-        &base.inet_env_cmd,
-    );
-    let remote_base_dir = pick(
-        "TSN_AGENT_INET_BASEDIR",
-        ui.as_ref().map(|c| c.base_dir.as_str()),
-        &base.remote_base_dir,
-    );
-    if !is_valid_host_or_user(&host) {
-        return Err(format!(
-            "主机名 {host:?} 含非法字符（仅允许字母/数字/.-_），请在设置里改正。"
-        ));
-    }
-    if !is_valid_host_or_user(&user) {
-        return Err(format!(
-            "用户名 {user:?} 含非法字符（仅允许字母/数字/.-_），请在设置里改正。"
-        ));
-    }
-    Ok(RemoteConfig {
-        host,
-        user,
-        remote_base_dir,
-        inet_env_cmd,
-        timeout: base.timeout,
-    })
-}
-
-/// 读远端主机配置给设置面板展示：UI 持久值优先，无则播种当前默认（dev_default）。
-#[tauri::command]
-pub async fn get_inet_host_config(
-    app: tauri::AppHandle,
-    store: tauri::State<'_, crate::session_store::SessionStore>,
-) -> Result<InetHostConfig, String> {
-    let pool = store.pool(&app).await?;
-    if let Some(cfg) = load_host_config(pool).await {
-        return Ok(cfg);
-    }
-    let base = RemoteConfig::dev_default();
-    Ok(InetHostConfig {
-        host: base.host,
-        user: base.user,
-        inet_env_cmd: base.inet_env_cmd,
-        base_dir: base.remote_base_dir,
-    })
-}
-
-/// 写远端主机配置（设置面板保存）。落 app_state；写前 host/user 字符集校验。
-#[tauri::command]
-pub async fn set_inet_host_config(
-    app: tauri::AppHandle,
-    store: tauri::State<'_, crate::session_store::SessionStore>,
-    config: InetHostConfig,
-) -> Result<(), String> {
-    if !is_valid_host_or_user(&config.host) {
-        return Err("主机名含非法字符（仅允许字母/数字/.-_）。".to_string());
-    }
-    if !is_valid_host_or_user(&config.user) {
-        return Err("用户名含非法字符（仅允许字母/数字/.-_）。".to_string());
-    }
-    // base_dir 是命令模板（自用工具、信任用户，同 inet_env_cmd 口径不做字符集校验），但必须非空：
-    // 空值会让运行目录变成 `/run-<hex>`，mkdir/rm -rf 落到根下，风险大。
-    if config.base_dir.trim().is_empty() {
-        return Err("运行目录不能为空。".to_string());
-    }
-    let pool = store.pool(&app).await?;
-    let json = serde_json::to_string(&config).map_err(|e| format!("序列化配置失败：{e}"))?;
-    sqlx::query(
-        "INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, datetime('now'))",
-    )
-    .bind(INET_HOST_CONFIG_KEY)
-    .bind(&json)
-    .execute(pool)
-    .await
-    .map_err(|e| format!("写配置失败：{e}"))?;
-    Ok(())
-}
 
 // ---------- U5/U6：软仿覆盖参数默认值（单一事实源在后端，前端读用于摘要/预填）----------
 
@@ -414,21 +295,19 @@ pub async fn run_timesync_sim(
         drift_ppm: request.drift_ppm,
         sim_time_s: request.sim_time_s,
     };
-    // 选路（U7/KTD4）：配了 INET 软仿 HTTP 地址走 HttpRunner，否则 SSH 兜底。
-    // 下游 run_timesync_sim_inner（bundle/解析/分型）两路共用，前端零改。
-    let http_url = crate::inet_sim_http_config::resolve_inet_sim_http_url(pool).await?;
-    if let Some(base_url) = http_url {
-        let runner = crate::inet_sim_http::HttpRunner::new(
-            crate::inet_sim_http::ReqwestInetSimClient,
-            base_url,
-        );
-        // HttpRunner 不消费 RemoteConfig（SSH 专用）；占位默认，避免无谓校验 SSH 配置。
-        let cfg = RemoteConfig::dev_default();
-        run_timesync_sim_inner(pool, &request.session_id, &overrides, &runner, &cfg).await
-    } else {
-        let cfg = resolve_remote_config(pool).await?;
-        run_timesync_sim_inner(pool, &request.session_id, &overrides, &SshRunner, &cfg).await
-    }
+    // 软仿走宿主机薄 HTTP 服务（单路径）。未配置地址 → 结构化提示，不弹 IPC 错。
+    let Some(base_url) = crate::inet_sim_http_config::resolve_inet_sim_http_url(pool).await? else {
+        return Ok(SimResult {
+            caliber: CALIBER_TIMESYNC_SIMULATED.to_string(),
+            status: "no_service".to_string(),
+            per_node: vec![],
+            overall: "未配置软仿 HTTP 服务地址，请在设置里填写。".to_string(),
+            message: Some("InetSimHttpConfig.base_url 为空。".to_string()),
+        });
+    };
+    let runner =
+        crate::inet_sim_http::HttpRunner::new(crate::inet_sim_http::ReqwestInetSimClient, base_url);
+    run_timesync_sim_inner(pool, &request.session_id, &overrides, &runner).await
 }
 
 /// 可测内核：注入 RemoteRunner，编排 verify-gate → bundle → 远端跑 → 取数算偏差。
@@ -437,7 +316,6 @@ pub async fn run_timesync_sim_inner<R: RemoteRunner>(
     session_id: &str,
     overrides: &SimOverrides,
     runner: &R,
-    cfg: &RemoteConfig,
 ) -> Result<SimResult, String> {
     // 1) 触发时重跑 verify_time_sync（防确认后改拓扑/GM 拿陈旧树跑）。
     let verify = crate::timesync_verify::verify_time_sync(pool, session_id)
@@ -497,7 +375,7 @@ pub async fn run_timesync_sim_inner<R: RemoteRunner>(
         };
 
     // 4) 远端跑 + 取数。
-    let outcome = match runner.run_sim_fetch_csv(&sim_bundle.bundle, cfg, TIMECHANGED_FILTER) {
+    let outcome = match runner.run_sim_fetch_csv(&sim_bundle.bundle, TIMECHANGED_FILTER) {
         Ok(o) => o,
         Err(RemoteError::Unreachable(m)) => {
             return Ok(unreachable_result(&m));
@@ -752,82 +630,6 @@ fn parse_i64_array(json: &str) -> Vec<i64> {
 mod tests {
     use super::*;
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-
-    async fn app_state_pool() -> sqlx::Pool<sqlx::Sqlite> {
-        let opts = SqliteConnectOptions::new().in_memory(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(opts)
-            .await
-            .unwrap();
-        sqlx::query(
-            "CREATE TABLE app_state (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        pool
-    }
-
-    #[tokio::test]
-    async fn host_config_save_load_round_trip_and_resolve_prefers_ui() {
-        let pool = app_state_pool().await;
-        // 无配置 → load None。
-        assert!(load_host_config(&pool).await.is_none());
-        // 直写 UI 配置。
-        let cfg = InetHostConfig {
-            host: "10.0.0.5".into(),
-            user: "alice".into(),
-            inet_env_cmd: "opp_env mock".into(),
-            base_dir: "/home/alice/runs".into(),
-        };
-        let json = serde_json::to_string(&cfg).unwrap();
-        sqlx::query(
-            "INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, 'now')",
-        )
-        .bind(INET_HOST_CONFIG_KEY)
-        .bind(&json)
-        .execute(&pool)
-        .await
-        .unwrap();
-        assert_eq!(load_host_config(&pool).await, Some(cfg.clone()));
-        // resolve（无 env 时）取 UI 值。
-        if std::env::var("TSN_AGENT_INET_HOST").is_err() {
-            let resolved = resolve_remote_config(&pool).await.unwrap();
-            assert_eq!(resolved.host, "10.0.0.5");
-            assert_eq!(resolved.user, "alice");
-            if std::env::var("TSN_AGENT_INET_ENV").is_err() {
-                assert_eq!(resolved.inet_env_cmd, "opp_env mock");
-            }
-            if std::env::var("TSN_AGENT_INET_BASEDIR").is_err() {
-                assert_eq!(resolved.remote_base_dir, "/home/alice/runs");
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn resolve_rejects_invalid_saved_host() {
-        if std::env::var("TSN_AGENT_INET_HOST").is_ok() {
-            return; // env 覆盖会绕过 UI 值，跳过。
-        }
-        let pool = app_state_pool().await;
-        let bad = InetHostConfig {
-            host: "evil; rm -rf".into(),
-            user: "zhang".into(),
-            inet_env_cmd: "opp_env mock".into(),
-            base_dir: "/home/zhang/runs".into(),
-        };
-        let json = serde_json::to_string(&bad).unwrap();
-        sqlx::query(
-            "INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, 'now')",
-        )
-        .bind(INET_HOST_CONFIG_KEY)
-        .bind(&json)
-        .execute(&pool)
-        .await
-        .unwrap();
-        assert!(resolve_remote_config(&pool).await.is_err());
-    }
 
     // ---------- serde 契约：命令外壳的请求/响应字段名（camelCase）↔ 前端 TS ----------
 
@@ -1201,7 +1003,6 @@ mod tests {
         fn run_sim_fetch_csv(
             &self,
             bundle: &crate::inet_remote::InetBundle,
-            _cfg: &RemoteConfig,
             _filter: &str,
         ) -> Result<SimRunOutcome, RemoteError> {
             *self.captured_ini.lock().unwrap() = Some(bundle.omnetpp_ini.clone());
@@ -1300,9 +1101,7 @@ mod tests {
             drift_ppm: Some(50.0),
             sim_time_s: Some(2.5),
         };
-        let cfg = RemoteConfig::dev_default();
-
-        let result = run_timesync_sim_inner(&pool, "s1", &overrides, &mock, &cfg)
+        let result = run_timesync_sim_inner(&pool, "s1", &overrides, &mock)
             .await
             .unwrap();
 
@@ -1355,15 +1154,9 @@ mod tests {
             csv: String::new(),
             captured_ini: Mutex::new(None),
         };
-        let result = run_timesync_sim_inner(
-            &pool,
-            "s1",
-            &SimOverrides::default(),
-            &mock,
-            &RemoteConfig::dev_default(),
-        )
-        .await
-        .unwrap();
+        let result = run_timesync_sim_inner(&pool, "s1", &SimOverrides::default(), &mock)
+            .await
+            .unwrap();
         assert_eq!(result.status, "stale_tree", "{result:?}");
         assert!(
             mock.captured_ini.lock().unwrap().is_none(),

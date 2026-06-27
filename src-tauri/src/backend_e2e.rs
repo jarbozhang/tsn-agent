@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tower::ServiceExt;
 
-use crate::inet_remote::{InetBundle, RemoteConfig, RemoteError, RemoteRunner, SimRunOutcome};
+use crate::inet_remote::{InetBundle, RemoteError, RemoteRunner, SimRunOutcome};
 use crate::inet_sim_bundle::{OscillatorKind, SimOverrides};
 use crate::inet_sim_command::run_timesync_sim_inner;
 use crate::topology_mutation_buffer::TopologyMutationBuffer;
@@ -35,7 +35,6 @@ impl RemoteRunner for MockRunner {
     fn run_sim_fetch_csv(
         &self,
         bundle: &InetBundle,
-        _cfg: &RemoteConfig,
         _filter: &str,
     ) -> Result<SimRunOutcome, RemoteError> {
         *self.captured_ini.lock().unwrap() = Some(bundle.omnetpp_ini.clone());
@@ -204,10 +203,9 @@ async fn backend_full_flow_initialize_to_soft_sim() {
     };
 
     // 6) 真软仿命令内核：verify 闸（不漂移）→ bundle → mock runner → 取数算偏差。
-    let result =
-        run_timesync_sim_inner(&pool, "s1", &overrides, &mock, &RemoteConfig::dev_default())
-            .await
-            .unwrap();
+    let result = run_timesync_sim_inner(&pool, "s1", &overrides, &mock)
+        .await
+        .unwrap();
 
     assert_eq!(result.status, "converged", "{result:?}");
     assert_eq!(result.caliber, "timesync_simulated");

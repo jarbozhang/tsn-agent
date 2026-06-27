@@ -2,7 +2,7 @@
 //! POST bundle → 轮询 status → 取 result，映射成与 SSH 路径同样的 `SimRunOutcome`。
 //!
 //! 这样 `run_timesync_sim_inner` 下游（classify_and_compute / CSV 解析 / GM 对齐）全复用、
-//! 前端零改——选 HttpRunner 还是 SshRunner 只是 `run_timesync_sim` 按配置切（KTD4/KTD5）。
+//! 前端零改。软仿单路径：`run_timesync_sim` 始终用 HttpRunner（SSH 路径已移除，KTD4）。
 //!
 //! reqwest 是 async（仓库未启 blocking feature），而 RemoteRunner 是 sync：每次 HTTP 在一个
 //! 临时 current-thread runtime（独立线程，scope 借用）里跑，不依赖 ambient runtime 形态。
@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::inet_remote::{InetBundle, RemoteConfig, RemoteError, RemoteRunner, SimRunOutcome};
+use crate::inet_remote::{InetBundle, RemoteError, RemoteRunner, SimRunOutcome};
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// 轮询总上限（opp_env 首跑编译数分钟，给足；服务端单条命令另有 CMD_TIMEOUT 兜底）。
@@ -199,7 +199,6 @@ impl<C: InetSimHttpClient> RemoteRunner for HttpRunner<C> {
     fn run_sim_fetch_csv(
         &self,
         bundle: &InetBundle,
-        _cfg: &RemoteConfig,
         scavetool_filter: &str,
     ) -> Result<SimRunOutcome, RemoteError> {
         let job_id = self
@@ -257,10 +256,6 @@ mod tests {
             omnetpp_ini: "i".into(),
             manifest_json: "{}".into(),
         }
-    }
-
-    fn cfg() -> RemoteConfig {
-        RemoteConfig::dev_default()
     }
 
     /// Fake：scripted status 序列 + canned result，捕获 submit 入参。
@@ -322,7 +317,7 @@ mod tests {
             scavetool_failed: false,
         });
         let runner = fast_runner(client);
-        let out = runner.run_sim_fetch_csv(&bundle(), &cfg(), "filt").unwrap();
+        let out = runner.run_sim_fetch_csv(&bundle(), "filt").unwrap();
         assert_eq!(out.exit_code, Some(0));
         assert_eq!(out.csv.as_deref(), Some("module,name,vectime,vecvalue\n"));
         assert!(!out.scavetool_failed);
@@ -342,7 +337,7 @@ mod tests {
             scavetool_failed: false,
         });
         let out = fast_runner(client)
-            .run_sim_fetch_csv(&bundle(), &cfg(), "f")
+            .run_sim_fetch_csv(&bundle(), "f")
             .unwrap();
         assert_eq!(out.exit_code, Some(1));
         assert!(out.csv.is_none());
@@ -358,7 +353,7 @@ mod tests {
         });
         client.statuses = RefCell::new(vec!["failed"]);
         client.result = Err("命令超时".into());
-        let err = fast_runner(client).run_sim_fetch_csv(&bundle(), &cfg(), "f");
+        let err = fast_runner(client).run_sim_fetch_csv(&bundle(), "f");
         assert!(matches!(err, Err(RemoteError::Unreachable(m)) if m.contains("命令超时")));
     }
 
@@ -370,7 +365,7 @@ mod tests {
             submitted_filter: RefCell::new(None),
             submit_err: Some("服务忙".into()),
         };
-        let err = fast_runner(client).run_sim_fetch_csv(&bundle(), &cfg(), "f");
+        let err = fast_runner(client).run_sim_fetch_csv(&bundle(), "f");
         assert!(matches!(err, Err(RemoteError::Unreachable(m)) if m.contains("服务忙")));
     }
 }
