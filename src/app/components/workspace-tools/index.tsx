@@ -315,7 +315,12 @@ function EvalToolPanel({ currentSessionId }: { currentSessionId: string }) {
 
   return (
     <section className="settings-eval-section" aria-label="评估采集">
-      <h3 className="settings-eval-section__title">评估采集</h3>
+      <div className="detail-surface-header">
+        <div>
+          <p className="drawer-kicker">Eval Capture</p>
+          <h3>评估采集</h3>
+        </div>
+      </div>
       <p className="tool-panel-summary">
         每次与大模型的交互都原样保存为 eval 样本（不脱敏、含密钥原文），用于离线评估。 数据存在本机
         eval 目录，删除工程不会删除它——隐私清除请用下方按钮。
