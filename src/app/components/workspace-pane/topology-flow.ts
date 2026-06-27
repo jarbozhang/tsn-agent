@@ -180,8 +180,6 @@ import type { TimesyncNodeRole, TimesyncSnapshot } from "../../../sessions/times
 export interface TsnNodeTimesync {
   role: TimesyncNodeRole;
   isGm?: boolean;
-  arrivalDelaySec?: number;
-  pulseCycleSec?: number;
 }
 
 /**

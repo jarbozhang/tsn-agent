@@ -1228,7 +1228,7 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
     expect(meta).toHaveAttribute("data-timesync-pulse", "none");
   });
 
-  it("硬件部署运行中：只有非 GM 交换机在小圆点到达时触发呼吸灯", () => {
+  it("硬件部署运行中：交换机节点不触发呼吸灯动画", () => {
     const snapshot = portedSnapshot();
     snapshot.nodes = [
       { mid: "1", name: "SW-1", x: 0, y: 0, nodeType: "switch", insertOrder: 0 },
@@ -1248,8 +1248,8 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
     const gmNode = within(flow).getByText("SW-1").closest(".tsn-node");
     const reachedSwitch = within(flow).getByText("SW-2").closest(".tsn-node");
     expect(gmNode).not.toHaveClass("timesync-arrival-pulse");
-    expect(reachedSwitch).toHaveClass("timesync-arrival-pulse");
-    expect(reachedSwitch).toHaveStyle({
+    expect(reachedSwitch).not.toHaveClass("timesync-arrival-pulse");
+    expect(reachedSwitch).not.toHaveStyle({
       "--timesync-arrival-delay": "1.68s",
       "--timesync-cycle-duration": "3s",
     });
