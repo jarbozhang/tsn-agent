@@ -1167,7 +1167,7 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
           topologySnapshot: portedSnapshot(),
           workflowStep: "time-sync",
           timesyncSnapshot: timesyncFor("1"),
-          hardwareState: { status: "observing", taskId: "hw-1" },
+          hardwareState: { status: "observing", taskId: "hw-1", phase: "running" },
         })}
       />,
     );
@@ -1188,7 +1188,7 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
           topologySnapshot: portedSnapshot(),
           workflowStep: "time-sync",
           timesyncSnapshot: timesyncFor("1"),
-          hardwareState: { status: "observing", taskId: "hw-1" },
+          hardwareState: { status: "observing", taskId: "hw-1", phase: "running" },
         })}
       />,
     );
@@ -1240,7 +1240,7 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
           topologySnapshot: snapshot,
           workflowStep: "time-sync",
           timesyncSnapshot: timesyncFor("1"),
-          hardwareState: { status: "observing", taskId: "hw-1" },
+          hardwareState: { status: "observing", taskId: "hw-1", phase: "running" },
         })}
       />,
     );
@@ -1274,7 +1274,7 @@ describe("WorkspacePane 时钟同步视图（U11）", () => {
           topologySnapshot: snapshot,
           workflowStep: "time-sync",
           timesyncSnapshot: timesyncFor("1"),
-          hardwareState: { status: "observing", taskId: "hw-1" },
+          hardwareState: { status: "observing", taskId: "hw-1", phase: "running" },
         })}
       />,
     );
