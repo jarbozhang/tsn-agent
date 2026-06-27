@@ -1,8 +1,8 @@
 //! INET 软仿 HTTP 服务配置（2026-06-27）：base_url 持久化 + 读写命令。
 //!
-//! 镜像 `hardware_api_config.rs`，但**默认为空 = 未启用**：配了 base_url 走 HTTP 软仿，
-//! 留空走现有 SSH 兜底（plan KTD4/U5）。与 `InetHostConfig`（SSH）、`HardwareApiConfig`
-//! 三套配置解耦。base_url 自用工具信任输入，仅校验「空，或 http(s) 前缀」。
+//! 镜像 `hardware_api_config.rs`：**默认指向已部署的宿主机软仿服务**（HTTP 是默认路径），
+//! 显式清空 base_url 才回退到现有 SSH 兜底（plan KTD4/U5）。与 `HardwareApiConfig` 解耦。
+//! base_url 自用工具信任输入，仅校验「空，或 http(s) 前缀」。
 
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 const INET_SIM_HTTP_CONFIG_KEY: &str = "inet_sim_http_config";
 /// 覆盖 base_url 的环境变量。
 const INET_SIM_HTTP_URL_ENV: &str = "TSN_AGENT_INET_SIM_HTTP_URL";
+/// dev 默认 base_url：已部署的宿主机薄 HTTP 软仿服务。
+const DEFAULT_INET_SIM_HTTP_URL: &str = "http://100.104.38.106:19090";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -36,8 +38,8 @@ async fn load_config(pool: &sqlx::Pool<sqlx::Sqlite>) -> Option<InetSimHttpConfi
     raw.and_then(|s| serde_json::from_str::<InetSimHttpConfig>(&s).ok())
 }
 
-/// 解析最终 base_url：env 覆盖 > UI 持久值 > 默认（空）。
-/// 空 → Ok(None)（未启用，走 SSH）；非空非法 → Err；非空合法 → Ok(Some(url))。
+/// 解析最终 base_url：env 覆盖 > UI 持久值 > 默认（已部署服务）。
+/// 显式清空（存了空串）→ Ok(None)（回退 SSH）；非空非法 → Err；否则 Ok(Some(url))。
 pub async fn resolve_inet_sim_http_url(
     pool: &sqlx::Pool<sqlx::Sqlite>,
 ) -> Result<Option<String>, String> {
@@ -46,10 +48,11 @@ pub async fn resolve_inet_sim_http_url(
         .filter(|v| !v.trim().is_empty());
     let resolved = match env_url {
         Some(u) => u,
+        // 无持久记录 → 默认指向已部署服务（HTTP 为默认）；有记录但为空 → 用户显式清空，回退 SSH。
         None => load_config(pool)
             .await
             .map(|c| c.base_url)
-            .unwrap_or_default(),
+            .unwrap_or_else(|| DEFAULT_INET_SIM_HTTP_URL.to_string()),
     };
     let trimmed = resolved.trim();
     if trimmed.is_empty() {
@@ -63,7 +66,7 @@ pub async fn resolve_inet_sim_http_url(
     Ok(Some(trimmed.to_string()))
 }
 
-/// 读软仿 HTTP 配置给设置面板展示：UI 持久值优先，无则空（未启用）。
+/// 读软仿 HTTP 配置给设置面板展示：UI 持久值优先，无则播种当前默认（已部署服务）。
 #[tauri::command]
 pub async fn get_inet_sim_http_config(
     app: tauri::AppHandle,
@@ -74,7 +77,7 @@ pub async fn get_inet_sim_http_config(
         return Ok(cfg);
     }
     Ok(InetSimHttpConfig {
-        base_url: String::new(),
+        base_url: DEFAULT_INET_SIM_HTTP_URL.to_string(),
     })
 }
 
@@ -152,10 +155,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_value_resolves_none() {
+    async fn no_value_resolves_default() {
         let pool = app_state_pool().await;
         if std::env::var(INET_SIM_HTTP_URL_ENV).is_err() {
-            assert_eq!(resolve_inet_sim_http_url(&pool).await.unwrap(), None);
+            assert_eq!(
+                resolve_inet_sim_http_url(&pool).await.unwrap(),
+                Some(DEFAULT_INET_SIM_HTTP_URL.to_string())
+            );
         }
     }
 
