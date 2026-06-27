@@ -415,6 +415,19 @@ function TerminalNote({ state }: { state: HardwareUiState }) {
   }
 }
 
+/** series 里是否已有任一节点的数据点（两层并集都看）。 */
+function metricsHasPoints(payload: MetricsPayload | undefined): boolean {
+  if (!payload) return false;
+  const series =
+    (payload as { series?: unknown }).series ??
+    (payload as { data?: { series?: unknown } }).data?.series;
+  if (!Array.isArray(series)) return false;
+  return series.some((s) => {
+    const pts = (s as { points?: unknown }).points;
+    return Array.isArray(pts) && pts.length > 0;
+  });
+}
+
 function MetricsView({
   state,
   metrics,
@@ -422,15 +435,16 @@ function MetricsView({
   state: HardwareUiState["status"];
   metrics: MetricsPayload | undefined;
 }) {
-  const status = metricsStatusOf(metrics);
-  // 观测中且还没数据：区分 collecting（动态骨架）与 no_data（静态文案）。
-  if (state === "observing" && (!metrics || status === "collecting")) {
+  // 关键：只要已有数据点就实时画——远端任务运行期 metrics_status 一直是 collecting，但 series 在逐秒
+  // 攒点；不能等 collecting→ready（那要等满整段 duration）。有点即画 = 每秒滚动最近一分钟。
+  if (metricsHasPoints(metrics)) {
+    return <TimeSyncOffsetChart metrics={metrics} title="时钟偏移曲线" />;
+  }
+  // 还没有任何点：observing 显采集中骨架（动态）；no_data/其它显暂无数据（静态）。
+  if (state === "observing" && metricsStatusOf(metrics) !== "no_data") {
     return <div className="hard-deploy-collecting mono">采集中…</div>;
   }
-  if (status === "no_data") {
-    return <div className="empty-panel mono">暂无数据</div>;
-  }
-  return <TimeSyncOffsetChart metrics={metrics} title="时钟偏移曲线" />;
+  return <div className="empty-panel mono">暂无数据</div>;
 }
 
 /** issues 纯文本节点渲染（KTD12 防 XSS，不走 markdown）+ R1 sync_period 专门引导。 */

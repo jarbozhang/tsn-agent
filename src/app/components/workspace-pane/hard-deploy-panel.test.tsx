@@ -9,6 +9,14 @@ import type {
   TaskStatusOut,
 } from "./hardware-deploy";
 
+// echarts 动态 import：mock 掉，让带数据点的图表能在 jsdom 渲染（同 chart 自带测试）。
+const echartsMock = vi.hoisted(() => ({
+  setOption: vi.fn(),
+  resize: vi.fn(),
+  dispose: vi.fn(),
+}));
+vi.mock("echarts", () => ({ init: vi.fn(() => echartsMock) }));
+
 const okCheck: HardwareCheckResult = { healthzOk: true, hardwareAvailable: true };
 const passStart: HardwareStartResult = {
   taskId: "hw-1",
@@ -71,6 +79,25 @@ describe("HardDeployPanel — button + body per state", () => {
     expect(screen.getByRole("button", { name: "停止任务" })).toBeInTheDocument();
     expect(screen.getByText("采集中…")).toBeInTheDocument();
   });
+  it("observing + collecting WITH points renders chart (real-time), not 采集中", () => {
+    // 远端运行期 metrics_status 一直 collecting 但 series 在攒点——有点就实时画，不卡采集中（修复回归）。
+    render(
+      <HardDeployPanel
+        {...fakes({
+          hardwareState: {
+            status: "observing",
+            taskId: "hw-1",
+            metrics: {
+              metrics_status: "collecting",
+              series: [{ node_id: "1", points: [{ bucket_start_ns: 0, latest_offset_ns: 33 }] }],
+            },
+          },
+        })}
+      />,
+    );
+    expect(screen.queryByText("采集中…")).not.toBeInTheDocument();
+  });
+
   it("observing with no_data metrics: 暂无数据", () => {
     render(
       <HardDeployPanel
