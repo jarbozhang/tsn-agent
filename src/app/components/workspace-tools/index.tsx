@@ -16,7 +16,6 @@ import {
   type HardwareApiConfig,
   setHardwareApiConfig,
 } from "../../hardware-api-config";
-import { getInetHostConfig, type InetHostConfig, setInetHostConfig } from "../../inet-host-config";
 import {
   getInetSimHttpConfig,
   type InetSimHttpConfig,
@@ -439,129 +438,9 @@ function SkillToolPanel() {
   );
 }
 
-const HOST_KEY_HINT = "新主机首次连接需先手动 ssh 建立 host key 信任";
-
 /**
- * U5：远端 INET 主机配置表单（host / user / INET 环境命令，自由输入）。
- * doc-review 决定：显式「保存」提交（非 blur 自动存）；保存后关抽屉；关闭不保存则回滚
- * （表单 form-local，重开时重新从后端加载）。known_hosts 常驻提示挂在主机输入框下方。
- */
-function InetHostConfigForm({ onClose }: { onClose: () => void }) {
-  const [config, setConfig] = useState<InetHostConfig | undefined>();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | undefined>();
-
-  useEffect(() => {
-    let cancelled = false;
-    getInetHostConfig()
-      .then((loaded) => {
-        if (!cancelled) {
-          setConfig(loaded);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setError("读取远端主机配置失败");
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function handleSave() {
-    if (!config || saving) {
-      return;
-    }
-    setSaving(true);
-    setError(undefined);
-    try {
-      await setInetHostConfig(config);
-      onClose();
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : String(saveError));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <section className="settings-host-form" aria-label="远端仿真主机">
-      <div className="detail-surface-header">
-        <div>
-          <p className="drawer-kicker">Remote Host</p>
-          <h3>远端仿真主机</h3>
-        </div>
-      </div>
-      {config ? (
-        <div className="host-form-fields">
-          <label className="sim-field">
-            <span>主机</span>
-            <input
-              type="text"
-              value={config.host}
-              onChange={(event) => setConfig({ ...config, host: event.target.value })}
-            />
-          </label>
-          <p className="host-form-hint">{HOST_KEY_HINT}</p>
-          <label className="sim-field">
-            <span>用户名</span>
-            <input
-              type="text"
-              value={config.user}
-              onChange={(event) => setConfig({ ...config, user: event.target.value })}
-            />
-          </label>
-          <label className="sim-field">
-            <span>INET 环境命令</span>
-            <input
-              type="text"
-              value={config.inetEnvCmd}
-              onChange={(event) => setConfig({ ...config, inetEnvCmd: event.target.value })}
-            />
-          </label>
-          <p className="host-form-hint">
-            在此环境里跑 inet 与 opp_scavetool（如 opp_env wrapper），app 以 “命令 -c 实际指令”
-            方式调用。一般用默认即可。
-          </p>
-          <label className="sim-field">
-            <span>运行目录</span>
-            <input
-              type="text"
-              value={config.baseDir}
-              onChange={(event) => setConfig({ ...config, baseDir: event.target.value })}
-            />
-          </label>
-          <p className="host-form-hint">
-            远端运行目录的父目录，每次软仿在其下建 run-&lt;随机&gt; 子目录。目录保留不删（默认
-            /tmp，重启自动清），可 SSH 进去看实际 ini/ned 与 results/。换主机若家目录不同记得改。
-          </p>
-          <div className="drawer-actions">
-            <button
-              className="btn primary"
-              type="button"
-              disabled={saving}
-              onClick={() => void handleSave()}
-            >
-              保存
-            </button>
-          </div>
-          {error && (
-            <p className="transfer-notice error" role="alert">
-              {error}
-            </p>
-          )}
-        </div>
-      ) : (
-        <div className="empty-panel mono">{error ?? "加载中…"}</div>
-      )}
-    </section>
-  );
-}
-
-/**
- * U4：硬件部署 API 配置表单（tsn-sim 服务 base_url，自由输入）。与软仿远端 SSH 配置解耦。
- * 同 InetHostConfigForm 模式：显式「保存」提交、保存后关抽屉、关闭不保存则回滚。
+ * U4：硬件部署 API 配置表单（tsn-sim 服务 base_url，自由输入）。
+ * 显式「保存」提交、保存后关抽屉、关闭不保存则回滚。
  */
 function HardwareApiConfigForm({ onClose }: { onClose: () => void }) {
   const [config, setConfig] = useState<HardwareApiConfig | undefined>();
@@ -709,8 +588,8 @@ function InetSimHttpConfigForm({ onClose }: { onClose: () => void }) {
             />
           </label>
           <p className="host-form-hint">
-            INET 宿主机上的薄 HTTP 软仿服务地址（如 http://100.104.38.106:19090），需 http(s)
-            前缀。配了软仿走 HTTP；留空则走远端主机 SSH 兜底。
+            INET 宿主机上的薄 HTTP 软仿服务地址（默认已指向已部署服务），需 http(s) 前缀。
+            软仿默认走 HTTP；清空则回退旧 SSH 路径。
           </p>
           <div className="drawer-actions">
             <button
@@ -773,8 +652,6 @@ function SettingsToolPanel({
       </div>
 
       <EvalToolPanel currentSessionId={currentSessionId} />
-
-      <InetHostConfigForm onClose={onClose} />
 
       <InetSimHttpConfigForm onClose={onClose} />
 
