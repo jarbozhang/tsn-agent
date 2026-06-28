@@ -64,7 +64,7 @@ export const FALLBACK_SIM_DEFAULTS: SimDefaults = {
   oscillator: "Random",
   driftPpm: 100,
   driftRateChangePpm: 0.3,
-  changeIntervalMs: 12.5,
+  changeIntervalMs: 50,
   simTimeS: 60,
 };
 

@@ -67,7 +67,7 @@ export function TimeSyncPanel({
 }: TimeSyncPanelProps) {
   // U12：覆盖表单状态（默认收起，跨软仿运行保留）。form 只存「用户覆盖」（在哪个键=已覆盖）；
   // 显示/预填用 form.x ?? defaults.x，提交也只发 form（不填走后端默认，保持原语义）。
-  const [formExpanded, setFormExpanded] = useState(false);
+  const [formExpanded, setFormExpanded] = useState(true);
   const [form, setForm] = useState<SimOverrideForm>({});
   // U6：软仿覆盖参数默认值（后端单一事实源）。undefined=加载中；取数失败回退兜底常量。
   const [defaults, setDefaults] = useState<SimDefaults | undefined>();
@@ -113,6 +113,7 @@ export function TimeSyncPanel({
       return;
     }
     softSimInflight.current = true;
+    setFormExpanded(false); // 开跑即收起覆盖参数（boss）
     // 运行前定格当前会话：await 期间用户切走时，迟到结果不得落进新会话的状态。
     const runSessionId = sessionId;
     setExplainState({ status: "idle" });
@@ -187,7 +188,11 @@ export function TimeSyncPanel({
                   className="btn primary"
                   disabled={softSimDisabled}
                   title={softSimTooltip}
-                  onClick={() => void handleSoftSim()}
+                  // 重新仿真：回初始态（CTA 居中 + 覆盖参数展开可重选），不直接重跑（仿硬件部署「重新部署」）。
+                  onClick={() => {
+                    onSimStateChange({ status: "idle" });
+                    setFormExpanded(true);
+                  }}
                 >
                   {running ? "仿真运行中…" : "开始仿真"}
                 </button>
@@ -206,7 +211,7 @@ export function TimeSyncPanel({
           {softFresh ? (
             <PanelCta
               label="开始仿真"
-              hint="把当前拓扑 + 时钟树组装成 INET gPTP 软仿，跑完取回各节点相对 GM 的收敛偏差。"
+              hint="运行 INET gPTP 软仿，取回各节点相对 GM 的收敛偏差。"
               onClick={() => void handleSoftSim()}
               disabled={softSimDisabled}
               title={softSimTooltip}
@@ -493,7 +498,7 @@ const CHART_COLORS = [
 
 /** 阈值标签格式化：整 µs 显示 µs，否则 ns（如 1000→±1µs、500→±500ns）。 */
 function formatThreshold(ns: number): string {
-  return ns % 1000 === 0 ? `±${ns / 1000}µs` : `±${ns}ns`;
+  return ns % 1000 === 0 ? `${ns / 1000}µs` : `${ns}ns`;
 }
 
 /** 取模块短名：`TsnAgentTimesyncNetwork.sw1.clock` → `sw1`（去网络前缀与 .clock 后缀）。 */
@@ -541,16 +546,13 @@ function OffsetChart({ perNode }: { perNode: PerNodeOffset[] }) {
   const uniformThreshold = thresholdValues.every((t) => t === thresholdValues[0])
     ? thresholdValues[0]
     : null;
-  // y 轴定界自适应（取 |offset| 的 95 分位 ×1.3 裁掉启动瞬态作数据界）：
-  // - 数据接近阈值（≥1/3）→ 把阈值纳入视图，显示参考带（如 Random 稳态几百 ns）；
-  // - 数据远小于阈值（如 Constant 偏差才几十 ns）→ 贴合数据，否则会被阈值带压成贴底直线，阈值改顶部标注。
+  // y 轴定界：有统一阈值时固定以阈值为基准（×1.35）——±阈值两条横线落在约 74% 高度、上方留
+  // 余量显示溢出尖峰被截断，无论数据大小都能一眼看出相对阈值的位置（不再随数据贴合缩放）。
+  // 多阈值时回退数据自适应（|offset| 95 分位 ×1.3 裁掉启动瞬态），逐节点判定见表格。
   absVals.sort((a, b) => a - b);
   const p95 = absVals[Math.floor(absVals.length * 0.95)] ?? 0;
   const dataBound = Math.max(p95 * 1.3, 1);
-  const yBound =
-    uniformThreshold !== null && dataBound >= uniformThreshold / 3
-      ? Math.max(dataBound, uniformThreshold * 1.15)
-      : dataBound;
+  const yBound = uniformThreshold !== null ? uniformThreshold * 1.35 : dataBound;
   const clipped = rawAbsMax > yBound;
   const thresholdInView = uniformThreshold !== null && uniformThreshold <= yBound;
 
@@ -578,7 +580,7 @@ function OffsetChart({ perNode }: { perNode: PerNodeOffset[] }) {
         <clipPath id="sim-chart-plot">
           <rect x={ml} y={mt} width={pw} height={ph} />
         </clipPath>
-        {/* ±1µs 收敛阈值带：仅当落在数据范围内才画带，否则不强行撑大 y 轴 */}
+        {/* 收敛阈值带（淡填充）：统一阈值时落在视图内 */}
         {thresholdInView && (
           <rect
             x={ml}
@@ -592,6 +594,25 @@ function OffsetChart({ perNode }: { perNode: PerNodeOffset[] }) {
         <line x1={ml} y1={mt} x2={ml} y2={mt + ph} className="sim-chart-axis" />
         <line x1={ml} y1={mt + ph} x2={ml + pw} y2={mt + ph} className="sim-chart-axis" />
         <line x1={ml} y1={baseline} x2={ml + pw} y2={baseline} className="sim-chart-baseline" />
+        {/* ±阈值两条横线标记（统一阈值时） */}
+        {uniformThreshold !== null && thresholdInView && (
+          <>
+            <line
+              x1={ml}
+              y1={bandTop}
+              x2={ml + pw}
+              y2={bandTop}
+              className="sim-chart-threshold-line"
+            />
+            <line
+              x1={ml}
+              y1={bandBottom}
+              x2={ml + pw}
+              y2={bandBottom}
+              className="sim-chart-threshold-line"
+            />
+          </>
+        )}
         {/* y 轴上下界 + 0 + x 轴末点标注 + 阈值标注 */}
         <text x={ml - 6} y={mt + 4} className="sim-chart-tick" textAnchor="end">
           {yBound.toFixed(0)} ns
@@ -604,12 +625,12 @@ function OffsetChart({ perNode }: { perNode: PerNodeOffset[] }) {
         </text>
         {uniformThreshold !== null && thresholdInView && (
           <text x={ml + pw} y={bandTop - 3} className="sim-chart-tick" textAnchor="end">
-            {formatThreshold(uniformThreshold)} 阈值
+            {`+${formatThreshold(uniformThreshold)} 阈值`}
           </text>
         )}
-        {uniformThreshold !== null && !thresholdInView && (
-          <text x={ml + pw} y={mt + 11} className="sim-chart-tick" textAnchor="end">
-            ↑ {formatThreshold(uniformThreshold)} 阈值（远高于此范围，全部在内）
+        {uniformThreshold !== null && thresholdInView && (
+          <text x={ml + pw} y={bandBottom + 11} className="sim-chart-tick" textAnchor="end">
+            {`-${formatThreshold(uniformThreshold)} 阈值`}
           </text>
         )}
         {uniformThreshold === null && (

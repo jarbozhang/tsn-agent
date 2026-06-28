@@ -28,8 +28,8 @@ const MAX_DATARATE_MBPS: f64 = 100_000.0;
 pub const DEFAULT_DRIFT_PPM: f64 = 100.0;
 pub const DEFAULT_SIM_TIME_S: f64 = 60.0;
 const NOMINAL_TICK_LENGTH: &str = "10ns";
-/// RandomDriftOscillator 漂移率更新间隔默认（ms，取自 INET gptp showcase；可被覆盖表单改）。
-pub const DEFAULT_CHANGE_INTERVAL_MS: f64 = 12.5;
+/// RandomDriftOscillator 漂移率更新间隔默认（ms，可被覆盖表单改）。
+pub const DEFAULT_CHANGE_INTERVAL_MS: f64 = 50.0;
 /// RandomDriftOscillator 每次更新的漂移率增量默认（ppm，随机游走步长；可被覆盖表单改）。
 /// 这是晶振频率稳定度的代理——决定稳态同步残差；drift_ppm 反而被 gPTP 速率比补偿、几乎不影响偏差。
 /// 默认 0.3：HTTP 软仿实测此值稳态偏差 ~30ns、贴合真机（INET showcase 默认 1.0 是为演示放大的劣质晶振）。
@@ -575,7 +575,7 @@ mod tests {
         assert!(ini.contains("RandomDriftOscillator"));
         // 真机校正：RandomDriftOscillator 的 changeInterval 必填（无默认会停下等输入）。
         assert!(
-            ini.contains("**.clock.oscillator.changeInterval = 12.5ms"),
+            ini.contains("**.clock.oscillator.changeInterval = 50ms"),
             "{ini}"
         );
         assert!(

@@ -95,7 +95,7 @@ function baseProps(overrides: Partial<TimeSyncPanelProps> = {}): TimeSyncPanelPr
       oscillator: "Random" as const,
       driftPpm: 100,
       driftRateChangePpm: 0.3,
-      changeIntervalMs: 12.5,
+      changeIntervalMs: 50,
       simTimeS: 60,
     })),
     ...overrides,
@@ -127,7 +127,7 @@ describe("TimeSyncPanel 运行/结果（U11）", () => {
   it("初始态显示 CTA（开始仿真按钮 + 引导说明）", () => {
     render(<TimeSyncPanel {...baseProps()} />);
     expect(screen.getByRole("button", { name: "开始仿真" })).toBeInTheDocument();
-    expect(screen.getByText(/跑完取回各节点相对 GM 的收敛偏差/)).toBeInTheDocument();
+    expect(screen.getByText(/取回各节点相对 GM 的收敛偏差/)).toBeInTheDocument();
   });
 
   it("点软仿 → invoke 命令、置运行态", async () => {
@@ -173,17 +173,18 @@ describe("TimeSyncPanel 运行/结果（U11）", () => {
     expect(screen.queryByText("TsnAgentTimesyncNetwork.sw1.clock")).not.toBeInTheDocument();
   });
 
-  it("偏差远小于阈值（如 Constant）→ y 轴贴合数据、阈值改顶部标注而非压平", () => {
+  it("统一阈值 → y 轴固定阈值×1.35、画带 + ±阈值两条横线（数据小也不贴底）", () => {
     render(
       <TimeSyncPanel {...baseProps({ simState: { status: "done", result: convergedResult() } })} />,
     );
     const chart = screen.getByRole("img", { name: "从节点偏差随仿真时间抖动曲线" });
-    // 数据 <40ns、阈值 1µs 在视图外 → 不画带，改顶部标注。
-    expect(chart.querySelector("rect.sim-chart-threshold-band")).toBeNull();
-    expect(screen.getByText(/±1µs 阈值（远高于此范围/)).toBeInTheDocument();
-    // y 轴上界贴合数据（几十 ns 量级，而非被 1µs 撑到上千）。
+    // convergedResult 阈值 1µs：y 轴固定到 1350（=1000×1.35），不再贴合几十 ns 数据。
+    expect(chart.querySelector("rect.sim-chart-threshold-band")).not.toBeNull();
+    expect(chart.querySelectorAll("line.sim-chart-threshold-line")).toHaveLength(2);
+    expect(screen.getByText("+1µs 阈值")).toBeInTheDocument();
+    expect(screen.getByText("-1µs 阈值")).toBeInTheDocument();
     const topLabel = screen.getByText(/^\d+ ns$/);
-    expect(Number(topLabel.textContent?.replace(" ns", ""))).toBeLessThan(200);
+    expect(Number(topLabel.textContent?.replace(" ns", ""))).toBe(1350);
   });
 
   it("偏差接近阈值（如 Random，几百 ns）→ 纳入 ±1µs 阈值带", () => {
@@ -209,9 +210,10 @@ describe("TimeSyncPanel 运行/结果（U11）", () => {
     };
     render(<TimeSyncPanel {...baseProps({ simState: { status: "done", result: randomLike } })} />);
     const chart = screen.getByRole("img", { name: "从节点偏差随仿真时间抖动曲线" });
-    // 数据约 ±600ns 接近 1µs → 阈值带应纳入视图。
+    // 统一阈值 → 画带 + ±阈值两条横线。
     expect(chart.querySelector("rect.sim-chart-threshold-band")).not.toBeNull();
-    expect(screen.getByText("±1µs 阈值")).toBeInTheDocument();
+    expect(screen.getByText("+1µs 阈值")).toBeInTheDocument();
+    expect(screen.getByText("-1µs 阈值")).toBeInTheDocument();
   });
 
   it("阈值带按各节点实际阈值标注（统一 500ns → ±500ns 阈值）(U7)", () => {
@@ -236,8 +238,9 @@ describe("TimeSyncPanel 运行/结果（U11）", () => {
       ],
     };
     render(<TimeSyncPanel {...baseProps({ simState: { status: "done", result } })} />);
-    expect(screen.getByText("±500ns 阈值")).toBeInTheDocument();
-    expect(screen.queryByText("±1µs 阈值")).not.toBeInTheDocument();
+    expect(screen.getByText("+500ns 阈值")).toBeInTheDocument();
+    expect(screen.getByText("-500ns 阈值")).toBeInTheDocument();
+    expect(screen.queryByText("+1µs 阈值")).not.toBeInTheDocument();
   });
 
   it("各节点阈值不一致 → 不画统一带，提示看表格 (U7)", () => {
@@ -280,6 +283,25 @@ describe("TimeSyncPanel 运行/结果（U11）", () => {
     expect(screen.getByLabelText("软仿总判定")).toHaveClass("warn");
     expect(screen.getByText(/0 行 timeChanged/)).toBeInTheDocument();
   });
+
+  it("结果态点右上角「开始仿真」→ 回初始态（重置 idle，不直接重跑）", async () => {
+    const user = userEvent.setup();
+    const onSimStateChange = vi.fn();
+    const runTimesyncSim = vi.fn(async () => convergedResult());
+    render(
+      <TimeSyncPanel
+        {...baseProps({
+          simState: { status: "done", result: convergedResult() },
+          onSimStateChange,
+          runTimesyncSim,
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "开始仿真" }));
+    // 仿硬件部署「重新部署」：回 idle 让用户重选参数，不直接重跑。
+    expect(onSimStateChange).toHaveBeenCalledWith({ status: "idle" });
+    expect(runTimesyncSim).not.toHaveBeenCalled();
+  });
 });
 
 describe("TimeSyncPanel 子 tab（软件仿真/硬件部署，平级）", () => {
@@ -318,22 +340,21 @@ describe("TimeSyncPanel 子 tab（软件仿真/硬件部署，平级）", () => 
 });
 
 describe("TimeSyncPanel 覆盖表单（U12）", () => {
-  it("默认收起；展开后填值随软仿命令提交", async () => {
+  it("默认展开；填值随软仿命令提交", async () => {
     const user = userEvent.setup();
     const runTimesyncSim = vi.fn(async () => convergedResult());
     render(<TimeSyncPanel {...baseProps({ runTimesyncSim })} />);
-    expect(screen.queryByLabelText("软仿覆盖参数")).not.toBeInTheDocument();
+    // 覆盖参数在 idle 态默认展开。
+    expect(screen.getByLabelText("软仿覆盖参数")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /覆盖参数/ }));
-    fireEvent.change(screen.getByLabelText("振荡器类型"), { target: { value: "Random" } });
     fireEvent.change(screen.getByLabelText("漂移率步长（ppm）"), { target: { value: "0.5" } });
     fireEvent.change(screen.getByLabelText("变化间隔（ms）"), { target: { value: "25" } });
     fireEvent.change(screen.getByLabelText("仿真时长（s）"), { target: { value: "5" } });
 
     await user.click(screen.getByRole("button", { name: "开始仿真" }));
+    // 振荡器没改（默认 Random）→ 不发 oscillator，走后端默认。
     await waitFor(() =>
       expect(runTimesyncSim).toHaveBeenCalledWith("s1", {
-        oscillator: "Random",
         driftRateChangePpm: 0.5,
         changeIntervalMs: 25,
         simTimeS: 5,
@@ -345,7 +366,7 @@ describe("TimeSyncPanel 覆盖表单（U12）", () => {
     const user = userEvent.setup();
     const runTimesyncSim = vi.fn(async () => convergedResult());
     render(<TimeSyncPanel {...baseProps({ runTimesyncSim })} />);
-    await user.click(screen.getByRole("button", { name: /覆盖参数/ }));
+    // 默认展开，直接切振荡器类型。
     fireEvent.change(screen.getByLabelText("振荡器类型"), { target: { value: "Constant" } });
     // 切到 Constant 后只有漂移幅度，无步长/间隔。
     expect(screen.getByLabelText("漂移幅度（ppm）")).toBeInTheDocument();
@@ -375,7 +396,7 @@ describe("TimeSyncPanel 覆盖参数默认值可见（U6）", () => {
     render(<TimeSyncPanel {...baseProps()} />);
     await waitFor(() =>
       expect(
-        screen.getByText(/振荡器 Random · 步长 0.3ppm · 间隔 12.5ms · 时长 60s · 默认/),
+        screen.getByText(/振荡器 Random · 步长 0.3ppm · 间隔 50ms · 时长 60s · 默认/),
       ).toBeInTheDocument(),
     );
     expect(screen.queryByText(/已覆盖/)).not.toBeInTheDocument();
@@ -386,8 +407,7 @@ describe("TimeSyncPanel 覆盖参数默认值可见（U6）", () => {
     const runTimesyncSim = vi.fn(async () => convergedResult());
     render(<TimeSyncPanel {...baseProps({ runTimesyncSim })} />);
     await waitFor(() => expect(screen.getByText(/振荡器 Random/)).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: /覆盖参数/ }));
-    // 默认 Random：预填实值，步长输入框初值为默认 0.3。
+    // 默认展开 + Random：预填实值，步长输入框初值为默认 0.3。
     expect(screen.getByLabelText("漂移率步长（ppm）")).toHaveValue(0.3);
     fireEvent.change(screen.getByLabelText("漂移率步长（ppm）"), { target: { value: "0.5" } });
     expect(screen.getByText(/步长 0.5ppm（已覆盖）/)).toBeInTheDocument();
@@ -409,7 +429,7 @@ describe("TimeSyncPanel 覆盖参数默认值可见（U6）", () => {
     );
     await waitFor(() =>
       expect(
-        screen.getByText(/振荡器 Random · 步长 0.3ppm · 间隔 12.5ms · 时长 60s · 默认/),
+        screen.getByText(/振荡器 Random · 步长 0.3ppm · 间隔 50ms · 时长 60s · 默认/),
       ).toBeInTheDocument(),
     );
   });

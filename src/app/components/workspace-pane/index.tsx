@@ -843,7 +843,13 @@ export function WorkspacePane({
         aria-expanded={configPanelExpanded}
         onClick={onToggleConfigPanel}
       >
-        {configPanelExpanded ? "▾ 配置" : "▴ 配置"}
+        <span className="config-handle__grabber" aria-hidden="true" />
+        <span className="config-handle__label">
+          <span className="config-handle__chevron" aria-hidden="true">
+            {configPanelExpanded ? "▾" : "▴"}
+          </span>
+          配置
+        </span>
       </button>
     </section>
   );
