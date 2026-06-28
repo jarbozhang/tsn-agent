@@ -14,8 +14,8 @@ use sqlx::Row;
 
 use crate::inet_remote::{RemoteError, RemoteRunner, SimRunOutcome};
 use crate::inet_sim_bundle::{
-    DEFAULT_DRIFT_PPM, DEFAULT_SIM_TIME_S, OscillatorKind, SimNodeTiming, SimOverrides,
-    build_timesync_sim_bundle,
+    DEFAULT_CHANGE_INTERVAL_MS, DEFAULT_DRIFT_PPM, DEFAULT_DRIFT_RATE_CHANGE_PPM,
+    DEFAULT_SIM_TIME_S, OscillatorKind, SimNodeTiming, SimOverrides, build_timesync_sim_bundle,
 };
 
 const CALIBER_TIMESYNC_SIMULATED: &str = "timesync_simulated";
@@ -33,7 +33,12 @@ const CONVERGENCE_THRESHOLD_NS: f64 = 1000.0; // 1µs
 pub struct SimDefaults {
     /// 振荡器默认类型字符串（"Constant" / "Random"），与前端 SimOverrideForm.oscillator 对齐。
     pub oscillator: String,
+    /// Constant 用作恒定 driftRate；Random 不用（边界固定）。
     pub drift_ppm: f64,
+    /// Random 用：漂移率随机游走步长（ppm，晶振稳定度代理）。
+    pub drift_rate_change_ppm: f64,
+    /// Random 用：漂移率更新间隔（ms）。
+    pub change_interval_ms: f64,
     pub sim_time_s: f64,
 }
 
@@ -46,6 +51,8 @@ pub fn sim_defaults() -> SimDefaults {
     SimDefaults {
         oscillator: oscillator.to_string(),
         drift_ppm: DEFAULT_DRIFT_PPM,
+        drift_rate_change_ppm: DEFAULT_DRIFT_RATE_CHANGE_PPM,
+        change_interval_ms: DEFAULT_CHANGE_INTERVAL_MS,
         sim_time_s: DEFAULT_SIM_TIME_S,
     }
 }
@@ -60,11 +67,15 @@ pub fn get_sim_defaults() -> SimDefaults {
 #[serde(rename_all = "camelCase")]
 pub struct RunTimesyncSimRequest {
     pub session_id: String,
-    /// 覆盖表单（可选）：振荡器类型 / 漂移幅度 ppm / sim 时长 s。
+    /// 覆盖表单（可选）：振荡器类型 / 漂移幅度 ppm（Constant）/ 随机游走步长 + 间隔（Random）/ sim 时长 s。
     #[serde(default)]
     pub oscillator: Option<String>,
     #[serde(default)]
     pub drift_ppm: Option<f64>,
+    #[serde(default)]
+    pub drift_rate_change_ppm: Option<f64>,
+    #[serde(default)]
+    pub change_interval_ms: Option<f64>,
     #[serde(default)]
     pub sim_time_s: Option<f64>,
 }
@@ -293,6 +304,8 @@ pub async fn run_timesync_sim(
     let overrides = SimOverrides {
         oscillator: parse_oscillator(request.oscillator.as_deref()),
         drift_ppm: request.drift_ppm,
+        drift_rate_change_ppm: request.drift_rate_change_ppm,
+        change_interval_ms: request.change_interval_ms,
         sim_time_s: request.sim_time_s,
     };
     // 软仿走宿主机薄 HTTP 服务（单路径）。未配置地址 → 结构化提示，不弹 IPC 错。
@@ -637,17 +650,24 @@ mod tests {
     fn run_timesync_sim_request_deserializes_camelcase() {
         // 前端 invoke("run_timesync_sim", { request: {...} }) 的内层形态。
         let req: RunTimesyncSimRequest = serde_json::from_str(
-            r#"{"sessionId":"s1","oscillator":"Constant","driftPpm":50,"simTimeS":2.5}"#,
+            r#"{"sessionId":"s1","oscillator":"Random","driftRateChangePpm":0.3,"changeIntervalMs":25,"simTimeS":2.5}"#,
         )
         .unwrap();
         assert_eq!(req.session_id, "s1");
-        assert_eq!(req.oscillator.as_deref(), Some("Constant"));
-        assert_eq!(req.drift_ppm, Some(50.0));
+        assert_eq!(req.oscillator.as_deref(), Some("Random"));
+        assert_eq!(req.drift_rate_change_ppm, Some(0.3));
+        assert_eq!(req.change_interval_ms, Some(25.0));
         assert_eq!(req.sim_time_s, Some(2.5));
         // 覆盖参数全省略仍合法（走后端默认）。
         let bare: RunTimesyncSimRequest = serde_json::from_str(r#"{"sessionId":"s2"}"#).unwrap();
         assert_eq!(bare.session_id, "s2");
-        assert!(bare.oscillator.is_none() && bare.drift_ppm.is_none() && bare.sim_time_s.is_none());
+        assert!(
+            bare.oscillator.is_none()
+                && bare.drift_ppm.is_none()
+                && bare.drift_rate_change_ppm.is_none()
+                && bare.change_interval_ms.is_none()
+                && bare.sim_time_s.is_none()
+        );
     }
 
     #[test]
@@ -655,10 +675,20 @@ mod tests {
         let d = sim_defaults();
         assert_eq!(d.oscillator, "Random"); // OscillatorKind::default()
         assert_eq!(d.drift_ppm, DEFAULT_DRIFT_PPM);
+        assert_eq!(d.drift_rate_change_ppm, DEFAULT_DRIFT_RATE_CHANGE_PPM);
+        assert_eq!(d.change_interval_ms, DEFAULT_CHANGE_INTERVAL_MS);
         assert_eq!(d.sim_time_s, DEFAULT_SIM_TIME_S);
         let v = serde_json::to_value(&d).unwrap();
         assert!(v.get("oscillator").is_some());
         assert!(v.get("driftPpm").is_some(), "driftPpm camelCase");
+        assert!(
+            v.get("driftRateChangePpm").is_some(),
+            "driftRateChangePpm camelCase"
+        );
+        assert!(
+            v.get("changeIntervalMs").is_some(),
+            "changeIntervalMs camelCase"
+        );
         assert!(v.get("simTimeS").is_some(), "simTimeS camelCase");
         assert!(v.get("drift_ppm").is_none());
     }
@@ -1099,6 +1129,8 @@ mod tests {
         let overrides = SimOverrides {
             oscillator: OscillatorKind::Constant,
             drift_ppm: Some(50.0),
+            drift_rate_change_ppm: None,
+            change_interval_ms: None,
             sim_time_s: Some(2.5),
         };
         let result = run_timesync_sim_inner(&pool, "s1", &overrides, &mock)

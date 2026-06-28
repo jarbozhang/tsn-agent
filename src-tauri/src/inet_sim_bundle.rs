@@ -28,10 +28,14 @@ const MAX_DATARATE_MBPS: f64 = 100_000.0;
 pub const DEFAULT_DRIFT_PPM: f64 = 100.0;
 pub const DEFAULT_SIM_TIME_S: f64 = 60.0;
 const NOMINAL_TICK_LENGTH: &str = "10ns";
-/// RandomDriftOscillator 必填项：漂移率更新间隔（取自 INET gptp showcase）。
-const RANDOM_CHANGE_INTERVAL: &str = "12.5ms";
-/// 每次更新的漂移率增量（随机游走步长，showcase 默认）。
-const RANDOM_DRIFT_STEP_PPM: f64 = 1.0;
+/// RandomDriftOscillator 漂移率更新间隔默认（ms，取自 INET gptp showcase；可被覆盖表单改）。
+pub const DEFAULT_CHANGE_INTERVAL_MS: f64 = 12.5;
+/// RandomDriftOscillator 每次更新的漂移率增量默认（ppm，随机游走步长；可被覆盖表单改）。
+/// 这是晶振频率稳定度的代理——决定稳态同步残差；drift_ppm 反而被 gPTP 速率比补偿、几乎不影响偏差。
+pub const DEFAULT_DRIFT_RATE_CHANGE_PPM: f64 = 1.0;
+/// RandomDriftOscillator 漂移率随机游走的固定边界（ppm）：initialDriftRate 起点范围 + 上下限。
+/// Random 下不暴露给前端——边界对偏差≈0，仅防长仿真漂移率无界增长。
+const RANDOM_BOUND_PPM: f64 = 100.0;
 const LINK_LENGTH: &str = "10m";
 const SEED_SET: u32 = 0;
 
@@ -53,9 +57,13 @@ pub struct TimesyncSimBundle {
 pub struct SimOverrides {
     /// 振荡器类型：Constant（恒定漂移）/ Random（随机漂移，默认）。
     pub oscillator: OscillatorKind,
-    /// 漂移幅度（ppm，对称 uniform(-x, x)；Constant 则取常量 x）。缺省 100ppm。
+    /// 漂移幅度（ppm）：Constant 取作恒定 driftRate；Random 不用此值（边界固定）。缺省 100ppm。
     pub drift_ppm: Option<f64>,
-    /// sim 时长（秒）。缺省 1s。
+    /// Random 专用：漂移率随机游走步长（ppm，晶振稳定度代理）。缺省 1.0。
+    pub drift_rate_change_ppm: Option<f64>,
+    /// Random 专用：漂移率更新间隔（ms）。缺省 12.5。
+    pub change_interval_ms: Option<f64>,
+    /// sim 时长（秒）。缺省 60s。
     pub sim_time_s: Option<f64>,
 }
 
@@ -363,22 +371,28 @@ fn build_ini(
     match overrides.oscillator {
         OscillatorKind::Random => {
             // RandomDriftOscillator 用 initialDriftRate（非 driftRate，后者它没有 → 静默丢弃），
-            // changeInterval 必填（无默认，缺则 Cmdenv 停下等输入）。漂移率在 [-drift, drift] 内随机游走。
+            // changeInterval 必填（无默认，缺则 Cmdenv 停下等输入）。漂移率随机游走：
+            // 步长 driftRateChange + 节奏 changeInterval 决定稳态同步残差（晶振稳定度代理，可覆盖）；
+            // 起点/上下限用固定 RANDOM_BOUND_PPM（对偏差≈0、被 gPTP 补偿，仅防无界游走），不取 drift_ppm。
+            let drc = overrides
+                .drift_rate_change_ppm
+                .unwrap_or(DEFAULT_DRIFT_RATE_CHANGE_PPM);
+            let ci = overrides
+                .change_interval_ms
+                .unwrap_or(DEFAULT_CHANGE_INTERVAL_MS);
             ini.push_str("**.clock.oscillator.typename = \"RandomDriftOscillator\"\n");
+            ini.push_str(&format!("**.clock.oscillator.changeInterval = {ci}ms\n"));
             ini.push_str(&format!(
-                "**.clock.oscillator.changeInterval = {RANDOM_CHANGE_INTERVAL}\n"
+                "**.clock.oscillator.initialDriftRate = uniform(-{RANDOM_BOUND_PPM}ppm, {RANDOM_BOUND_PPM}ppm)\n"
             ));
             ini.push_str(&format!(
-                "**.clock.oscillator.initialDriftRate = uniform(-{drift}ppm, {drift}ppm)\n"
+                "**.clock.oscillator.driftRateChange = uniform(-{drc}ppm, {drc}ppm)\n"
             ));
             ini.push_str(&format!(
-                "**.clock.oscillator.driftRateChange = uniform(-{RANDOM_DRIFT_STEP_PPM}ppm, {RANDOM_DRIFT_STEP_PPM}ppm)\n"
+                "**.clock.oscillator.driftRateChangeLowerLimit = -{RANDOM_BOUND_PPM}ppm\n"
             ));
             ini.push_str(&format!(
-                "**.clock.oscillator.driftRateChangeLowerLimit = -{drift}ppm\n"
-            ));
-            ini.push_str(&format!(
-                "**.clock.oscillator.driftRateChangeUpperLimit = {drift}ppm\n"
+                "**.clock.oscillator.driftRateChangeUpperLimit = {RANDOM_BOUND_PPM}ppm\n"
             ));
         }
         OscillatorKind::Constant => {
@@ -655,6 +669,8 @@ mod tests {
         let ov = SimOverrides {
             oscillator: OscillatorKind::Constant,
             drift_ppm: Some(50.0),
+            drift_rate_change_ppm: None,
+            change_interval_ms: None,
             sim_time_s: Some(2.5),
         };
         let b = build_timesync_sim_bundle(&nodes, &links, "1", &timing, &ov, "s1", 1).unwrap();
@@ -662,5 +678,39 @@ mod tests {
         assert!(ini.contains("ConstantDriftOscillator"));
         assert!(ini.contains("driftRate = 50ppm"));
         assert!(ini.contains("sim-time-limit = 2.5s"));
+    }
+
+    #[test]
+    fn random_oscillator_drift_rate_change_and_interval_applied() {
+        let (nodes, links, timing) = sample();
+        let ov = SimOverrides {
+            oscillator: OscillatorKind::Random,
+            drift_ppm: Some(20.0), // Random 下忽略：边界用固定 RANDOM_BOUND_PPM，不取此值。
+            drift_rate_change_ppm: Some(0.3),
+            change_interval_ms: Some(25.0),
+            sim_time_s: None,
+        };
+        let b = build_timesync_sim_bundle(&nodes, &links, "1", &timing, &ov, "s1", 1).unwrap();
+        let ini = &b.bundle.omnetpp_ini;
+        assert!(ini.contains("RandomDriftOscillator"));
+        // 覆盖的步长与间隔进 ini。
+        assert!(
+            ini.contains("**.clock.oscillator.driftRateChange = uniform(-0.3ppm, 0.3ppm)"),
+            "{ini}"
+        );
+        assert!(
+            ini.contains("**.clock.oscillator.changeInterval = 25ms"),
+            "{ini}"
+        );
+        // drift_ppm(20) 不进 Random 的边界：起点/上下限固定 100ppm。
+        assert!(
+            ini.contains("initialDriftRate = uniform(-100ppm, 100ppm)"),
+            "{ini}"
+        );
+        assert!(ini.contains("driftRateChangeUpperLimit = 100ppm"), "{ini}");
+        assert!(
+            !ini.contains("20ppm"),
+            "Random 不该出现 drift_ppm=20：{ini}"
+        );
     }
 }

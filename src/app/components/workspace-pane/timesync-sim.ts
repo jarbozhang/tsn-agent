@@ -41,10 +41,12 @@ export interface SimResult {
   message?: string;
 }
 
-/** U12：软仿覆盖表单值（缺省走后端默认）。 */
+/** U12：软仿覆盖表单值（缺省走后端默认）。Constant 用 driftPpm；Random 用 driftRateChangePpm + changeIntervalMs。 */
 export interface SimOverrideForm {
   oscillator?: "Constant" | "Random";
   driftPpm?: number;
+  driftRateChangePpm?: number;
+  changeIntervalMs?: number;
   simTimeS?: number;
 }
 
@@ -52,6 +54,8 @@ export interface SimOverrideForm {
 export interface SimDefaults {
   oscillator: "Constant" | "Random";
   driftPpm: number;
+  driftRateChangePpm: number;
+  changeIntervalMs: number;
   simTimeS: number;
 }
 
@@ -59,6 +63,8 @@ export interface SimDefaults {
 export const FALLBACK_SIM_DEFAULTS: SimDefaults = {
   oscillator: "Random",
   driftPpm: 100,
+  driftRateChangePpm: 1,
+  changeIntervalMs: 12.5,
   simTimeS: 60,
 };
 
@@ -154,6 +160,8 @@ export async function invokeRunTimesyncSim(
       sessionId,
       oscillator: overrides.oscillator,
       driftPpm: overrides.driftPpm,
+      driftRateChangePpm: overrides.driftRateChangePpm,
+      changeIntervalMs: overrides.changeIntervalMs,
       simTimeS: overrides.simTimeS,
     },
   });

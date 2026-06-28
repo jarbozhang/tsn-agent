@@ -199,6 +199,8 @@ async fn backend_full_flow_initialize_to_soft_sim() {
     let overrides = SimOverrides {
         oscillator: OscillatorKind::Constant,
         drift_ppm: Some(50.0),
+        drift_rate_change_ppm: None,
+        change_interval_ms: None,
         sim_time_s: Some(2.5),
     };
 
