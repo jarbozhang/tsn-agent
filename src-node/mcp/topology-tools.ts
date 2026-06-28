@@ -642,7 +642,7 @@ export function createTimesyncToolRegistry(): TimesyncMcpToolDefinition[] {
         "(powers-of-two seconds in integer ms; hardware OpenSync requirement); measurePeriod is a power of two in ms (1..32768); " +
         "meanLinkDelayThresh is a power of two (1..128); offsetThreshold is an integer 0..4095; reportEnable is 0/1. " +
         "Recommended defaults (already applied on set_gm): syncPeriod=125, measurePeriod=2, reportEnable=1, " +
-        "meanLinkDelayThresh=64, offsetThreshold=1000.",
+        "meanLinkDelayThresh=64, offsetThreshold=200.",
       inputSchema: setParamsInputSchema(),
       handler: async (args) =>
         callSidecarTool("/db/timesync/set_params", args, {
@@ -759,6 +759,6 @@ export function setParamsInputSchema(): z.ZodRawShape {
       .min(0)
       .max(4095)
       .optional()
-      .describe("偏移阈值整数 0..4095（推荐 1000）"),
+      .describe("偏移阈值整数 0..4095（推荐 200）"),
   };
 }

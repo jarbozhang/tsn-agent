@@ -38,7 +38,7 @@ const DEFAULT_SYNC_PERIOD: i64 = 125;
 const DEFAULT_MEASURE_PERIOD: i64 = 2;
 const DEFAULT_REPORT_ENABLE: i64 = 1;
 const DEFAULT_MEAN_LINK_DELAY_THRESH: i64 = 64;
-const DEFAULT_OFFSET_THRESHOLD: i64 = 1000;
+const DEFAULT_OFFSET_THRESHOLD: i64 = 200;
 
 /// timesync_nodes 一行的同步参数（落库时缺省补默认）。
 #[derive(Debug, Clone)]

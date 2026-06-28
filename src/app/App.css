@@ -2598,9 +2598,13 @@ textarea:focus-visible {
 
 .sim-chart-threshold-band {
   fill: rgba(16, 185, 129, 0.08);
-  stroke: rgba(16, 185, 129, 0.35);
-  stroke-width: 1;
-  stroke-dasharray: 4 3;
+  stroke: none;
+}
+
+.sim-chart-threshold-line {
+  stroke: #e57373;
+  stroke-width: 1.4;
+  stroke-dasharray: 5 3;
 }
 
 .sim-chart-note {
