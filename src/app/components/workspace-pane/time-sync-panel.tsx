@@ -67,7 +67,7 @@ export function TimeSyncPanel({
 }: TimeSyncPanelProps) {
   // U12：覆盖表单状态（默认收起，跨软仿运行保留）。form 只存「用户覆盖」（在哪个键=已覆盖）；
   // 显示/预填用 form.x ?? defaults.x，提交也只发 form（不填走后端默认，保持原语义）。
-  const [formExpanded, setFormExpanded] = useState(false);
+  const [formExpanded, setFormExpanded] = useState(true);
   const [form, setForm] = useState<SimOverrideForm>({});
   // U6：软仿覆盖参数默认值（后端单一事实源）。undefined=加载中；取数失败回退兜底常量。
   const [defaults, setDefaults] = useState<SimDefaults | undefined>();
@@ -113,6 +113,7 @@ export function TimeSyncPanel({
       return;
     }
     softSimInflight.current = true;
+    setFormExpanded(false); // 开跑即收起覆盖参数（boss）
     // 运行前定格当前会话：await 期间用户切走时，迟到结果不得落进新会话的状态。
     const runSessionId = sessionId;
     setExplainState({ status: "idle" });
@@ -187,7 +188,11 @@ export function TimeSyncPanel({
                   className="btn primary"
                   disabled={softSimDisabled}
                   title={softSimTooltip}
-                  onClick={() => void handleSoftSim()}
+                  // 重新仿真：回初始态（CTA 居中 + 覆盖参数展开可重选），不直接重跑（仿硬件部署「重新部署」）。
+                  onClick={() => {
+                    onSimStateChange({ status: "idle" });
+                    setFormExpanded(true);
+                  }}
                 >
                   {running ? "仿真运行中…" : "开始仿真"}
                 </button>
@@ -206,7 +211,7 @@ export function TimeSyncPanel({
           {softFresh ? (
             <PanelCta
               label="开始仿真"
-              hint="把当前拓扑 + 时钟树组装成 INET gPTP 软仿，跑完取回各节点相对 GM 的收敛偏差。"
+              hint="运行 INET gPTP 软仿，取回各节点相对 GM 的收敛偏差。"
               onClick={() => void handleSoftSim()}
               disabled={softSimDisabled}
               title={softSimTooltip}
