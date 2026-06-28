@@ -263,14 +263,24 @@ function SimOverrideRegion({
   onChange: (form: SimOverrideForm) => void;
 }) {
   const eff = defaults ?? FALLBACK_SIM_DEFAULTS;
+  const currentOsc = form.oscillator ?? eff.oscillator;
+  const isConstant = currentOsc === "Constant";
   const oscOverridden = form.oscillator !== undefined;
   const driftOverridden = form.driftPpm !== undefined;
+  const drcOverridden = form.driftRateChangePpm !== undefined;
+  const ciOverridden = form.changeIntervalMs !== undefined;
   const simOverridden = form.simTimeS !== undefined;
-  const anyOverridden = oscOverridden || driftOverridden || simOverridden;
   const tag = (overridden: boolean) => (overridden ? "（已覆盖）" : "");
+  // 摘要 + anyOverridden 只看当前振荡器类型对应的参数（另一类型的残留覆盖后端会忽略，不计入）。
+  const paramSummary = isConstant
+    ? ` · 漂移 ${form.driftPpm ?? eff.driftPpm}ppm${tag(driftOverridden)}`
+    : ` · 步长 ${form.driftRateChangePpm ?? eff.driftRateChangePpm}ppm${tag(drcOverridden)}` +
+      ` · 间隔 ${form.changeIntervalMs ?? eff.changeIntervalMs}ms${tag(ciOverridden)}`;
+  const paramOverridden = isConstant ? driftOverridden : drcOverridden || ciOverridden;
+  const anyOverridden = oscOverridden || paramOverridden || simOverridden;
   const summary =
-    `振荡器 ${form.oscillator ?? eff.oscillator}${tag(oscOverridden)}` +
-    ` · 漂移 ${form.driftPpm ?? eff.driftPpm}ppm${tag(driftOverridden)}` +
+    `振荡器 ${currentOsc}${tag(oscOverridden)}` +
+    paramSummary +
     ` · 时长 ${form.simTimeS ?? eff.simTimeS}s${tag(simOverridden)}` +
     `${anyOverridden ? "" : " · 默认"}`;
 
@@ -289,7 +299,7 @@ function SimOverrideRegion({
           <label className="sim-field">
             <span>振荡器类型</span>
             <select
-              value={form.oscillator ?? eff.oscillator}
+              value={currentOsc}
               onChange={(event) =>
                 onChange({ ...form, oscillator: event.target.value as "Constant" | "Random" })
               }
@@ -298,20 +308,55 @@ function SimOverrideRegion({
               <option value="Random">Random</option>
             </select>
           </label>
-          <label className="sim-field">
-            <span>漂移幅度（ppm）</span>
-            <input
-              type="number"
-              inputMode="decimal"
-              value={form.driftPpm ?? eff.driftPpm}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  driftPpm: event.target.value === "" ? undefined : Number(event.target.value),
-                })
-              }
-            />
-          </label>
+          {isConstant ? (
+            <label className="sim-field">
+              <span>漂移幅度（ppm）</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                value={form.driftPpm ?? eff.driftPpm}
+                onChange={(event) =>
+                  onChange({
+                    ...form,
+                    driftPpm: event.target.value === "" ? undefined : Number(event.target.value),
+                  })
+                }
+              />
+            </label>
+          ) : (
+            <>
+              <label className="sim-field">
+                <span>漂移率步长（ppm）</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={form.driftRateChangePpm ?? eff.driftRateChangePpm}
+                  onChange={(event) =>
+                    onChange({
+                      ...form,
+                      driftRateChangePpm:
+                        event.target.value === "" ? undefined : Number(event.target.value),
+                    })
+                  }
+                />
+              </label>
+              <label className="sim-field">
+                <span>变化间隔（ms）</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={form.changeIntervalMs ?? eff.changeIntervalMs}
+                  onChange={(event) =>
+                    onChange({
+                      ...form,
+                      changeIntervalMs:
+                        event.target.value === "" ? undefined : Number(event.target.value),
+                    })
+                  }
+                />
+              </label>
+            </>
+          )}
           <label className="sim-field">
             <span>仿真时长（s）</span>
             <input
