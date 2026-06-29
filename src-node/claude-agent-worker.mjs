@@ -705,50 +705,19 @@ export function buildPrompt(
           : JSON.stringify(stageRunnerInput, null, 2)
       }\n`
     : "";
-  // Phase B-β2：worker 只服务拓扑阶段（其余阶段由 adapter 本地拦截），
-  // stage runner / flow-template 指引已删除。
-  const structuredResultInstructions = `结构化结果回传：
-- 当前阶段如果需要生成或修改拓扑，必须优先使用 tsn_topology MCP 工具。
-- 从 0 初始化拓扑时，先通过 topology.describe_templates 理解模板，再调用 topology.initialize（它会直接写入工程数据库并返回 mutationId）；已有拓扑编辑时，调用 topology.inspect / topology.apply_operations。
-- tsn_topology MCP 工具结果已是 sidecar 结构化领域响应；worker 会自动解析结果并合成 WorkflowStageResult。
-- 不要写 TSN_AGENT_STAGE_RESULT_PATH，不要让模型复述完整拓扑 JSON，不要从 summary 文本反解析拓扑。
-- TSN_AGENT_SKILL_OUTPUT_DIR=${skillOutputDir}`;
-  const executionInstructions = `执行顺序要求：
-1. 先完成 topology MCP 工具调用，确保 worker 能捕获 trusted topology result。
-2. 再生成左侧对话框要展示给用户的中文内容，不要输出 JSON。`;
-  const interactionInstructions = `交互规则：
-1. 不要调用 AskUserQuestion（运行环境无终端 UI，已禁用）；需要用户决策时在中文回复里列数字编号选项。
-2. 选项编号用数字、跨轮保持指代稳定，已采纳的编号不复用为新含义。
-3. 只提供当前工具/模板能落地的选项，不提供后端做不到的选项。
-4. 一轮聚焦一个决策点；次要参数有合理默认值时给默认并允许用户一句话确认。
-5. 用户的简短确认（如"速率够用"）不需要调用工具，直接推进。
-6. 增量修改已确认的拓扑时，先 topology.inspect 查 rows 再用 topology.apply_operations 构造原子操作；不要用 initialize 重建（会重排节点命名）。
-7. 不要把 inspect 返回的 rows / stylesJson 原文复述进中文回复。`;
-  const failureInstruction =
-    "6. 如果当前阶段是拓扑，不能只返回文字说明；没有 trusted topology result 就不要声称阶段已生成。";
-  const fileInstruction =
-    "4. 不要修改仓库文件；不要写 TSN_AGENT_STAGE_RESULT_PATH；不要输出 Markdown 表格。";
+  // 已由 SKILL.md / 系统骨架覆盖流程与规则；此处只保留运行时环境独有的约束。
+  const runtimeGuardrails = [
+    `TSN_AGENT_SKILL_OUTPUT_DIR=${skillOutputDir}`,
+    `不要调用 AskUserQuestion(不兼容),需要用户决策时在中文回复里列数字编号选项。`,
+    `先完成 topology MCP 工具调用,再生成中文回复。`,
+    `不要写 TSN_AGENT_STAGE_RESULT_PATH;不要复述完整拓扑 JSON / rows / stylesJson 原文。`,
+    `没有 trusted topology result 就不要声称阶段已生成。`,
+  ].join("\n");
 
-  return `用户正在通过 TSN Agent 桌面应用配置一个 TSN 网络。
-${contextBlock}
-${stageRunnerInputBlock}
+  return `用户通过 TSN Agent 桌面应用配置 TSN 网络。${contextBlock}${stageRunnerInputBlock}
+用户需求：${userPrompt}
 
-用户原始需求：
-${userPrompt}
-
-${structuredResultInstructions}
-
-${executionInstructions}
-
-${interactionInstructions}
-
-回复要求：
-1. 用新手能理解的语言解释你识别到了哪些拓扑规模和默认假设。
-2. 只描述当前阶段已经完成或正在等待确认的内容；不要提前宣称后续阶段的控制流、规划器输入或导出文件已经生成。
-3. 固定阶段顺序是“拓扑 -> 时间同步 -> 流量规划 -> 配置下发”。如果上下文显示当前阶段是时间同步，只能说明同步假设和等待确认，不能引导用户配置控制流。
-${fileInstruction}
-5. 如果需求缺少关键参数（规模 / 拓扑形态 / 要不要冗余），先用中文编号选项问清楚（把推荐默认值列为其中一个选项、标「推荐」），别默默套默认值直接生成。用户只给了拓扑名或组网名（如双平面双跳、五跳线性）时，场景模板 / preset 补全的规模和特征是你替他做的假设，也要先列出来确认，不算「信息齐了」；只有规模、形态、冗余都显式说全了才直接生成。
-${failureInstruction}`;
+${runtimeGuardrails}`;
 }
 
 async function createStageResultPath() {

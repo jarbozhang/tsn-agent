@@ -137,8 +137,6 @@ describe("claude-agent-worker", () => {
       // U3：仿真「不得声称」已移出骨架（收敛到 SKILL.md 指引 + sanitizeClaudeAssistantText 输出守卫）。
       expect(input.options.systemPrompt).not.toContain("不能声称已启动仿真");
       expect(input.prompt).toContain("TSN_AGENT_SKILL_OUTPUT_DIR");
-      expect(input.prompt).toContain("tsn_topology MCP 工具");
-      expect(input.prompt).not.toContain("--stage topology");
       expect(input.prompt).toContain("不要写 TSN_AGENT_STAGE_RESULT_PATH");
       expect(input.prompt).not.toContain("必须写入 TSN_AGENT_STAGE_RESULT_PATH");
       expect(input.options.env.TSN_AGENT_SKILL_OUTPUT_DIR).toContain("skill-output");
@@ -1403,24 +1401,17 @@ describe("claude-agent-worker", () => {
     expect(prompt).toContain("历史上下文");
     expect(prompt).toContain("阶段结构化输入");
     expect(prompt).toContain('"scenarioConfigId": "generic-tsn"');
-    expect(prompt).toContain("只描述当前阶段已经完成或正在等待确认的内容");
-    expect(prompt).toContain("拓扑 -> 时间同步 -> 流量规划 -> 配置下发");
-    // U3：仿真「不得声称」从 buildPrompt 移出（SKILL.md 指引 + sanitize 守卫承载）。
+    // 以下领域流程/交互细节已收敛到 SKILL.md 与骨架（去重、减 token），buildPrompt
+    // 只保留运行时独有的环境约束（output dir、工具限制、不要写路径、trusted result 闸）。
     expect(prompt).not.toContain("当前应用没有接入 OMNeT++/远程服务器仿真 runner");
     expect(prompt).not.toContain("/tmp/result.json");
     expect(prompt).toContain("/tmp/skill-output");
-    expect(prompt).toContain("tsn_topology MCP 工具");
     expect(prompt).toContain("trusted topology result");
     expect(prompt).not.toContain("--stage topology");
     expect(prompt).not.toContain("然后继续生成控制流模板和导出文件");
-    // 交互工学规则（plan 2026-06-05-001 U5）。
     expect(prompt).toContain("不要调用 AskUserQuestion");
-    expect(prompt).toContain("选项编号用数字、跨轮保持指代稳定");
-    // buildPrompt 仍承载部分正确性提示（initialize 仅用于从 0 生成/换模板）。
-    expect(prompt).toContain("不要用 initialize 重建");
-    // U3：重试「复用同一 batch」去重——只留 SYSTEM_PROMPT_SKELETON 一份权威，buildPrompt 不再重复。
+    // 以下领域细节已移出 buildPrompt（SKILL.md + 骨架承载）。
     expect(prompt).not.toContain("逐字节复用");
-    expect(prompt).toContain("不要把 inspect 返回的 rows");
     // U1：与 SKILL.md 重复的领域指引已移出 buildPrompt（由注入的 SKILL.md 承载）。
     // 默认互联公式（N*M+(N-1)）。
     expect(prompt).not.toContain("N*M");
