@@ -209,6 +209,7 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     // 默认模型（如 /model 切到 worker 环境不可用的型号即整轮失败）——产品运行时
     // 不耦合个人偏好。
     model: "claude-sonnet-4-6",
+    alwaysThinkingEnabled: false,
     permissionMode: "dontAsk",
     tools: { type: "preset", preset: "claude_code" },
     allowedTools: buildAllowedToolsForStage(
