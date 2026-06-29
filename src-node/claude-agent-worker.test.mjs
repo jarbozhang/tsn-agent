@@ -108,7 +108,7 @@ describe("claude-agent-worker", () => {
       ]);
       expect(input.options.settingSources).toEqual(["user", "project"]);
       expect(input.options.skills).toEqual(["tsn-topology", "tsn-time-sync", "tsn-flow-planning"]);
-      expect(input.options.tools).toEqual({ type: "preset", preset: "claude_code" });
+      expect(input.options.tools).toEqual(["Read", "Skill"]);
       expect(input.options.allowedTools).toEqual([
         "Skill",
         "Read",

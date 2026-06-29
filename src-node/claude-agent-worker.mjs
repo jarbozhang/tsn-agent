@@ -211,7 +211,10 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     model: "claude-sonnet-4-6",
     alwaysThinkingEnabled: false,
     permissionMode: "dontAsk",
-    tools: { type: "preset", preset: "claude_code" },
+    // 不拆 preset：避免把 20+ 内置工具 schema 全发给 API（~15K tokens 白送）。
+    // 当前阶段代理只用 Read/Skill 两个内置工具，其余靠 MCP server 工具
+    // （mcpServers 自动注入 schema，不受此列表影响，不需 listed here）。
+    tools: ["Read", "Skill"],
     allowedTools: buildAllowedToolsForStage(
       resolvedOptions.stageRunnerInput,
       Boolean(topologyMcpConfig),
