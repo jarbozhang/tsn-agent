@@ -134,7 +134,8 @@ fn link_rate(link: &VerifyLink) -> u32 {
 
 /// 端口→ethN 映射（KTD3 A）：每节点端口集合按库端口号升序取下标。
 /// 返回 `mid → (db_port → k)`。同一节点所有出现过的端口（来自 src_port/dst_port）参与排序。
-fn build_port_eth_map(links: &[VerifyLink]) -> BTreeMap<String, BTreeMap<i64, usize>> {
+/// pub(crate)：路由推导（flow_route，U5）与 bundle 共用同一张门号事实源，绝不复制（KTD3）。
+pub(crate) fn build_port_eth_map(links: &[VerifyLink]) -> BTreeMap<String, BTreeMap<i64, usize>> {
     // 先收集每节点用到的库端口号（去重、升序由 BTreeMap 保证）。
     let mut node_ports: BTreeMap<String, std::collections::BTreeSet<i64>> = BTreeMap::new();
     for link in links {
