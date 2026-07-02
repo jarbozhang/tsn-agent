@@ -31,6 +31,14 @@ export const TIMESYNC_MCP_ALLOWED_TOOLS = [
   "mcp__tsn_topology__timesync_inspect",
   "mcp__tsn_topology__timesync_undo",
 ];
+// flow 工具同住 tsn_topology stdio server，仅在 flow-template 阶段放行（见
+// buildAllowedToolsForStage）。worker 是纯 ESM、不能 import TS registry，故此处镜像
+// topology-tools.ts 的 FLOW_MCP_ALLOWED_TOOLS；测试断言两者一致防漂移。
+export const FLOW_MCP_ALLOWED_TOOLS = [
+  "mcp__tsn_topology__flow_add_stream",
+  "mcp__tsn_topology__flow_inspect",
+  "mcp__tsn_topology__flow_remove_stream",
+];
 
 // U1（独立编排能力）：切阶段工具独立于四个阶段，用 SDK in-process 自定义工具承载，
 // 不连 sidecar、不写状态、不做合法性判断（合法性在应用层 agent-adapter）。它只把
@@ -532,6 +540,13 @@ export function buildAllowedToolsForStage(stageRunnerInput, hasTopologyMcpConfig
     ...(hasTopologyMcpConfig && stage === "time-sync"
       ? ["mcp__tsn_topology__topology_inspect"]
       : []),
+    // U3：flow 工具只在流量规划阶段开放（同住 tsn_topology stdio server，故同门控
+    // hasTopologyMcpConfig）。录流写库走 sidecar + verify_flow 闸，不经 stageResult 对账。
+    ...(hasTopologyMcpConfig && stage === "flow-template" ? FLOW_MCP_ALLOWED_TOOLS : []),
+    // flow 阶段同样放行只读 topology_inspect：录流要把 talker/listener 节点名解析成 mid。
+    ...(hasTopologyMcpConfig && stage === "flow-template"
+      ? ["mcp__tsn_topology__topology_inspect"]
+      : []),
     // U6：撤销工具只在拓扑阶段开放（不像 request_stage_change 全阶段）——本期只撤 topology，
     // 在时间同步 / 流量规划阶段撤销会错误回退拓扑。撤销 in-process 不依赖拓扑 stdio server，
     // 故只门控 stage（不门控 hasTopologyMcpConfig）。time-sync 阶段撤销走 timesync.undo 工具。
@@ -563,7 +578,9 @@ function skillDirForStage(stageRunnerInput) {
     isRecord(stageRunnerInput) && typeof stageRunnerInput.stage === "string"
       ? stageRunnerInput.stage
       : undefined;
-  return stage === "time-sync" ? "tsn-time-sync" : "tsn-topology";
+  if (stage === "time-sync") return "tsn-time-sync";
+  if (stage === "flow-template") return "tsn-flow-planning";
+  return "tsn-topology";
 }
 
 async function buildSystemPromptForStage(stageRunnerInput, skillRoot) {
