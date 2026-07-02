@@ -561,7 +561,7 @@ fn empty_result() -> SimResult {
     }
 }
 
-async fn load_topology(
+pub(crate) async fn load_topology(
     pool: &sqlx::Pool<sqlx::Sqlite>,
     session_id: &str,
 ) -> Result<
@@ -608,7 +608,7 @@ async fn load_topology(
     Ok((nodes, links))
 }
 
-async fn load_timing(
+pub(crate) async fn load_timing(
     pool: &sqlx::Pool<sqlx::Sqlite>,
     session_id: &str,
 ) -> Result<Vec<SimNodeTiming>, String> {

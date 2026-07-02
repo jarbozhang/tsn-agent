@@ -2,6 +2,7 @@ mod backend_e2e;
 mod commands;
 mod db;
 mod eval_command;
+mod flow_plan_command;
 mod flow_reconcile;
 mod flow_route;
 mod flow_sidecar_routes;
@@ -116,6 +117,7 @@ pub fn run() {
             verify_time_sync,
             inet_sim_command::run_timesync_sim,
             inet_sim_command::get_sim_defaults,
+            flow_plan_command::plan_tas,
             hardware_api_config::get_hardware_api_config,
             hardware_api_config::set_hardware_api_config,
             inet_sim_http_config::get_inet_sim_http_config,
