@@ -13,6 +13,7 @@ import {
 } from "../project/project-state";
 import type { ChatMessage, TsnSession } from "../sessions/session-repository";
 import { redactSecretsInValue } from "../sessions/session-repository";
+import type { TimesyncSnapshot } from "../sessions/timesync-snapshot";
 import {
   countEndSystems,
   countSwitches,
@@ -214,11 +215,12 @@ export async function runTsnAgent(
       sessionId,
       userIntent: effectiveIntent,
     });
+    const finalWorkflow = await flagTimeSyncReadyIfPersisted(application.workflow, sessionId);
 
     return {
       events: application.events,
-      workflow: application.workflow,
-      assistantText: sanitizeClaudeAssistantText(claude.assistantText, application.workflow),
+      workflow: finalWorkflow,
+      assistantText: sanitizeClaudeAssistantText(claude.assistantText, finalWorkflow),
       mode: "claude",
       claudeSessionId: claude.sessionId,
       topologyMutationId: application.topologyMutationId,
@@ -830,6 +832,44 @@ function buildConversationContext(
     "工程状态：",
     topologySummary,
   ].join("\n");
+}
+
+// U9 修复：进入时间同步阶段时状态为 current（先等用户指定 GM）。GM 一经 set_gm 落库——
+// 时钟同步树即生成（timesync_domain.gm_mid 非空）——本轮结束时把阶段翻成 waiting_confirmation，
+// 「确认并继续」按钮据此显示（镜像拓扑：产出工作的那一轮进入待确认，确认链/显示/verify 闸全复用）。
+// GM 只经对话调 set_gm 设置（面板无此入口），故翻转放在回合末尾即覆盖全部路径。
+async function flagTimeSyncReadyIfPersisted(
+  workflow: WorkflowState,
+  sessionId: string | undefined,
+): Promise<WorkflowState> {
+  if (workflow.currentStep !== "time-sync" || workflow.stages["time-sync"].status !== "current") {
+    return workflow;
+  }
+
+  const gmMid = await fetchTimesyncGmMid(sessionId);
+  if (!gmMid) {
+    return workflow;
+  }
+
+  return recordStageResult(workflow, {
+    step: "time-sync",
+    summary: "时钟同步树已生成，确认无误后点「确认并继续」进入流量规划阶段。",
+  });
+}
+
+async function fetchTimesyncGmMid(sessionId: string | undefined): Promise<string | undefined> {
+  if (!sessionId) {
+    return undefined;
+  }
+
+  try {
+    const snapshot = await invoke<TimesyncSnapshot>("query_timesync", {
+      request: { sessionId },
+    });
+    return snapshot.domain?.gmMid ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function fetchTopologySnapshot(

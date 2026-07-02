@@ -30,6 +30,7 @@ function mockTauriCommands(
     claude?: Record<string, unknown>;
     claudeError?: unknown;
     topology?: Record<string, unknown>;
+    timesync?: Record<string, unknown>;
     verify?: Record<string, unknown>;
     verifyError?: unknown;
     verifyTimeSync?: Record<string, unknown>;
@@ -39,6 +40,11 @@ function mockTauriCommands(
   invokeMock.mockImplementation(async (command: string) => {
     if (command === "query_topology") {
       return options.topology ?? { sessionId: "session-1", nodes: [], links: [] };
+    }
+
+    if (command === "query_timesync") {
+      // 默认无 GM（domain: null）——时钟同步树尚未生成，不触发阶段翻转。
+      return options.timesync ?? { sessionId: "session-1", domain: null, nodes: [] };
     }
 
     if (command === "verify_topology") {
@@ -99,6 +105,25 @@ function timeSyncWaitingWorkflow(): WorkflowState {
         step: "time-sync",
         status: "waiting_confirmation",
         summary: "时间同步默认值。",
+      },
+    },
+  };
+}
+
+// 进入时间同步阶段的初始态：拓扑已确认、time-sync 为 current（等用户指定 GM）。
+function timeSyncCurrentWorkflow(): WorkflowState {
+  const base = createInitialWorkflowState();
+  return {
+    ...base,
+    currentStep: "time-sync",
+    availableActions: ["confirm-stage"],
+    stages: {
+      ...base.stages,
+      topology: { step: "topology", status: "confirmed" },
+      "time-sync": {
+        step: "time-sync",
+        status: "current",
+        summary: "等待指定时钟主节点（GM）。",
       },
     },
   };
@@ -775,6 +800,43 @@ describe("runTsnAgent", () => {
     expect(result.assistantText).toContain("GM");
     // 仍可点「确认并继续」（current 非 topology 阶段动作含 confirm-stage），由 U6 校验闸把关。
     expect(result.workflow.availableActions).toContain("confirm-stage");
+  });
+
+  it("flips time-sync current -> waiting_confirmation once the clock tree is persisted (GM set)", async () => {
+    enableTauriRuntime();
+    // set_gm 落库后 query_timesync 返回 gm_mid（时钟同步树已生成）。
+    mockTauriCommands({
+      claude: { assistantText: "已把 GM 设为 ES-1。", sessionId: "claude-session-gm" },
+      timesync: { sessionId: "session-1", domain: { gmMid: "0" }, nodes: [] },
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "把 GM 设成 ES-1",
+      session: sessionWithWorkflow(timeSyncCurrentWorkflow()),
+    });
+
+    expect(result.mode).toBe("claude");
+    // 时钟树落库 → 阶段翻成 waiting_confirmation，「确认并继续」按钮据此显示。
+    expect(result.workflow.stages["time-sync"].status).toBe("waiting_confirmation");
+    expect(result.workflow.availableActions).toContain("confirm-stage");
+  });
+
+  it("keeps time-sync current when the clock tree is not yet persisted (GM unset)", async () => {
+    enableTauriRuntime();
+    // query_timesync 默认 domain: null（GM 未设）——不翻转，按钮不显示。
+    mockTauriCommands({
+      claude: { assistantText: "请指定 GM。", sessionId: "claude-session-nogm" },
+    });
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "同步周期设成 125ms",
+      session: sessionWithWorkflow(timeSyncCurrentWorkflow()),
+    });
+
+    expect(result.mode).toBe("claude");
+    expect(result.workflow.stages["time-sync"].status).toBe("current");
   });
 
   it("shows the offline notice when the confirm button advances into a gray stage (U4 regression)", async () => {
