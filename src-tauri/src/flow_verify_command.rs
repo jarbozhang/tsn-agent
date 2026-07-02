@@ -575,4 +575,91 @@ mod tests {
             assert_eq!(r.status, "no_plan");
         });
     }
+
+    // ---------- U10 端到端接缝：录流 → plan_tas → verify_tas（mock 双端）----------
+
+    struct MockPlan {
+        sca: String,
+    }
+    impl crate::inet_sim_http::InetSimPlanClient for MockPlan {
+        fn plan_gcl(
+            &self,
+            _base: &str,
+            _b: &crate::inet_remote::InetBundle,
+        ) -> Result<crate::inet_sim_http::HttpPlanResult, String> {
+            Ok(crate::inet_sim_http::HttpPlanResult {
+                exit_code: 0,
+                output_tail: "ok".into(),
+                sca_gcl: Some(self.sca.clone()),
+                solver: Some("Z3".into()),
+            })
+        }
+    }
+
+    /// R18/R19 CI 接缝：一条 ST 流 record → plan_tas_inner 写 flow_plans → verify_tas_inner 读回
+    /// pin 判决。证 plan→verify 经 flow_plans 的接缝（durations JSON 往返、node=mid、stream_seq=0）。
+    #[test]
+    fn e2e_plan_then_verify_pipeline() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            seed(&pool).await;
+            // 清掉 seed 写的 flow_plans——让 plan_tas 自己综合落库（真接缝）。
+            sqlx::query("DELETE FROM flow_plans WHERE session_id='s1'")
+                .execute(&pool)
+                .await
+                .unwrap();
+
+            // plan：mock 服务回 sw1 gate 的 .sca（ned sw1 → mid 0）。
+            let plan_client = MockPlan {
+                sca: "par N.sw1.eth[1].macLayer.queue.transmissionGate[0] initiallyOpen true\npar N.sw1.eth[1].macLayer.queue.transmissionGate[0] offset 0s\npar N.sw1.eth[1].macLayer.queue.transmissionGate[0] durations \"[300us, 700us]\"\n".into(),
+            };
+            let pr =
+                crate::flow_plan_command::plan_tas_inner(&pool, "s1", &plan_client, "http://x")
+                    .await
+                    .unwrap();
+            assert_eq!(pr.status, "ok", "{pr:?}");
+            assert_eq!(pr.gate_count, 1);
+
+            // flow_plans 落库（plan 写的）→ verify 读回 pin。
+            let csv = format!(
+                "{}TsnAgentFlowTasNetwork.es2.app[0].sink,packetLifeTime:vector,0 0 0,0.0001 0.00012 0.00011\nTsnAgentFlowTasNetwork.es2.app[0].sink,packetJitter:vector,0 0 0,0.0000002 0.0000003 0.0000001\n",
+                header()
+            );
+            let vr = verify_tas_inner(
+                &pool,
+                "s1",
+                &MockRunner {
+                    outcome: outcome(Some(&csv)),
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(vr.status, "ok", "{vr:?}");
+            assert!(vr.per_stream[0].pass);
+        });
+    }
+
+    /// R24 对照：故意坏 GCL（碰撞致丢包）软仿判 FAIL——证闸能区分好坏排程。
+    #[test]
+    fn e2e_bad_gcl_fails_verification() {
+        tauri::async_runtime::block_on(async {
+            let pool = fresh_pool().await;
+            seed(&pool).await; // seed 已写一条 GCL（视作坏排程占位）。
+            // 坏排程的软仿表现：收 < 发（碰撞丢包）。
+            let csv = format!(
+                "{}TsnAgentFlowTasNetwork.es2.app[0].sink,packetLifeTime:vector,0,0.0001\nTsnAgentFlowTasNetwork.es2.app[0].sink,packetJitter:vector,0,0.0000002\n",
+                header()
+            );
+            let vr = verify_tas_inner(
+                &pool,
+                "s1",
+                &MockRunner {
+                    outcome: outcome(Some(&csv)),
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(vr.status, "fail", "坏 GCL 应判 FAIL：{vr:?}");
+        });
+    }
 }
