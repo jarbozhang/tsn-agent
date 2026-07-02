@@ -800,7 +800,8 @@ describe("runTsnAgent", () => {
     // time-sync 前进确认现在先过校验闸（调 verify_time_sync），不再是完全 invoke-free。
     expect(invokeMock.mock.calls.some(([command]) => command === "verify_time_sync")).toBe(true);
     expect(result.workflow.currentStep).toBe("flow-template");
-    expect(result.assistantText).toContain("暂时下线");
+    // U4：确认时间同步 → 进入流量规划阶段，走录流引导（不再「暂时下线」）。
+    expect(result.assistantText).toContain("进入流量规划阶段");
   });
 
   it("sends a typed confirmation word to the model instead of regex-matching it (U4)", async () => {
@@ -842,6 +843,31 @@ describe("runTsnAgent", () => {
         stageRunnerInput: expect.objectContaining({ stage: "flow-template" }),
       }),
     });
+  });
+
+  it("does not rewrite legitimate soft-sim talk in the flow-template stage (U4/R1)", async () => {
+    enableTauriRuntime();
+    mockTauriCommands({
+      claude: {
+        // 含「远程…仿真」——非 flow 阶段会命中仿真否认守卫被改写；flow 阶段应放行。
+        assistantText: "流录好了，去面板点软仿验证，会在宿主机远程跑仿真实测抖动和丢包。",
+        sessionId: "cs-flow-sim",
+      },
+    });
+    const workflow = createInitialWorkflowState();
+    workflow.currentStep = "flow-template";
+    workflow.stages.topology = { step: "topology", status: "confirmed" };
+    workflow.stages["time-sync"] = { step: "time-sync", status: "confirmed" };
+    workflow.stages["flow-template"] = { step: "flow-template", status: "current" };
+    const { runTsnAgent } = await import("./agent-adapter");
+
+    const result = await runTsnAgent({
+      userIntent: "录好了",
+      session: sessionWithWorkflow(workflow),
+    });
+
+    expect(result.assistantText).toContain("软仿验证");
+    expect(result.assistantText).not.toContain("还没有接入");
   });
 
   it("proposes a rollback to topology when the model requests it from an offline stage (U4)", async () => {
