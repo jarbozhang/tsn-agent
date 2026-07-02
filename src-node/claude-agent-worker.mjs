@@ -212,12 +212,16 @@ export async function runClaude(userPrompt, options = {}, queryFn = query) {
     cwd,
     // 打包态指向随 app 分发的 claude binary；dev 态 undefined → SDK 默认用 node_modules 平台包。
     ...(claudeBinaryPath ? { pathToClaudeCodeExecutable: claudeBinaryPath } : {}),
-    // 隔离模式（不读任何文件系统 settings）：
+    // 只保留 "project"，砍掉 "user"：
     // - 不含 "user" → 不继承开发者个人 Claude Code 的 enabledPlugins（compound-engineering/
-    //   gstack 等几十个 skill/agent 描述会灌进工具 schema）与个人默认模型/偏好；
-    // - 不含 "project" → 不加载项目 AGENTS.md/CLAUDE.md（那是给开发者看的，非运行时 agent 所需）。
-    // 运行时依赖全部显式传入：model 下方 pin、mcpServers/skills/env 各自显式声明，不靠 settings 文件。
-    settingSources: [],
+    //   gstack 等几十个 skill/agent 描述会灌进工具 schema）与个人默认模型/偏好——这是 token 大头；
+    //   debug 实测已确认：Found 0 enabled plugins / Total plugin skills loaded: 0。
+    // - 保留 "project" → SDK 才会从 .claude/skills/ 发现并注册 tsn-topology/tsn-time-sync/
+    //   tsn-flow-planning（下方 skills 数组只是「启用哪些」的过滤白名单，不负责加载；关掉
+    //   "project" 后 Skill 工具会报 Unknown skill）。debug 实测：Loaded 3 unique skills (project: 3)。
+    // - 项目 AGENTS.md/CLAUDE.md 不会进 prompt：memory 注入靠 claude_code preset，而本 worker
+    //   用的是自定义字符串 systemPrompt（见下方 systemPrompt），preset 未启用 → memory 不注入。
+    settingSources: ["project"],
     model: "claude-sonnet-4-6",
     permissionMode: "dontAsk",
     // 只发 agent 实际用到的内置工具，不用整套 claude_code 预设（预设会把 Bash/Write/
