@@ -309,6 +309,7 @@ mod tests {
             mid: mid.to_string(),
             name: None,
             node_type: Some("switch".to_string()),
+            queue_count: 8,
         }
     }
 

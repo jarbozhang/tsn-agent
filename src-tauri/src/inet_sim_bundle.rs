@@ -143,6 +143,8 @@ pub struct SimNodeTiming {
 struct MappedNode {
     ned_name: String,
     ned_type: &'static str,
+    /// 节点队列数（来自 topology_nodes.queue_count，默认 8）= INET egress numTrafficClasses。
+    queue_count: i64,
 }
 
 fn map_node_type(node_type: Option<&str>) -> Option<&'static str> {
@@ -240,6 +242,7 @@ fn map_and_validate<'a>(
                     MappedNode {
                         ned_name: format!("sw{sw_seq}"),
                         ned_type: "TsnSwitch",
+                        queue_count: node.queue_count,
                     },
                 );
             }
@@ -250,6 +253,7 @@ fn map_and_validate<'a>(
                     MappedNode {
                         ned_name: format!("es{es_seq}"),
                         ned_type,
+                        queue_count: node.queue_count,
                     },
                 );
             }
@@ -595,29 +599,26 @@ pub(crate) fn plan_flow_traffic(
     let mut order: Vec<usize> = (0..streams.len()).collect();
     order.sort_by_key(|&i| streams[i].stream_seq);
 
-    // distinct pcp 升序 → gate_index；class 名取该 pcp 首条流的 class（verify_flow 保 pcp→单一 class）。
+    // gate_index = pcp（INET PcpTrafficClassClassifier 默认 pcp→traffic class 恒等映射）：
+    // 每条流的门下标就是它的 PCP，交换机开满 queue_count 个门（见 numTrafficClasses）。这样
+    // ST(pcp7)→gate7 由 Z3 排，而 gPTP 等控制流量走各自的 PCP 门（默认恒开、Z3 不排），不会
+    // 被塞进 ST 的受控门里挨延迟致时钟伺服发散（真机实证）。class 名取该 pcp 首条流的 class。
     let mut pcps: Vec<i64> = streams.iter().map(|s| s.pcp).collect();
     pcps.sort_unstable();
     pcps.dedup();
     let classes: Vec<FlowClassInfo> = pcps
         .iter()
-        .enumerate()
-        .map(|(gi, &pcp)| FlowClassInfo {
+        .map(|&pcp| FlowClassInfo {
             name: streams
                 .iter()
                 .find(|s| s.pcp == pcp)
                 .map(|s| s.class.clone())
                 .unwrap_or_default(),
             pcp,
-            gate_index: gi,
+            gate_index: pcp as usize,
         })
         .collect();
-    let gate_of_pcp = |pcp: i64| {
-        classes
-            .iter()
-            .find(|c| c.pcp == pcp)
-            .map_or(0, |c| c.gate_index)
-    };
+    let gate_of_pcp = |pcp: i64| pcp as usize;
 
     // 每节点 source / sink 流（stream_seq 序）。
     let mut src_of: BTreeMap<String, Vec<usize>> = BTreeMap::new();
@@ -793,7 +794,8 @@ fn build_flow_tas_ini(
     }
 
     // --- 交换机：收发流 + 解码/编码 + 出口整形（R14）+ 队列/门 ---
-    let num_classes = classes.len().max(1);
+    // numTrafficClasses 取节点 queue_count（默认 8=PCP 全空间），每 PCP 一个门：ST(pcp7)→gate7
+    // 由 Z3 排，其余 PCP 门（含 gPTP/控制）默认恒开、Z3 不排——避免控制流量被 ST 门延迟致时钟发散。
     for m in mapped.values() {
         if m.ned_type != "TsnSwitch" {
             continue;
@@ -809,7 +811,8 @@ fn build_flow_tas_ini(
         ));
         ini.push_str(&format!("*.{sw}.hasEgressTrafficShaping = true\n"));
         ini.push_str(&format!(
-            "*.{sw}.eth[*].macLayer.queue.numTrafficClasses = {num_classes}\n"
+            "*.{sw}.eth[*].macLayer.queue.numTrafficClasses = {}\n",
+            m.queue_count
         ));
         for c in &classes {
             ini.push_str(&format!(
@@ -957,6 +960,7 @@ mod tests {
             mid: mid.into(),
             name: None,
             node_type: Some(ty.into()),
+            queue_count: 8,
         }
     }
     fn link(seq: i64, src: &str, dst: &str, sp: Option<i64>, dp: Option<i64>) -> VerifyLink {
@@ -1372,18 +1376,19 @@ mod tests {
         )
         .unwrap();
         let ini = &b.bundle.omnetpp_ini;
+        // numTrafficClasses = 节点 queue_count（sample 节点为 8），非流类别数——每 PCP 一个门。
         assert!(
-            ini.contains("*.sw1.eth[*].macLayer.queue.numTrafficClasses = 2"),
+            ini.contains("*.sw1.eth[*].macLayer.queue.numTrafficClasses = 8"),
             "{ini}"
         );
         // encoder 两类都在。
         assert!(ini.contains("{stream: \"BE\", pcp: 0}"), "{ini}");
         assert!(ini.contains("{stream: \"ST\", pcp: 7}"), "{ini}");
-        // BE(pcp0) 排在 ST(pcp7) 前 → gate0；ST → gate1。
+        // gate_index = pcp：BE(pcp0)→gate0、ST(pcp7)→gate7。
         assert!(ini.contains("queue[0].display-name = \"BE\""), "{ini}");
-        assert!(ini.contains("queue[1].display-name = \"ST\""), "{ini}");
-        // synth configuration 里 ST 的 gateIndex=1、BE 的 gateIndex=0。
-        assert!(ini.contains("pcp: 7, gateIndex: 1"), "{ini}");
+        assert!(ini.contains("queue[7].display-name = \"ST\""), "{ini}");
+        // synth configuration 里 ST 的 gateIndex=7、BE 的 gateIndex=0。
+        assert!(ini.contains("pcp: 7, gateIndex: 7"), "{ini}");
         assert!(ini.contains("pcp: 0, gateIndex: 0"), "{ini}");
     }
 

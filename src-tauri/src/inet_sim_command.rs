@@ -572,7 +572,7 @@ pub(crate) async fn load_topology(
     String,
 > {
     let node_rows = sqlx::query(
-        "SELECT mid, name, node_type FROM topology_nodes WHERE session_id = ? ORDER BY insert_order, mid",
+        "SELECT mid, name, node_type, queue_count FROM topology_nodes WHERE session_id = ? ORDER BY insert_order, mid",
     )
     .bind(session_id)
     .fetch_all(pool)
@@ -591,6 +591,7 @@ pub(crate) async fn load_topology(
             mid: r.get("mid"),
             name: r.get("name"),
             node_type: r.get("node_type"),
+            queue_count: r.get("queue_count"),
         })
         .collect();
     let links = link_rows
